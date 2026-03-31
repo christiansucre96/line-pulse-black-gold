@@ -18,12 +18,15 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
   const [line, setLine] = useState(
     player.sport === "NFL" ? 250 : player.sport === "NBA" ? 19.5 : player.sport === "MLB" ? 1.5 : player.sport === "NHL" ? 3.5 : 1.5
   );
+  const [selectedRange, setSelectedRange] = useState<number>(10);
 
   const getStatValue = (log: typeof player.gameLogs[0], key: string): number => {
     return Number(log[key]) || 0;
   };
 
-  const chartData = player.gameLogs.slice(0, 10).reverse().map((log) => {
+  const filteredLogs = useMemo(() => player.gameLogs.slice(0, selectedRange), [player.gameLogs, selectedRange]);
+
+  const chartData = filteredLogs.slice().reverse().map((log) => {
     const val = getStatValue(log, activeTab);
     return { name: `${log.opponent}`, value: val, aboveLine: val >= line };
   });
