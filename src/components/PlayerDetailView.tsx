@@ -87,12 +87,16 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
               </div>
             </div>
             <div className="flex gap-2 flex-wrap">
-              {[{ label: "L5", ...l5 }, { label: "L10", ...l10 }, { label: "L15", ...l15 }, { label: "L20", ...l20 }].map((s) => (
-                <div key={s.label} className={`px-3 py-2 rounded-lg border text-sm ${hrColor(s.hr)}`}>
+              {[{ label: "L5", n: 5, ...l5 }, { label: "L10", n: 10, ...l10 }, { label: "L15", n: 15, ...l15 }, { label: "L20", n: 20, ...l20 }].map((s) => (
+                <button
+                  key={s.label}
+                  onClick={() => setSelectedRange(s.n)}
+                  className={`px-3 py-2 rounded-lg border text-sm cursor-pointer transition-all ${hrColor(s.hr)} ${selectedRange === s.n ? "ring-2 ring-primary scale-105" : "opacity-75 hover:opacity-100"}`}
+                >
                   <div className="font-bold text-muted-foreground">{s.label}</div>
                   <div className="font-bold">HR {s.hr}%</div>
                   <div className="text-muted-foreground text-xs">Avg {s.avg}</div>
-                </div>
+                </button>
               ))}
             </div>
           </div>
