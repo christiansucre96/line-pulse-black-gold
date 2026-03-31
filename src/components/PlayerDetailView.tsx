@@ -134,7 +134,7 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {player.gameLogs.map((log, i) => (
+                    {filteredLogs.map((log, i) => (
                       <tr key={i} className="border-b border-border/50 hover:bg-secondary/30">
                         <td className="py-2 px-2 text-center font-medium">{log.opponent}</td>
                         <td className="py-2 px-2 text-center text-muted-foreground">{log.date}</td>
