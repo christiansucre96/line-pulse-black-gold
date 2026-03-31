@@ -193,7 +193,6 @@ const nbaDetails: Record<string, PlayerDetail> = {
       { opponent: "SAS", date: "03-04", pts: 12, rebs: 9, asts: 1, stl: 0, blks: 2, tov: 0, threes: 0, pa: 13, pr: 21, ra: 10, pra: 22 },
     ],
   },
-,
   n2: {
     id: "n2", name: "Al Horford", position: "C-F", team: "BOS", initials: "AH", season: "2024-25", sport: "NBA",
     maxStats: [{ label: "Points", value: 34 }, { label: "Rebounds", value: 17 }, { label: "Assists", value: 13 }],
@@ -521,7 +520,6 @@ const mlbDetails: Record<string, PlayerDetail> = {
       { opponent: "CHC", date: "03-04", hits: 1, runs: 1, rbis: 1, tb: 3, so: 1, ha: 1, hrr: 3 },
     ],
   },
-,
   m2: {
     id: "m2", name: "Aaron Judge", position: "RF", team: "NYY", initials: "AJ", season: "2025", sport: "MLB",
     maxStats: [{ label: "Hits", value: 2 }, { label: "RBIs", value: 6 }, { label: "Total Bases", value: 12 }],
@@ -741,7 +739,6 @@ const nhlDetails: Record<string, PlayerDetail> = {
       { opponent: "NSH", date: "03-04", sog: 7, goals: 1, assists: 2, points: 3, ga: 3 },
     ],
   },
-,
   h2: {
     id: "h2", name: "Nathan MacKinnon", position: "C", team: "COL", initials: "NM", season: "2024-25", sport: "NHL",
     maxStats: [{ label: "Goals", value: 1 }, { label: "Assists", value: 4 }, { label: "SOG", value: 5 }],
@@ -907,7 +904,6 @@ const soccerDetails: Record<string, PlayerDetail> = {
       { opponent: "BRE", date: "03-04", shots: 6, sot: 4, goals: 1, assists: 1, passes: 22, ga: 2 },
     ],
   },
-,
   s2: {
     id: "s2", name: "Kylian Mbappé", position: "LW", team: "RMA", initials: "KM", season: "2025", sport: "Soccer",
     maxStats: [{ label: "Goals", value: 1 }, { label: "Assists", value: 2 }, { label: "Shots", value: 6 }],
@@ -1046,7 +1042,6 @@ const nflDetails: Record<string, PlayerDetail> = {
       { opponent: "TB", date: "W12", passYds: 295, rushYds: 38, recYds: 0, tds: 3, prYds: 333, rrYds: 38 },
     ],
   },
-,
   f2: {
     id: "f2", name: "Josh Allen", position: "QB", team: "BUF", initials: "JA", season: "2025", sport: "NFL",
     maxStats: [{ label: "Pass Yards", value: 403 }, { label: "Rush Yards", value: 113 }, { label: "TDs", value: 3 }],
