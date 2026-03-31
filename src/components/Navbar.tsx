@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { Menu, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { Link } from "react-router-dom";
 
 const navLinks = [
   { label: "Home", href: "#home" },
+  { label: "Scanner", href: "/scanner", isRoute: true },
   { label: "Services", href: "#services" },
   { label: "Packages", href: "#packages" },
   { label: "How It Works", href: "#how-it-works" },
@@ -26,15 +28,25 @@ const Navbar = () => {
         </a>
 
         <div className="hidden md:flex items-center gap-8">
-          {navLinks.map((link) => (
-            <a
-              key={link.label}
-              href={link.href}
-              className="font-body text-sm text-muted-foreground hover:text-primary transition-colors uppercase tracking-wider"
-            >
-              {link.label}
-            </a>
-          ))}
+          {navLinks.map((link) =>
+            link.isRoute ? (
+              <Link
+                key={link.label}
+                to={link.href}
+                className="font-body text-sm text-muted-foreground hover:text-primary transition-colors uppercase tracking-wider"
+              >
+                {link.label}
+              </Link>
+            ) : (
+              <a
+                key={link.label}
+                href={link.href}
+                className="font-body text-sm text-muted-foreground hover:text-primary transition-colors uppercase tracking-wider"
+              >
+                {link.label}
+              </a>
+            )
+          )}
         </div>
 
         <div className="hidden md:flex items-center gap-3">
