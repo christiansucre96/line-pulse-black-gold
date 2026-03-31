@@ -1,6 +1,6 @@
 import { getPlayerDetail, sportDetailTabs, sportGamelogColumns, sportGamelogKeys } from "@/data/mockPlayers";
 import { ArrowLeft, Minus, Plus } from "lucide-react";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from "recharts";
 
 interface PlayerDetailViewProps {
