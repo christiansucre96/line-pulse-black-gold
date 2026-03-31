@@ -1,6 +1,6 @@
 import { getPlayerDetail, sportDetailTabs, sportGamelogColumns, sportGamelogKeys } from "@/data/mockPlayers";
 import { ArrowLeft, Minus, Plus } from "lucide-react";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from "recharts";
 
 interface PlayerDetailViewProps {
@@ -18,12 +18,15 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
   const [line, setLine] = useState(
     player.sport === "NFL" ? 250 : player.sport === "NBA" ? 19.5 : player.sport === "MLB" ? 1.5 : player.sport === "NHL" ? 3.5 : 1.5
   );
+  const [selectedRange, setSelectedRange] = useState<number>(10);
 
   const getStatValue = (log: typeof player.gameLogs[0], key: string): number => {
     return Number(log[key]) || 0;
   };
 
-  const chartData = player.gameLogs.slice(0, 10).reverse().map((log) => {
+  const filteredLogs = useMemo(() => player.gameLogs.slice(0, selectedRange), [player.gameLogs, selectedRange]);
+
+  const chartData = filteredLogs.slice().reverse().map((log) => {
     const val = getStatValue(log, activeTab);
     return { name: `${log.opponent}`, value: val, aboveLine: val >= line };
   });
@@ -84,12 +87,16 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
               </div>
             </div>
             <div className="flex gap-2 flex-wrap">
-              {[{ label: "L5", ...l5 }, { label: "L10", ...l10 }, { label: "L15", ...l15 }, { label: "L20", ...l20 }].map((s) => (
-                <div key={s.label} className={`px-3 py-2 rounded-lg border text-sm ${hrColor(s.hr)}`}>
+              {[{ label: "L5", n: 5, ...l5 }, { label: "L10", n: 10, ...l10 }, { label: "L15", n: 15, ...l15 }, { label: "L20", n: 20, ...l20 }].map((s) => (
+                <button
+                  key={s.label}
+                  onClick={() => setSelectedRange(s.n)}
+                  className={`px-3 py-2 rounded-lg border text-sm cursor-pointer transition-all ${hrColor(s.hr)} ${selectedRange === s.n ? "ring-2 ring-primary scale-105" : "opacity-75 hover:opacity-100"}`}
+                >
                   <div className="font-bold text-muted-foreground">{s.label}</div>
                   <div className="font-bold">HR {s.hr}%</div>
                   <div className="text-muted-foreground text-xs">Avg {s.avg}</div>
-                </div>
+                </button>
               ))}
             </div>
           </div>
@@ -116,7 +123,7 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
 
           {player.gameLogs.length > 0 && (
             <div className="border-t border-border pt-4">
-              <h3 className="text-center font-display font-bold text-foreground mb-3">Gamelog — Last {player.gameLogs.length} Games</h3>
+             <h3 className="text-center font-display font-bold text-foreground mb-3">Gamelog — Last {filteredLogs.length} Games</h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -127,7 +134,7 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {player.gameLogs.map((log, i) => (
+                    {filteredLogs.map((log, i) => (
                       <tr key={i} className="border-b border-border/50 hover:bg-secondary/30">
                         <td className="py-2 px-2 text-center font-medium">{log.opponent}</td>
                         <td className="py-2 px-2 text-center text-muted-foreground">{log.date}</td>
