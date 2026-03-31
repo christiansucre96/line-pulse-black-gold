@@ -98,4 +98,19 @@
   .glow-gold {
     filter: drop-shadow(0 0 20px hsl(43 96% 56% / 0.4));
   }
+
+  .hit-cell-high {
+    background-color: hsl(160 80% 40% / 0.2);
+    color: hsl(160 80% 55%);
+  }
+
+  .hit-cell-mid {
+    background-color: hsl(43 96% 56% / 0.15);
+    color: hsl(43 96% 56%);
+  }
+
+  .hit-cell-low {
+    background-color: hsl(0 72% 50% / 0.15);
+    color: hsl(0 72% 60%);
+  }
 }
