@@ -123,7 +123,7 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
 
           {player.gameLogs.length > 0 && (
             <div className="border-t border-border pt-4">
-              <h3 className="text-center font-display font-bold text-foreground mb-3">Gamelog — Last {player.gameLogs.length} Games</h3>
+             <h3 className="text-center font-display font-bold text-foreground mb-3">Gamelog — Last {filteredLogs.length} Games</h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
