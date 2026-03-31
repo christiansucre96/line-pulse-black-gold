@@ -1,5 +1,6 @@
-import { BarChart3, Layers, Trophy, Users, Bandage } from "lucide-react";
+import { BarChart3, Layers, Trophy, Users, Bandage, User, Shield, LogOut, LogIn } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
 
 const navItems = [
   { icon: BarChart3, label: "Props", path: "/scanner" },
@@ -11,6 +12,7 @@ const navItems = [
 
 export function AppSidebar() {
   const { pathname } = useLocation();
+  const { user, isAdmin, signOut } = useAuth();
 
   return (
     <nav className="fixed left-0 top-0 h-screen w-[72px] bg-card border-r border-border flex flex-col items-center py-4 gap-2 z-50">
@@ -34,8 +36,47 @@ export function AppSidebar() {
         );
       })}
 
-      <div className="mt-auto w-9 h-9 rounded-full bg-primary/20 border border-primary/30 flex items-center justify-center text-xs font-bold text-primary">
-        U
+      {isAdmin && (
+        <Link
+          to="/admin"
+          title="Admin"
+          className={`w-11 h-11 rounded-lg flex items-center justify-center transition-all ${
+            pathname === "/admin" ? "bg-gradient-gold text-primary-foreground" : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+          }`}
+        >
+          <Shield size={20} />
+        </Link>
+      )}
+
+      <div className="mt-auto flex flex-col items-center gap-2">
+        {user ? (
+          <>
+            <Link
+              to="/profile"
+              title="Profile"
+              className={`w-11 h-11 rounded-lg flex items-center justify-center transition-all ${
+                pathname === "/profile" ? "bg-gradient-gold text-primary-foreground" : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+              }`}
+            >
+              <User size={20} />
+            </Link>
+            <button
+              onClick={signOut}
+              title="Sign Out"
+              className="w-11 h-11 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-destructive/20 hover:text-destructive transition-all"
+            >
+              <LogOut size={20} />
+            </button>
+          </>
+        ) : (
+          <Link
+            to="/auth"
+            title="Sign In"
+            className="w-11 h-11 rounded-lg flex items-center justify-center text-primary hover:bg-primary/20 transition-all"
+          >
+            <LogIn size={20} />
+          </Link>
+        )}
       </div>
     </nav>
   );
