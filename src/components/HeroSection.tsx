@@ -48,12 +48,12 @@ const HeroSection = () => {
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.6, delay: 0.6 }}
         >
-          <a
-            href="#contact"
+          <Link
+            to="/scanner"
             className="inline-block font-display text-lg px-10 py-4 bg-gradient-gold text-primary-foreground rounded-lg shadow-gold hover:opacity-90 transition-all uppercase tracking-widest font-semibold"
           >
-            Get Started
-          </a>
+            Launch Scanner
+          </Link>
         </motion.div>
       </div>
 
