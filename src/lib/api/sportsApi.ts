@@ -66,7 +66,7 @@ export const sportsApi = {
   },
 
   // Direct DB queries (uses anon key / RLS)
-  async getPlayers(sport?: string, search?: string, limit = 100) {
+  async getPlayers(sport?: SportType, search?: string, limit = 100) {
     let query = supabase.from('players').select('*, teams(name, abbreviation)');
     if (sport) query = query.eq('sport', sport);
     if (search) query = query.ilike('full_name', `%${search}%`);
