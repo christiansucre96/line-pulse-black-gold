@@ -121,7 +121,7 @@ export const sportsApi = {
     return data;
   },
 
-  async getLiveEdges(sport?: string) {
+  async getLiveEdges(sport?: SportType) {
     let query = supabase.from('live_edges').select('*');
     if (sport) query = query.eq('sport', sport);
     const { data, error } = await query.order('confidence_score', { ascending: false, nullsFirst: false }).limit(50);
