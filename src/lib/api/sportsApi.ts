@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 
-const PROJECT_ID = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+type SportType = Database["public"]["Enums"]["sport_type"];
 
 export const sportsApi = {
   // Data ingestion
