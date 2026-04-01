@@ -86,7 +86,7 @@ export const sportsApi = {
     return data;
   },
 
-  async getGames(sport?: string, status?: string, date?: string) {
+  async getGames(sport?: SportType, status?: string, date?: string) {
     let query = supabase.from('games_data').select('*');
     if (sport) query = query.eq('sport', sport);
     if (status) query = query.eq('status', status);
