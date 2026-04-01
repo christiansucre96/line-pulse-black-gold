@@ -112,7 +112,7 @@ export const sportsApi = {
     return data;
   },
 
-  async getProps(sport?: string, combo?: boolean) {
+  async getProps(sport?: SportType, combo?: boolean) {
     let query = supabase.from('player_props').select('*');
     if (sport) query = query.eq('sport', sport);
     if (combo !== undefined) query = query.eq('is_combo', combo);
