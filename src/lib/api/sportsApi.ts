@@ -104,7 +104,7 @@ export const sportsApi = {
     return data;
   },
 
-  async getInjuries(sport?: string) {
+  async getInjuries(sport?: SportType) {
     let query = supabase.from('injury_tracking').select('*, players(full_name, position)');
     if (sport) query = query.eq('sport', sport);
     const { data, error } = await query.order('last_updated', { ascending: false }).limit(200);
