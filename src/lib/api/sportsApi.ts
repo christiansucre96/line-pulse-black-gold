@@ -96,7 +96,7 @@ export const sportsApi = {
     return data;
   },
 
-  async getTeams(sport?: string) {
+  async getTeams(sport?: SportType) {
     let query = supabase.from('teams').select('*');
     if (sport) query = query.eq('sport', sport);
     const { data, error } = await query.order('name');
