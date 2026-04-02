@@ -1,3 +1,6 @@
+import { useEffect, useState } from "react"
+import { supabase } from "@/integrations/supabase/client"
+
 import Navbar from "@/components/Navbar";
 import HeroSection from "@/components/HeroSection";
 import ServicesSection from "@/components/ServicesSection";
@@ -7,9 +10,20 @@ import ContactSection from "@/components/ContactSection";
 import Footer from "@/components/Footer";
 
 const Index = () => {
+  const [user, setUser] = useState<any>(null)
+
+  useEffect(() => {
+    const getUser = async () => {
+      const { data } = await supabase.auth.getUser()
+      setUser(data.user)
+    }
+
+    getUser()
+  }, [])
+
   return (
     <div className="min-h-screen">
-      <Navbar />
+      <Navbar user={user} />
       <HeroSection />
       <ServicesSection />
       <HowItWorksSection />
