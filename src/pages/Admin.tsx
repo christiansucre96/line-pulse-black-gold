@@ -4,7 +4,7 @@ import { sportsApi } from "@/lib/api/sportsApi";
 import { useEffect, useState } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { toast } from "sonner";
-import { Shield, Users, BarChart3, Settings, Database, Play, RefreshCw, Loader2 } from "lucide-react";
+import { Shield, Users, BarChart3, Settings, Database, Play, RefreshCw, Loader2, UserPlus, Clock } from "lucide-react";
 import { Navigate } from "react-router-dom";
 
 interface UserRow {
@@ -12,7 +12,16 @@ interface UserRow {
   display_name: string | null;
   created_at: string;
   role: string;
+  subscription?: { plan: string; expires_at: string | null; is_lifetime: boolean } | null;
 }
+
+const PLAN_OPTIONS = [
+  { value: "7_days", label: "7 Days", days: 7 },
+  { value: "30_days", label: "30 Days", days: 30 },
+  { value: "90_days", label: "90 Days", days: 90 },
+  { value: "1_year", label: "1 Year", days: 365 },
+  { value: "lifetime", label: "Lifetime", days: 0 },
+];
 
 export default function Admin() {
   const { user, isAdmin, loading: authLoading } = useAuth();
@@ -28,13 +37,20 @@ export default function Admin() {
     const fetchData = async () => {
       const { data: profiles } = await supabase.from("profiles").select("user_id, display_name, created_at");
       const { data: roles } = await supabase.from("user_roles").select("user_id, role");
+      const { data: subs } = await supabase.from("user_subscriptions" as any).select("user_id, plan, expires_at, is_lifetime");
+
       const roleMap = new Map<string, string>();
       roles?.forEach((r) => roleMap.set(r.user_id, r.role));
+
+      const subMap = new Map<string, any>();
+      (subs as any[] || []).forEach((s: any) => subMap.set(s.user_id, s));
+
       const merged: UserRow[] = (profiles || []).map((p) => ({
         user_id: p.user_id,
         display_name: p.display_name,
         created_at: p.created_at,
         role: roleMap.get(p.user_id) || "user",
+        subscription: subMap.get(p.user_id) || null,
       }));
       setUsers(merged);
 
@@ -61,6 +77,47 @@ export default function Admin() {
       setUsers((u) => u.map((x) => (x.user_id === userId ? { ...x, role: newRole } : x)));
       toast.success("Role updated");
     }
+  };
+
+  const handleGrantAccess = async (userId: string, planValue: string) => {
+    const plan = PLAN_OPTIONS.find((p) => p.value === planValue);
+    if (!plan) return;
+
+    const isLifetime = plan.value === "lifetime";
+    const expiresAt = isLifetime ? null : new Date(Date.now() + plan.days * 86400000).toISOString();
+
+    // Upsert: delete old then insert
+    await supabase.from("user_subscriptions" as any).delete().eq("user_id", userId);
+    const { error } = await supabase.from("user_subscriptions" as any).insert({
+      user_id: userId,
+      plan: plan.value,
+      expires_at: expiresAt,
+      is_lifetime: isLifetime,
+      granted_by: user?.id,
+    } as any);
+
+    if (error) {
+      toast.error("Failed to grant access");
+    } else {
+      setUsers((u) =>
+        u.map((x) =>
+          x.user_id === userId
+            ? { ...x, subscription: { plan: plan.value, expires_at: expiresAt, is_lifetime: isLifetime } }
+            : x
+        )
+      );
+      toast.success(`Granted ${plan.label} access`);
+    }
+  };
+
+  const getSubStatus = (sub: UserRow["subscription"]) => {
+    if (!sub) return { label: "No Plan", color: "bg-muted text-muted-foreground" };
+    if (sub.is_lifetime) return { label: "Lifetime", color: "bg-primary/20 text-primary" };
+    if (sub.expires_at && new Date(sub.expires_at) > new Date()) {
+      const days = Math.ceil((new Date(sub.expires_at).getTime() - Date.now()) / 86400000);
+      return { label: `${days}d left`, color: "bg-green-500/20 text-green-400" };
+    }
+    return { label: "Expired", color: "bg-red-500/20 text-red-400" };
   };
 
   const handleIngest = async (sport: string, operation: string) => {
@@ -170,26 +227,51 @@ export default function Admin() {
                       <th className="text-left py-3 px-4 font-semibold text-muted-foreground">User</th>
                       <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Joined</th>
                       <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Role</th>
+                      <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Subscription</th>
+                      <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Grant Access</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {users.map((u) => (
-                      <tr key={u.user_id} className="border-b border-border/50 hover:bg-secondary/20">
-                        <td className="py-3 px-4">
-                          <div className="font-medium text-foreground">{u.display_name || "Unknown"}</div>
-                          <div className="text-xs text-muted-foreground">{u.user_id.slice(0, 8)}...</div>
-                        </td>
-                        <td className="py-3 px-4 text-muted-foreground">{new Date(u.created_at).toLocaleDateString()}</td>
-                        <td className="py-3 px-4">
-                          <select value={u.role} onChange={(e) => handleRoleChange(u.user_id, e.target.value)}
-                            className="bg-secondary border border-border rounded px-2 py-1 text-sm text-foreground">
-                            <option value="user">User</option>
-                            <option value="moderator">Moderator</option>
-                            <option value="admin">Admin</option>
-                          </select>
-                        </td>
-                      </tr>
-                    ))}
+                    {users.map((u) => {
+                      const subStatus = getSubStatus(u.subscription);
+                      return (
+                        <tr key={u.user_id} className="border-b border-border/50 hover:bg-secondary/20">
+                          <td className="py-3 px-4">
+                            <div className="font-medium text-foreground">{u.display_name || "Unknown"}</div>
+                            <div className="text-xs text-muted-foreground">{u.user_id.slice(0, 8)}...</div>
+                          </td>
+                          <td className="py-3 px-4 text-muted-foreground">{new Date(u.created_at).toLocaleDateString()}</td>
+                          <td className="py-3 px-4">
+                            <select value={u.role} onChange={(e) => handleRoleChange(u.user_id, e.target.value)}
+                              className="bg-secondary border border-border rounded px-2 py-1 text-sm text-foreground">
+                              <option value="user">User</option>
+                              <option value="moderator">Moderator</option>
+                              <option value="admin">Admin</option>
+                            </select>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className={`px-2 py-1 rounded text-xs font-medium ${subStatus.color}`}>
+                              {subStatus.label}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <select
+                              defaultValue=""
+                              onChange={(e) => {
+                                if (e.target.value) handleGrantAccess(u.user_id, e.target.value);
+                                e.target.value = "";
+                              }}
+                              className="bg-secondary border border-border rounded px-2 py-1 text-sm text-foreground"
+                            >
+                              <option value="" disabled>Add plan...</option>
+                              {PLAN_OPTIONS.map((p) => (
+                                <option key={p.value} value={p.value}>{p.label}</option>
+                              ))}
+                            </select>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -199,7 +281,6 @@ export default function Admin() {
 
         {activeTab === "data" && (
           <div className="space-y-6">
-            {/* Daily Automation */}
             <div className="bg-card border border-border rounded-xl p-4">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-display font-bold text-foreground">Daily Automation</h3>
@@ -212,7 +293,6 @@ export default function Admin() {
               <p className="text-sm text-muted-foreground">Fetches teams, rosters, games, injuries, and generates props for all sports.</p>
             </div>
 
-            {/* Per-sport controls */}
             <div className="bg-card border border-border rounded-xl p-4">
               <h3 className="font-display font-bold text-foreground mb-4">Sport-Specific Ingestion</h3>
               <div className="space-y-3">
@@ -238,7 +318,6 @@ export default function Admin() {
               </div>
             </div>
 
-            {/* Ingestion logs */}
             <div className="bg-card border border-border rounded-xl p-4">
               <h3 className="font-display font-bold text-foreground mb-4">Recent Ingestion Logs</h3>
               {logs.length === 0 ? (

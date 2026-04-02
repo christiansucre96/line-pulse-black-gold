@@ -25,7 +25,8 @@ const ContactSection = () => {
               Get More Information
             </h2>
             <p className="text-muted-foreground font-body text-lg">
-              Complete the form below to get started
+              Complete the form below or email us at{" "}
+              <a href="mailto:linepulse1@gmail.com" className="text-primary hover:underline">linepulse1@gmail.com</a>
             </p>
           </div>
 
