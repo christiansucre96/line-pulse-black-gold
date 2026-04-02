@@ -1,14 +1,45 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Search, BarChart3, Loader2 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+
 import { SportTabs } from "@/components/SportTabs";
 import { StatFilters } from "@/components/StatFilters";
 import { PlayerTable, SortField, SortDir } from "@/components/PlayerTable";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { DashboardLayout } from "@/components/DashboardLayout";
+
 import { Sport, sportCategories, mockPlayers } from "@/data/mockPlayers";
 import { usePlayerProps } from "@/hooks/useLiveData";
 
 export default function Scanner() {
+
+  // 🔒 PROTECT PAGE (ADMIN ONLY)
+  useEffect(() => {
+    const protectPage = async () => {
+      const { data: userData } = await supabase.auth.getUser();
+
+      // Not logged in
+      if (!userData.user) {
+        window.location.href = "/";
+        return;
+      }
+
+      // Check role using user_id (IMPORTANT)
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("user_id", userData.user.id)
+        .single();
+
+      // Not admin → block
+      if (!profile || profile.role !== "admin") {
+        window.location.href = "/";
+      }
+    };
+
+    protectPage();
+  }, []);
+
   const [sport, setSport] = useState<Sport>("NBA");
   const [search, setSearch] = useState("");
   const [activeStats, setActiveStats] = useState<string[]>(sportCategories["NBA"].core.slice(0, 4));
@@ -18,7 +49,7 @@ export default function Scanner() {
 
   const { data: liveProps, isLoading } = usePlayerProps(sport);
 
-  // Fall back to mock data if DB is empty
+  // TEMP: still allows fallback (we’ll remove later)
   const players = useMemo(() => {
     if (liveProps && liveProps.length > 0) return liveProps;
     return mockPlayers.filter((p) => p.sport === sport);
@@ -31,32 +62,51 @@ export default function Scanner() {
   };
 
   const toggleStat = (stat: string) => {
-    setActiveStats((prev) => prev.includes(stat) ? prev.filter((s) => s !== stat) : [...prev, stat]);
+    setActiveStats((prev) =>
+      prev.includes(stat) ? prev.filter((s) => s !== stat) : [...prev, stat]
+    );
   };
 
   const handleSort = (field: SortField) => {
-    if (sortField === field) setSortDir((d) => (d === "desc" ? "asc" : "desc"));
-    else { setSortField(field); setSortDir("desc"); }
+    if (sortField === field) {
+      setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+    } else {
+      setSortField(field);
+      setSortDir("desc");
+    }
   };
 
   const filteredPlayers = useMemo(() => {
     let result = [...players];
-    if (search) result = result.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()));
-    if (activeStats.length > 0) {
-      result = result.filter((p) => p.categories.some((c) => activeStats.includes(c)));
+
+    if (search) {
+      result = result.filter((p) =>
+        p.name.toLowerCase().includes(search.toLowerCase())
+      );
     }
+
+    if (activeStats.length > 0) {
+      result = result.filter((p) =>
+        p.categories.some((c) => activeStats.includes(c))
+      );
+    }
+
     result.sort((a, b) => {
       const aVal = a[sortField] as number;
       const bVal = b[sortField] as number;
       return sortDir === "desc" ? bVal - aVal : aVal - bVal;
     });
+
     return result;
   }, [players, search, activeStats, sortField, sortDir]);
 
   if (selectedPlayer) {
     return (
       <DashboardLayout>
-        <PlayerDetailView playerId={selectedPlayer} onBack={() => setSelectedPlayer(null)} />
+        <PlayerDetailView
+          playerId={selectedPlayer}
+          onBack={() => setSelectedPlayer(null)}
+        />
       </DashboardLayout>
     );
   }
@@ -67,7 +117,9 @@ export default function Scanner() {
         <div className="px-6 py-3 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
           <div>
             <p className="text-xs text-muted-foreground">Welcome to</p>
-            <h1 className="text-2xl font-display font-bold text-gradient-gold tracking-wider">LINE PULSE</h1>
+            <h1 className="text-2xl font-display font-bold text-gradient-gold tracking-wider">
+              LINE PULSE
+            </h1>
             <p className="text-xs text-green-400">● LIVE</p>
           </div>
           <SportTabs activeSport={sport} onSportChange={handleSportChange} />
@@ -86,6 +138,7 @@ export default function Scanner() {
               className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-input border border-border text-foreground placeholder:text-muted-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
             />
           </div>
+
           <button
             onClick={() => setSortDir((d) => (d === "desc" ? "asc" : "desc"))}
             className="px-4 py-2.5 rounded-lg bg-secondary border border-border text-sm font-medium text-secondary-foreground hover:bg-muted transition-colors flex items-center gap-2"
@@ -94,7 +147,12 @@ export default function Scanner() {
             {sortDir === "desc" ? "↓ Highest First" : "↑ Lowest First"}
           </button>
         </div>
-        <StatFilters activeStats={activeStats} onToggleStat={toggleStat} sport={sport} />
+
+        <StatFilters
+          activeStats={activeStats}
+          onToggleStat={toggleStat}
+          sport={sport}
+        />
       </div>
 
       <div className="px-6 pb-8">
@@ -113,9 +171,12 @@ export default function Scanner() {
             />
           </div>
         )}
+
         <div className="text-center text-sm text-muted-foreground mt-4">
           Showing {filteredPlayers.length} results
-          {liveProps && liveProps.length > 0 && <span className="ml-2 text-green-400">● Live Data</span>}
+          {liveProps && liveProps.length > 0 && (
+            <span className="ml-2 text-green-400">● Live Data</span>
+          )}
         </div>
       </div>
     </DashboardLayout>
