@@ -44,12 +44,22 @@ const Footer = () => {
           </div>
         </div>
 
-        <div className="border-t border-gold-subtle pt-6">
-          <p className="text-muted-foreground font-body text-xs text-center leading-relaxed">
-            Line Pulse is committed to responsible gambling. Please bet responsibly. Always wager within your limits.
+        <div className="border-t border-gold-subtle pt-6 space-y-3">
+          <p className="text-muted-foreground font-body text-xs text-center leading-relaxed font-semibold uppercase tracking-wider">
+            Disclaimer
+          </p>
+          <p className="text-muted-foreground font-body text-xs text-center leading-relaxed max-w-3xl mx-auto">
+            Line Pulse provides sports analytics and statistical data for informational and entertainment purposes only. 
+            We do not guarantee the accuracy, completeness, or reliability of any information provided. Line Pulse does not 
+            encourage, promote, or facilitate gambling. Any wagering decisions are made solely at your own risk. You must be 
+            of legal age in your jurisdiction to participate in sports betting. Please gamble responsibly and within your means. 
+            If you or someone you know has a gambling problem, call 1-800-GAMBLER.
+          </p>
+          <p className="text-muted-foreground font-body text-xs text-center">
+            Contact: <a href="mailto:linepulse1@gmail.com" className="text-primary hover:underline">linepulse1@gmail.com</a>
           </p>
           <p className="text-muted-foreground font-body text-xs text-center mt-2">
-            Copyright © 2025. All rights reserved.
+            Copyright © 2025 Line Pulse. All rights reserved.
           </p>
         </div>
       </div>
