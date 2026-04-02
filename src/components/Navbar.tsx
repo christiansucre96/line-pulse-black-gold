@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Menu, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Link } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
 
 const navLinks = [
   { label: "Home", href: "#home" },
@@ -14,6 +15,25 @@ const navLinks = [
 
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
+
+  // 🔐 LOGIN FUNCTION
+  const handleLogin = async () => {
+    const email = prompt("Enter your email");
+    const password = prompt("Enter your password");
+
+    if (!email || !password) return;
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      alert("Login failed: " + error.message);
+    } else {
+      window.location.href = "/scanner"; // redirect after login
+    }
+  };
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-xl border-b border-gold-subtle">
@@ -49,13 +69,21 @@ const Navbar = () => {
           )}
         </div>
 
+        {/* 🔥 FIXED BUTTONS */}
         <div className="hidden md:flex items-center gap-3">
-          <a href="#contact" className="font-display text-sm px-5 py-2 border border-primary/30 text-primary rounded hover:bg-primary/10 transition-colors uppercase tracking-wider">
+          <a
+            href="#contact"
+            className="font-display text-sm px-5 py-2 border border-primary/30 text-primary rounded hover:bg-primary/10 transition-colors uppercase tracking-wider"
+          >
             Sign Up
           </a>
-          <a href="#contact" className="font-display text-sm px-5 py-2 bg-gradient-gold text-primary-foreground rounded hover:opacity-90 transition-opacity uppercase tracking-wider">
+
+          <button
+            onClick={handleLogin}
+            className="font-display text-sm px-5 py-2 bg-gradient-gold text-primary-foreground rounded hover:opacity-90 transition-opacity uppercase tracking-wider"
+          >
             Login
-          </a>
+          </button>
         </div>
 
         <button
@@ -75,19 +103,35 @@ const Navbar = () => {
             className="md:hidden bg-background border-b border-gold-subtle overflow-hidden"
           >
             <div className="px-4 py-4 flex flex-col gap-4">
-              {navLinks.map((link) => (
-                <a
-                  key={link.label}
-                  href={link.href}
-                  onClick={() => setIsOpen(false)}
-                  className="font-body text-sm text-muted-foreground hover:text-primary transition-colors uppercase tracking-wider"
-                >
-                  {link.label}
-                </a>
-              ))}
-              <a href="#contact" className="font-display text-sm px-5 py-2 bg-gradient-gold text-primary-foreground rounded text-center uppercase tracking-wider">
-                Get Started
-              </a>
+              {navLinks.map((link) =>
+                link.isRoute ? (
+                  <Link
+                    key={link.label}
+                    to={link.href}
+                    onClick={() => setIsOpen(false)}
+                    className="font-body text-sm text-muted-foreground hover:text-primary transition-colors uppercase tracking-wider"
+                  >
+                    {link.label}
+                  </Link>
+                ) : (
+                  <a
+                    key={link.label}
+                    href={link.href}
+                    onClick={() => setIsOpen(false)}
+                    className="font-body text-sm text-muted-foreground hover:text-primary transition-colors uppercase tracking-wider"
+                  >
+                    {link.label}
+                  </a>
+                )
+              )}
+
+              {/* 🔥 MOBILE LOGIN */}
+              <button
+                onClick={handleLogin}
+                className="font-display text-sm px-5 py-2 bg-gradient-gold text-primary-foreground rounded text-center uppercase tracking-wider"
+              >
+                Login
+              </button>
             </div>
           </motion.div>
         )}
