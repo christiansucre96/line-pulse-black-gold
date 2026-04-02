@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Menu, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Link } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
 
 const navLinks = [
   { label: "Home", href: "#home" },
@@ -16,28 +15,11 @@ const navLinks = [
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
 
-  // 🔐 LOGIN FUNCTION
-  const handleLogin = async () => {
-    const email = prompt("Enter your email");
-    const password = prompt("Enter your password");
-
-    if (!email || !password) return;
-
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (error) {
-      alert("Login failed: " + error.message);
-    } else {
-      window.location.href = "/scanner"; // redirect after login
-    }
-  };
-
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-xl border-b border-gold-subtle">
       <div className="container mx-auto flex items-center justify-between h-16 px-4">
+        
+        {/* LOGO */}
         <a href="#home" className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-full bg-gradient-gold flex items-center justify-center">
             <span className="font-display text-sm font-bold text-primary-foreground">LP</span>
@@ -47,6 +29,7 @@ const Navbar = () => {
           </span>
         </a>
 
+        {/* NAV LINKS */}
         <div className="hidden md:flex items-center gap-8">
           {navLinks.map((link) =>
             link.isRoute ? (
@@ -69,23 +52,27 @@ const Navbar = () => {
           )}
         </div>
 
-        {/* 🔥 FIXED BUTTONS */}
+        {/* ACTION BUTTONS */}
         <div className="hidden md:flex items-center gap-3">
-          <a
-            href="#contact"
+          
+          {/* SIGN UP */}
+          <button
+            onClick={() => window.location.href = "/auth"}
             className="font-display text-sm px-5 py-2 border border-primary/30 text-primary rounded hover:bg-primary/10 transition-colors uppercase tracking-wider"
           >
             Sign Up
-          </a>
+          </button>
 
+          {/* LOGIN */}
           <button
-            onClick={handleLogin}
+            onClick={() => window.location.href = "/auth"}
             className="font-display text-sm px-5 py-2 bg-gradient-gold text-primary-foreground rounded hover:opacity-90 transition-opacity uppercase tracking-wider"
           >
             Login
           </button>
         </div>
 
+        {/* MOBILE MENU BUTTON */}
         <button
           className="md:hidden text-foreground"
           onClick={() => setIsOpen(!isOpen)}
@@ -94,6 +81,7 @@ const Navbar = () => {
         </button>
       </div>
 
+      {/* MOBILE MENU */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
@@ -103,6 +91,7 @@ const Navbar = () => {
             className="md:hidden bg-background border-b border-gold-subtle overflow-hidden"
           >
             <div className="px-4 py-4 flex flex-col gap-4">
+              
               {navLinks.map((link) =>
                 link.isRoute ? (
                   <Link
@@ -125,12 +114,20 @@ const Navbar = () => {
                 )
               )}
 
-              {/* 🔥 MOBILE LOGIN */}
+              {/* MOBILE LOGIN */}
               <button
-                onClick={handleLogin}
+                onClick={() => window.location.href = "/auth"}
                 className="font-display text-sm px-5 py-2 bg-gradient-gold text-primary-foreground rounded text-center uppercase tracking-wider"
               >
                 Login
+              </button>
+
+              {/* MOBILE SIGNUP */}
+              <button
+                onClick={() => window.location.href = "/auth"}
+                className="font-display text-sm px-5 py-2 border border-primary/30 text-primary rounded text-center uppercase tracking-wider"
+              >
+                Sign Up
               </button>
             </div>
           </motion.div>
