@@ -1,8 +1,31 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
 export default function ResetPassword() {
   const [password, setPassword] = useState("");
+  const [ready, setReady] = useState(false);
+
+  // 🔥 IMPORTANT: HANDLE RESET TOKEN
+  useEffect(() => {
+    const handleSession = async () => {
+      const hash = window.location.hash;
+
+      if (hash) {
+        const params = new URLSearchParams(hash.replace("#", ""));
+        const access_token = params.get("access_token");
+
+        if (access_token) {
+          await supabase.auth.setSession({
+            access_token,
+            refresh_token: access_token,
+          });
+          setReady(true);
+        }
+      }
+    };
+
+    handleSession();
+  }, []);
 
   const handleReset = async () => {
     const { error } = await supabase.auth.updateUser({
@@ -13,9 +36,17 @@ export default function ResetPassword() {
       alert("Error: " + error.message);
     } else {
       alert("Password updated!");
-      window.location.href = "/scanner";
+      window.location.href = "/auth";
     }
   };
+
+  if (!ready) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-muted-foreground">
+        Loading reset session...
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background">
