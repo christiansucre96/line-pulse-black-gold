@@ -1,11 +1,12 @@
 import { useState, useMemo } from "react";
-import { Search, BarChart3 } from "lucide-react";
+import { Search, BarChart3, Loader2 } from "lucide-react";
 import { SportTabs } from "@/components/SportTabs";
 import { StatFilters } from "@/components/StatFilters";
 import { PlayerTable, SortField, SortDir } from "@/components/PlayerTable";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { DashboardLayout } from "@/components/DashboardLayout";
-import { mockPlayers, Sport, sportCategories } from "@/data/mockPlayers";
+import { Sport, sportCategories, mockPlayers } from "@/data/mockPlayers";
+import { usePlayerProps } from "@/hooks/useLiveData";
 
 export default function Scanner() {
   const [sport, setSport] = useState<Sport>("NBA");
@@ -14,6 +15,14 @@ export default function Scanner() {
   const [sortField, setSortField] = useState<SortField>("diff");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
+
+  const { data: liveProps, isLoading } = usePlayerProps(sport);
+
+  // Fall back to mock data if DB is empty
+  const players = useMemo(() => {
+    if (liveProps && liveProps.length > 0) return liveProps;
+    return mockPlayers.filter((p) => p.sport === sport);
+  }, [liveProps, sport]);
 
   const handleSportChange = (s: Sport) => {
     setSport(s);
@@ -31,18 +40,18 @@ export default function Scanner() {
   };
 
   const filteredPlayers = useMemo(() => {
-    let players = mockPlayers.filter((p) => p.sport === sport);
-    if (search) players = players.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()));
+    let result = [...players];
+    if (search) result = result.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()));
     if (activeStats.length > 0) {
-      players = players.filter((p) => p.categories.some((c) => activeStats.includes(c)));
+      result = result.filter((p) => p.categories.some((c) => activeStats.includes(c)));
     }
-    players.sort((a, b) => {
+    result.sort((a, b) => {
       const aVal = a[sortField] as number;
       const bVal = b[sortField] as number;
       return sortDir === "desc" ? bVal - aVal : aVal - bVal;
     });
-    return players;
-  }, [sport, search, activeStats, sortField, sortDir]);
+    return result;
+  }, [players, search, activeStats, sortField, sortDir]);
 
   if (selectedPlayer) {
     return (
@@ -89,17 +98,24 @@ export default function Scanner() {
       </div>
 
       <div className="px-6 pb-8">
-        <div className="bg-card border border-border rounded-xl overflow-hidden">
-          <PlayerTable
-            players={filteredPlayers}
-            sortField={sortField}
-            sortDir={sortDir}
-            onSort={handleSort}
-            onPlayerClick={setSelectedPlayer}
-          />
-        </div>
+        {isLoading ? (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          </div>
+        ) : (
+          <div className="bg-card border border-border rounded-xl overflow-hidden">
+            <PlayerTable
+              players={filteredPlayers}
+              sortField={sortField}
+              sortDir={sortDir}
+              onSort={handleSort}
+              onPlayerClick={setSelectedPlayer}
+            />
+          </div>
+        )}
         <div className="text-center text-sm text-muted-foreground mt-4">
           Showing {filteredPlayers.length} results
+          {liveProps && liveProps.length > 0 && <span className="ml-2 text-green-400">● Live Data</span>}
         </div>
       </div>
     </DashboardLayout>
