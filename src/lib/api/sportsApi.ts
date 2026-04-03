@@ -1,5 +1,6 @@
 // src/lib/api/sportsApi.ts
-// Routes all operations through the single "clever-action" edge function
+// Merged version – routes all operations through the single "clever-action" edge function.
+// Includes operation validation, request/response logging, and all DB query helpers.
 
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
@@ -8,23 +9,34 @@ type SportType = Database["public"]["Enums"]["sport_type"];
 
 const FN = "clever-action";
 
+/**
+ * Safely invoke the edge function with operation validation and logging.
+ */
 async function invoke(body: Record<string, any>) {
+  // 🔒 Prevent missing operation (was causing crashes)
+  if (!body.operation) {
+    throw new Error("Missing operation (this was causing your crash)");
+  }
+
+  console.log("🚀 Sending to edge function:", body);
+
   const { data, error } = await supabase.functions.invoke(FN, { body });
 
   if (error) {
     // FunctionsRelayError  → function not deployed yet
     // FunctionsHttpError   → function threw an error (check Supabase logs)
     // FunctionsFetchError  → network / CORS problem
-    console.error(`[clever-action] error (op=${body.operation}):`, error);
+    console.error("❌ Edge function error:", error);
     throw new Error(error.message ?? "Edge function failed");
   }
 
   if (!data) throw new Error("No response from edge function");
+
+  console.log("✅ Edge response:", data);
   return data;
 }
 
 export const sportsApi = {
-
   // ── DATA INGESTION ────────────────────────────────────────────
   /** Fetch teams + players + games + injuries for one sport */
   async ingest(sport: string, operation = "full", date?: string) {
@@ -127,9 +139,9 @@ export const sportsApi = {
         away_team:teams!games_data_away_team_id_fkey(name, abbreviation, logo_url)
       `)
       .order("start_time", { ascending: true });
-    if (sport)  q = q.eq("sport", sport);
+    if (sport) q = q.eq("sport", sport);
     if (status) q = q.eq("status", status);
-    if (date)   q = q.eq("game_date", date);
+    if (date) q = q.eq("game_date", date);
     const { data, error } = await q.limit(50);
     if (error) throw error;
     return data ?? [];
@@ -169,7 +181,7 @@ export const sportsApi = {
       results.database = `❌ ${e.message}`;
     }
 
-    // Test edge function
+    // Test edge function via a lightweight operation
     try {
       const data = await invoke({ operation: "schedule", sport: "nba" });
       results.edge_function = data?.success !== false
@@ -179,7 +191,7 @@ export const sportsApi = {
       results.edge_function = `❌ Not deployed — ${e.message}`;
     }
 
-    // Count records
+    // Count records in key tables
     for (const table of ["teams", "players", "player_props", "games_data"] as const) {
       const { count } = await supabase
         .from(table)
