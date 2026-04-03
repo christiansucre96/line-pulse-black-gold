@@ -117,4 +117,15 @@ export const sportsApi = {
     if (error) throw error;
     return data || [];
   },
+
+  async getIngestionLogs() {
+    const { data, error } = await supabase
+      .from("ingestion_logs")
+      .select("*")
+      .order("started_at", { ascending: false })
+      .limit(20);
+
+    if (error) throw error;
+    return data || [];
+  },
 };

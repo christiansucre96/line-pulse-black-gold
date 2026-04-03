@@ -16,7 +16,7 @@ Deno.serve(async (req) => {
   )
 
   const baseUrl = Deno.env.get('SUPABASE_URL')!
-  const anonKey = Deno.env.get('SUPABASE_PUBLISHABLE_KEY')!
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!
 
   try {
     const results: any = {}
