@@ -86,7 +86,6 @@ export default function Admin() {
     const isLifetime = plan.value === "lifetime";
     const expiresAt = isLifetime ? null : new Date(Date.now() + plan.days * 86400000).toISOString();
 
-    // Upsert: delete old then insert
     await supabase.from("user_subscriptions" as any).delete().eq("user_id", userId);
     const { error } = await supabase.from("user_subscriptions" as any).insert({
       user_id: userId,
@@ -142,6 +141,35 @@ export default function Admin() {
       loadLogs();
     } catch (e: any) {
       toast.error(`Daily run failed: ${e.message}`);
+    } finally {
+      setIngesting(null);
+    }
+  };
+
+  // NEW: Full system sync (all sports, all operations)
+  const handleFullSystemSync = async () => {
+    setIngesting("fullSync");
+    try {
+      const result = await sportsApi.fullSystemSync();
+      console.log("Full system sync result:", result);
+      toast.success("Full system sync completed for all sports!");
+      loadLogs();
+    } catch (e: any) {
+      toast.error(`Full sync failed: ${e.message}`);
+    } finally {
+      setIngesting(null);
+    }
+  };
+
+  // NEW: Load NBA props to console (for quick verification)
+  const handleLoadNbaProps = async () => {
+    setIngesting("loadProps");
+    try {
+      const props = await sportsApi.getProps("nba");
+      console.log("NBA props:", props);
+      toast.success(`Loaded ${props.length} NBA props (check console)`);
+    } catch (e: any) {
+      toast.error(`Failed to load props: ${e.message}`);
     } finally {
       setIngesting(null);
     }
@@ -281,6 +309,40 @@ export default function Admin() {
 
         {activeTab === "data" && (
           <div className="space-y-6">
+            {/* NEW SECTION: Quick Admin Actions */}
+            <div className="bg-card border border-border rounded-xl p-4">
+              <h3 className="font-display font-bold text-foreground mb-4">⚡ Quick Admin Actions</h3>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={handleFullSystemSync}
+                  disabled={!!ingesting}
+                  className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-semibold hover:bg-primary/90 disabled:opacity-50"
+                >
+                  {ingesting === "fullSync" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                  Run Full Sync
+                </button>
+                <button
+                  onClick={handleRunDaily}
+                  disabled={!!ingesting}
+                  className="flex items-center gap-2 bg-accent text-accent-foreground px-4 py-2 rounded-lg text-sm font-semibold hover:bg-accent/90 disabled:opacity-50"
+                >
+                  {ingesting === "daily" ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                  Run Daily (All Sports)
+                </button>
+                <button
+                  onClick={handleLoadNbaProps}
+                  disabled={!!ingesting}
+                  className="flex items-center gap-2 bg-secondary text-secondary-foreground px-4 py-2 rounded-lg text-sm font-semibold hover:bg-secondary/80 disabled:opacity-50"
+                >
+                  {ingesting === "loadProps" ? <Loader2 className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />}
+                  Load NBA Props (Console)
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground mt-3">
+                Full Sync = all sports (teams, players, games, injuries, live, boxscores, props). Daily = standard daily pipeline.
+              </p>
+            </div>
+
             <div className="bg-card border border-border rounded-xl p-4">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-display font-bold text-foreground">Daily Automation</h3>
