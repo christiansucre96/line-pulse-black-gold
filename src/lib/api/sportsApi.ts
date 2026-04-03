@@ -1,6 +1,6 @@
 // src/lib/api/sportsApi.ts
 // Merged version – routes all operations through the single "clever-action" edge function.
-// Includes operation validation, request/response logging, and all DB query helpers.
+// Includes batch sync for all sports, daily automation, per‑sport pipeline, and full DB helpers.
 
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
@@ -8,6 +8,7 @@ import type { Database } from "@/integrations/supabase/types";
 type SportType = Database["public"]["Enums"]["sport_type"];
 
 const FN = "clever-action";
+const SPORTS = ["nba", "nfl", "mlb", "nhl", "soccer"] as const;
 
 /**
  * Safely invoke the edge function with operation validation and logging.
@@ -37,7 +38,54 @@ async function invoke(body: Record<string, any>) {
 }
 
 export const sportsApi = {
-  // ── DATA INGESTION ────────────────────────────────────────────
+  // ── BATCH OPERATIONS (from first file) ─────────────────────────
+
+  /** Run FULL pipeline for all sports (teams+players+games+injuries + live + boxscores + props) */
+  async fullSystemSync() {
+    const results: Record<string, any> = {};
+
+    for (const sport of SPORTS) {
+      console.log(`🔥 Running FULL pipeline for ${sport.toUpperCase()}`);
+
+      try {
+        // 1. TEAMS + PLAYERS + GAMES + INJURIES
+        const ingest = await invoke({ sport, operation: "full" });
+
+        // 2. LIVE + BOX SCORES
+        const live = await invoke({ sport, operation: "live" });
+
+        // 3. FORCE BOX SCORES AGAIN (IMPORTANT)
+        const box = await invoke({ sport, operation: "boxscores" });
+
+        // 4. GENERATE PROPS (STANDARD + COMBOS)
+        const props = await invoke({ sport, operation: "props" });
+
+        results[sport] = { ingest, live, box, props };
+      } catch (err: any) {
+        console.error(`❌ ${sport} failed:`, err.message);
+        results[sport] = { error: err.message };
+      }
+    }
+
+    return results;
+  },
+
+  /** Daily automation for all sports (alias for runDailyAutomation) */
+  async runDailyAllSports() {
+    return this.runDailyAutomation();
+  },
+
+  /** Quick single‑sport pipeline: full ingest → live → props */
+  async runSport(sport: string) {
+    return {
+      ingest: await invoke({ sport, operation: "full" }),
+      live: await invoke({ sport, operation: "live" }),
+      props: await invoke({ sport, operation: "props" }),
+    };
+  },
+
+  // ── INDIVIDUAL EDGE FUNCTION OPERATIONS (from second file) ──────
+
   /** Fetch teams + players + games + injuries for one sport */
   async ingest(sport: string, operation = "full", date?: string) {
     return invoke({ sport, operation, date });
@@ -63,13 +111,16 @@ export const sportsApi = {
     return invoke({ sport, operation: "injuries" });
   },
 
-  // ── PROPS ENGINE ──────────────────────────────────────────────
+  /** Force boxscore refresh (useful after live updates) */
+  async ingestBoxScores(sport: string) {
+    return invoke({ sport, operation: "boxscores" });
+  },
+
   /** Calculate hit rates + lines from stored game logs */
   async generateProps(sport: string, player_id?: string) {
     return invoke({ sport, operation: "props", player_id });
   },
 
-  // ── LIVE TRACKER ──────────────────────────────────────────────
   /** Update live scores + box scores */
   async updateLive(sport?: string) {
     return invoke({ operation: "live", sport });
@@ -80,22 +131,23 @@ export const sportsApi = {
     return invoke({ operation: "schedule", sport });
   },
 
-  // ── FULL DAILY REFRESH ────────────────────────────────────────
-  /** Run full pipeline for all 5 sports */
+  /** Run full pipeline for all 5 sports (daily automation) */
   async runDailyAutomation() {
     return invoke({ operation: "daily" });
   },
 
-  // ── ADMIN ─────────────────────────────────────────────────────
+  /** Grant admin privileges by email */
   async makeAdmin(email: string) {
     return invoke({ operation: "make_admin", email });
   },
 
+  /** Make the first user an admin (initial setup) */
   async makeFirstAdmin() {
     return invoke({ operation: "make_first_admin" });
   },
 
-  // ── DIRECT DB QUERIES (no edge function needed) ───────────────
+  // ── DIRECT DB QUERIES (always work, no edge function) ──────────
+
   async getPlayers(sport?: SportType) {
     let q = supabase
       .from("players")
@@ -169,7 +221,7 @@ export const sportsApi = {
   },
 
   // ── HEALTH CHECK ──────────────────────────────────────────────
-  /** Call this from Admin page to verify everything is wired up */
+
   async healthCheck() {
     const results: Record<string, string> = {};
 
