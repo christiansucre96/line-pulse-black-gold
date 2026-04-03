@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -7,6 +7,27 @@ export default function ResetPassword() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const handleRecovery = async () => {
+      const hash = window.location.hash;
+
+      // 🔥 Detect Supabase recovery token
+      if (hash.includes("access_token")) {
+        const { error } = await supabase.auth.getSession();
+
+        if (error) {
+          toast.error("Invalid or expired reset link");
+          navigate("/auth");
+        }
+      } else {
+        // If no token → redirect
+        navigate("/auth");
+      }
+    };
+
+    handleRecovery();
+  }, [navigate]);
 
   const handleReset = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,7 +54,7 @@ export default function ResetPassword() {
 
         <input
           type="password"
-          placeholder="New password"
+          placeholder="Enter new password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           className="w-full px-4 py-3 rounded bg-secondary border border-border"
