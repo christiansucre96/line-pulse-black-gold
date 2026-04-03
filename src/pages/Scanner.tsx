@@ -24,15 +24,15 @@ export default function Scanner() {
         return;
       }
 
-      // Check role using user_id (IMPORTANT)
-      const { data: profile } = await supabase
-        .from("profiles")
+      // Check role using user_roles table
+      const { data: roleData } = await supabase
+        .from("user_roles")
         .select("role")
         .eq("user_id", userData.user.id)
         .single();
 
       // Not admin → block
-      if (!profile || profile.role !== "admin") {
+      if (!roleData || roleData.role !== "admin") {
         window.location.href = "/";
       }
     };
