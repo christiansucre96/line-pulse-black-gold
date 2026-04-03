@@ -1,143 +1,151 @@
 // src/lib/api/sportsApi.ts
-// Merged version – includes all functionality from both files,
-// with proper error handling and support for multiple edge functions.
+// Routes all operations through the single "clever-action" edge function
 
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 
 type SportType = Database["public"]["Enums"]["sport_type"];
 
-/**
- * Safely invokes a Supabase Edge Function with consistent error handling.
- * @param functionName - Name of the edge function (e.g., 'sports-ingest')
- * @param body - Request payload
- * @returns The function’s response data
- * @throws Error if the invocation fails or returns an error
- */
-async function safeInvoke(functionName: string, body: any) {
-  try {
-    const { data, error } = await supabase.functions.invoke(functionName, {
-      body,
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
+const FN = "clever-action";
 
-    if (error) {
-      console.error(`❌ Edge function [${functionName}] error:`, {
-        message: error.message,
-        context: (error as any).context,
-        status: (error as any).status,
-      });
-      throw new Error(`${functionName} failed: ${error.message}`);
-    }
+async function invoke(body: Record<string, any>) {
+  const { data, error } = await supabase.functions.invoke(FN, { body });
 
-    if (!data) throw new Error(`No response from ${functionName}`);
-    return data;
-  } catch (err: any) {
-    console.error(`🚨 [${functionName}] invoke failed:`, err.message);
-    throw err;
+  if (error) {
+    // FunctionsRelayError  → function not deployed yet
+    // FunctionsHttpError   → function threw an error (check Supabase logs)
+    // FunctionsFetchError  → network / CORS problem
+    console.error(`[clever-action] error (op=${body.operation}):`, error);
+    throw new Error(error.message ?? "Edge function failed");
   }
+
+  if (!data) throw new Error("No response from edge function");
+  return data;
 }
 
 export const sportsApi = {
-  // ── EDGE FUNCTION CALLS (DATA INGESTION & PROCESSING) ──────────────
 
-  /** Ingest data for a given sport and operation (e.g., 'teams', 'players') */
-  async ingest(sport: string, operation: string) {
-    return safeInvoke("sports-ingest", { sport, operation });
+  // ── DATA INGESTION ────────────────────────────────────────────
+  /** Fetch teams + players + games + injuries for one sport */
+  async ingest(sport: string, operation = "full", date?: string) {
+    return invoke({ sport, operation, date });
   },
 
-  /** Generate prop bets for a sport using the props engine */
-  async generateProps(sport: string) {
-    return safeInvoke("props-engine", { sport });
+  /** Ingest teams only */
+  async ingestTeams(sport: string) {
+    return invoke({ sport, operation: "teams" });
   },
 
-  /** Update live game data (optionally filtered by sport) */
+  /** Ingest rosters only */
+  async ingestPlayers(sport: string) {
+    return invoke({ sport, operation: "players" });
+  },
+
+  /** Ingest today's games (schedule + scores) */
+  async ingestGames(sport: string, date?: string) {
+    return invoke({ sport, operation: "games", date });
+  },
+
+  /** Fetch injury report */
+  async ingestInjuries(sport: string) {
+    return invoke({ sport, operation: "injuries" });
+  },
+
+  // ── PROPS ENGINE ──────────────────────────────────────────────
+  /** Calculate hit rates + lines from stored game logs */
+  async generateProps(sport: string, player_id?: string) {
+    return invoke({ sport, operation: "props", player_id });
+  },
+
+  // ── LIVE TRACKER ──────────────────────────────────────────────
+  /** Update live scores + box scores */
   async updateLive(sport?: string) {
-    return safeInvoke("live-tracker", { operation: "update_live", sport });
+    return invoke({ operation: "live", sport });
   },
 
-  /** Fetch today’s schedule from the live tracker */
-  async fetchSchedule() {
-    return safeInvoke("live-tracker", { operation: "schedule" });
+  /** Pull today's schedule for all sports */
+  async fetchSchedule(sport?: string) {
+    return invoke({ operation: "schedule", sport });
   },
 
-  /** Run the daily automation (ingest → props → publish) */
+  // ── FULL DAILY REFRESH ────────────────────────────────────────
+  /** Run full pipeline for all 5 sports */
   async runDailyAutomation() {
-    return safeInvoke("daily-automation", {});
+    return invoke({ operation: "daily" });
   },
 
-  /** Grant admin privileges to a user by email */
+  // ── ADMIN ─────────────────────────────────────────────────────
   async makeAdmin(email: string) {
-    return safeInvoke("admin-setup", { email, operation: "make_admin" });
+    return invoke({ operation: "make_admin", email });
   },
 
-  /** Make the first user an admin (useful for initial setup) */
   async makeFirstAdmin() {
-    return safeInvoke("admin-setup", { operation: "make_first_admin" });
+    return invoke({ operation: "make_first_admin" });
   },
 
-  // ── DIRECT DATABASE QUERIES (no edge functions) ─────────────────────
-
-  /** Get players, optionally filtered by sport, with team information */
+  // ── DIRECT DB QUERIES (no edge function needed) ───────────────
   async getPlayers(sport?: SportType) {
-    const q = supabase
+    let q = supabase
       .from("players")
-      .select("*, teams(name, abbreviation)");
-    const { data, error } = await (sport
-      ? q.eq("sport", sport)
-      : q
-    ).limit(100);
+      .select("*, teams(name, abbreviation)")
+      .order("full_name");
+    if (sport) q = q.eq("sport", sport);
+    const { data, error } = await q.limit(500);
     if (error) throw error;
-    return data || [];
+    return data ?? [];
   },
 
-  /** Get player props, ordered by confidence score */
-  async getProps(sport?: SportType) {
-    const q = supabase
+  async getProps(sport?: SportType, combo?: boolean) {
+    let q = supabase
       .from("player_props")
       .select("*")
       .order("confidence_score", { ascending: false, nullsFirst: false });
-    const { data, error } = await (sport
-      ? q.eq("sport", sport)
-      : q
-    ).limit(200);
+    if (sport) q = q.eq("sport", sport);
+    if (combo !== undefined) q = q.eq("is_combo", combo);
+    const { data, error } = await q.limit(500);
     if (error) throw error;
-    return data || [];
+    return data ?? [];
   },
 
-  /** Get injury reports with player and team details */
   async getInjuries(sport?: SportType) {
-    const q = supabase
+    let q = supabase
       .from("injury_tracking")
-      .select("*, players(full_name, position, teams(abbreviation))");
-    const { data, error } = await (sport
-      ? q.eq("sport", sport)
-      : q
-    ).limit(200);
+      .select("*, players(full_name, position, teams(abbreviation))")
+      .order("last_updated", { ascending: false });
+    if (sport) q = q.eq("sport", sport);
+    const { data, error } = await q.limit(300);
     if (error) throw error;
-    return data || [];
+    return data ?? [];
   },
 
-  /** Get games, optionally filtered by sport and/or date */
-  async getGames(sport?: SportType, date?: string) {
+  async getGames(sport?: SportType, status?: string, date?: string) {
     let q = supabase
       .from("games_data")
       .select(`
         *,
-        home_team:teams!games_data_home_team_id_fkey(name, abbreviation),
-        away_team:teams!games_data_away_team_id_fkey(name, abbreviation)
+        home_team:teams!games_data_home_team_id_fkey(name, abbreviation, logo_url),
+        away_team:teams!games_data_away_team_id_fkey(name, abbreviation, logo_url)
       `)
       .order("start_time", { ascending: true });
-    if (sport) q = q.eq("sport", sport);
-    if (date) q = q.eq("game_date", date);
+    if (sport)  q = q.eq("sport", sport);
+    if (status) q = q.eq("status", status);
+    if (date)   q = q.eq("game_date", date);
     const { data, error } = await q.limit(50);
     if (error) throw error;
-    return data || [];
+    return data ?? [];
   },
 
-  /** Get recent ingestion logs for monitoring */
+  async getPlayerStats(playerId: string, limit = 20) {
+    const { data, error } = await supabase
+      .from("player_game_stats")
+      .select("*")
+      .eq("player_id", playerId)
+      .order("game_date", { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    return data ?? [];
+  },
+
   async getIngestionLogs() {
     const { data, error } = await supabase
       .from("ingestion_logs")
@@ -145,44 +153,40 @@ export const sportsApi = {
       .order("started_at", { ascending: false })
       .limit(20);
     if (error) throw error;
-    return data || [];
+    return data ?? [];
   },
 
-  // ── HEALTH CHECK ────────────────────────────────────────────────────
+  // ── HEALTH CHECK ──────────────────────────────────────────────
+  /** Call this from Admin page to verify everything is wired up */
+  async healthCheck() {
+    const results: Record<string, string> = {};
 
-  /**
-   * Check if the database is reachable and edge functions are deployed.
-   * @returns Object with booleans and any error messages.
-   */
-  async healthCheck(): Promise<{
-    functionsDeployed: boolean;
-    dbConnected: boolean;
-    errors: string[];
-  }> {
-    const errors: string[] = [];
-    let dbConnected = false;
-    let functionsDeployed = false;
-
-    // Test database connection
+    // Test DB directly
     try {
       const { error } = await supabase.from("teams").select("id").limit(1);
-      dbConnected = !error;
-      if (error) errors.push(`DB: ${error.message}`);
+      results.database = error ? `❌ ${error.message}` : "✅ Connected";
     } catch (e: any) {
-      errors.push(`DB: ${e.message}`);
+      results.database = `❌ ${e.message}`;
     }
 
-    // Test one edge function (sports-ingest is a good candidate)
+    // Test edge function
     try {
-      const { error } = await supabase.functions.invoke("sports-ingest", {
-        body: { sport: "nba", operation: "teams" },
-      });
-      functionsDeployed = !error;
-      if (error) errors.push(`Functions: ${error.message}`);
+      const data = await invoke({ operation: "schedule", sport: "nba" });
+      results.edge_function = data?.success !== false
+        ? "✅ Deployed & working"
+        : `⚠️ ${JSON.stringify(data)}`;
     } catch (e: any) {
-      errors.push(`Functions: ${e.message}`);
+      results.edge_function = `❌ Not deployed — ${e.message}`;
     }
 
-    return { functionsDeployed, dbConnected, errors };
+    // Count records
+    for (const table of ["teams", "players", "player_props", "games_data"] as const) {
+      const { count } = await supabase
+        .from(table)
+        .select("*", { count: "exact", head: true });
+      results[table] = `${count ?? 0} rows`;
+    }
+
+    return results;
   },
 };
