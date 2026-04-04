@@ -1,14 +1,12 @@
-import { supabase } from "@/integrations/supabase/client";
 import { useState, useMemo, useEffect } from "react";
 import { Search, BarChart3, Loader2 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { SportTabs } from "@/components/SportTabs";
 import { StatFilters } from "@/components/StatFilters";
 import { PlayerTable, SortField, SortDir } from "@/components/PlayerTable";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { Sport, sportCategories } from "@/data/mockPlayers";
-
-const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
 const sportDbMap: Record<Sport, string> = {
   NBA: "nba",
@@ -27,13 +25,13 @@ export default function Scanner() {
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
   const [players, setPlayers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({ players: 0, props: 0 });
+  const [dbStats, setDbStats] = useState({ players: 0, props: 0 });
 
-  const fetchPlayers = async () => {
+  const fetchData = async () => {
     setLoading(true);
     try {
       const dbSport = sportDbMap[sport];
-      console.log(`📊 Fetching ${sport} players with props...`);
+      console.log(`📊 Fetching ${sport} (${dbSport}) data...`);
       
       // Fetch players with their team info
       const { data: playersData, error: playersError } = await supabase
@@ -50,7 +48,7 @@ export default function Scanner() {
       
       if (playersError) throw playersError;
       
-      // Fetch props for these players
+      // Fetch props for this specific sport
       const { data: propsData, error: propsError } = await supabase
         .from('player_props')
         .select('*')
@@ -58,17 +56,24 @@ export default function Scanner() {
       
       if (propsError) throw propsError;
       
-      console.log(`Found ${playersData?.length || 0} players, ${propsData?.length || 0} props`);
+      console.log(`${sport}: ${playersData?.length || 0} players, ${propsData?.length || 0} props`);
       
-      // Create a map of player_id to props
+      // Create prop map
       const propsMap = new Map();
       propsData?.forEach(prop => {
         propsMap.set(prop.player_id, prop);
       });
       
-      // Combine players with their props
+      // Combine and format
       const formattedPlayers = playersData?.map(player => {
-        const playerProps = propsMap.get(player.id);
+        const prop = propsMap.get(player.id);
+        const projectedValue = prop?.projected_value || 0;
+        const confidence = prop?.confidence_score || 0;
+        const hitRate = prop?.hit_rate_last10 || 0;
+        
+        // Calculate diff (difference from baseline)
+        const baseline = prop?.baseline_line || projectedValue;
+        const diff = projectedValue - baseline;
         
         return {
           id: player.id,
@@ -76,35 +81,35 @@ export default function Scanner() {
           position: player.position || "N/A",
           team: player.teams?.name || "Unknown",
           teamAbbr: player.teams?.abbreviation || "N/A",
-          line: playerProps?.projected_value || 12.5,
-          confidence: playerProps?.confidence_score || 0.55,
-          hit_rate: playerProps?.hit_rate_last10 || 0.5,
-          trend: playerProps?.trend || "stable",
-          diff: playerProps?.projected_value ? Math.floor(Math.random() * 5) - 2 : 0,
+          line: projectedValue,
+          confidence: Math.round(confidence * 100),
+          hit_rate: Math.round(hitRate * 100),
+          trend: diff > 0 ? "up" : diff < 0 ? "down" : "stable",
+          diff: diff > 0 ? `+${diff}` : diff,
           categories: ["points", "assists", "rebounds"],
-          avg_last5: playerProps?.avg_last5 || 0,
-          avg_last10: playerProps?.avg_last10 || 0,
-          avg_last20: playerProps?.avg_last20 || 0,
+          avg_last5: prop?.avg_last5 || 0,
+          avg_last10: prop?.avg_last10 || 0,
+          avg_last20: prop?.avg_last20 || 0,
         };
       }) || [];
       
       setPlayers(formattedPlayers);
-      setStats({ 
-        players: formattedPlayers.length, 
-        props: propsData?.length || 0 
+      setDbStats({
+        players: playersData?.length || 0,
+        props: propsData?.length || 0
       });
       
     } catch (error) {
-      console.error("Error fetching players:", error);
+      console.error("Error:", error);
     } finally {
       setLoading(false);
     }
   };
 
-  // Auto-refresh every 30 seconds
+  // Refresh every 30 seconds
   useEffect(() => {
-    fetchPlayers();
-    const interval = setInterval(fetchPlayers, 30000);
+    fetchData();
+    const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
   }, [sport]);
 
@@ -133,8 +138,8 @@ export default function Scanner() {
       result = result.filter(p => p.name?.toLowerCase().includes(search.toLowerCase()));
     }
     result.sort((a, b) => {
-      const aVal = a[sortField] as number;
-      const bVal = b[sortField] as number;
+      const aVal = a[sortField as keyof typeof a] as number;
+      const bVal = b[sortField as keyof typeof b] as number;
       return sortDir === "desc" ? (bVal || 0) - (aVal || 0) : (aVal || 0) - (bVal || 0);
     });
     return result;
@@ -191,7 +196,7 @@ export default function Scanner() {
           <>
             <div className="mb-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
               <p className="text-xs text-green-400">
-                ✅ LIVE 24/7: {stats.players} players • {stats.props} active props • Auto-refreshes every 30 seconds
+                ✅ LIVE 24/7: {dbStats.players} {sport} players • {dbStats.props} active props • Auto-refreshes every 30 seconds
               </p>
             </div>
             <div className="bg-card border border-border rounded-xl overflow-hidden">
@@ -206,7 +211,7 @@ export default function Scanner() {
           </>
         )}
         <div className="text-center text-sm text-muted-foreground mt-4">
-          Showing {filteredPlayers.length} results • Live data from ESPN
+          Showing {filteredPlayers.length} {sport} players • Live data from ESPN
         </div>
       </div>
     </DashboardLayout>
