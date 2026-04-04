@@ -1,6 +1,6 @@
 // supabase/functions/clever-action/index.ts
-// Merged version – supports all operations.
-// Uses PROJECT_URL and SERVICE_ROLE_KEY (no SUPABASE_ prefix).
+// FULLY AUTOMATED VERSION - No manual intervention needed
+// Includes cron jobs for live updates, props generation, and historical backfill
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
@@ -18,7 +18,6 @@ const NBA_HEADERS = {
   'x-nba-stats-token': 'true',
 }
 
-// ✅ Use the same environment variable names as the first file
 function getSupabase() {
   const url = Deno.env.get('PROJECT_URL')
   const key = Deno.env.get('SERVICE_ROLE_KEY')
@@ -116,7 +115,6 @@ async function ingestTeams(supabase: any, sport: string) {
       logo_url: t.teamLogo || null,
     }))
   } else {
-    // ESPN for NBA, NFL, Soccer
     const path = ESPN_PATHS[sport]
     const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${path}/teams?limit=50`)
     const data = await res.json()
@@ -170,7 +168,6 @@ async function ingestPlayers(supabase: any, sport: string) {
           headshot_url: p.headshot || null, status: 'active',
         }))
       } else {
-        // ESPN for NBA, NFL, Soccer
         const path = ESPN_PATHS[sport]
         const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${path}/teams/${team.external_id}/roster`)
         const data = await res.json()
@@ -323,7 +320,6 @@ async function ingestStats(supabase: any, sport: string, date: string) {
               const num = typeof val === 'number' ? val : parseFloat(val)
               if (isNaN(num)) return
 
-              // Common stats across all sports
               if (label === 'PTS') stat.points = num
               if (label === 'REB') stat.rebounds = num
               if (label === 'AST') stat.assists = num
@@ -331,7 +327,6 @@ async function ingestStats(supabase: any, sport: string, date: string) {
               if (label === 'BLK') stat.blocks = num
               if (label === 'TO') stat.turnovers = num
 
-              // NBA / NCAA
               if (label === '3PT') {
                 const [made, att] = (val as string).split('-')
                 stat.three_pointers_made = parseInt(made) || 0
@@ -349,26 +344,22 @@ async function ingestStats(supabase: any, sport: string, date: string) {
               }
               if (label === 'MIN') stat.minutes_played = num
 
-              // NFL
               if (label === 'YDS') stat.passing_yards = num
               if (label === 'TD') stat.passing_tds = num
               if (label === 'RUSH YDS') stat.rushing_yards = num
               if (label === 'REC YDS') stat.receiving_yards = num
               if (label === 'REC') stat.receptions = num
 
-              // MLB
               if (label === 'H') stat.hits = num
               if (label === 'R') stat.runs = num
               if (label === 'RBI') stat.rbi = num
               if (label === 'HR') stat.home_runs = num
               if (label === 'SB') stat.stolen_bases = num
 
-              // NHL
               if (label === 'G') stat.goals = num
               if (label === 'A') stat.assists_hockey = num
               if (label === 'SOG') stat.shots_on_goal = num
 
-              // Soccer
               if (label === 'G') stat.goals_soccer = num
               if (label === 'A') stat.assists_soccer = num
               if (label === 'SH') stat.shots_soccer = num
@@ -485,14 +476,12 @@ async function generateProps(supabase: any, sport: string, player_id?: string) {
       }
     }
 
-    // Standard props
     for (const field of config.statFields) {
       const values = stats.map((s: any) => s[field]).filter((v: any) => v != null) as number[]
       const prop = buildProp(values, field, false)
       if (prop) allProps.push(prop)
     }
 
-    // Combo props
     for (const combo of config.combos) {
       const values = stats.map((s: any) =>
         combo.fields.reduce((acc: number, f: string) => acc + (s[f] || 0), 0)
@@ -504,7 +493,6 @@ async function generateProps(supabase: any, sport: string, player_id?: string) {
     processed++
   }
 
-  // Clear + insert
   if (player_id) {
     await supabase.from('player_props').delete().eq('player_id', player_id)
   } else {
@@ -537,6 +525,112 @@ async function updateLive(supabase: any, sport?: string) {
   return { games_updated: gamesUpdated, stats_updated: statsUpdated }
 }
 
+// ──────────────────────────────────────────────────────────────
+// 🤖 AUTOMATED SCHEDULES (RUN AUTOMATICALLY - NO MANUAL INTERVENTION)
+// ──────────────────────────────────────────────────────────────
+
+// Schedule 1: Update live games and stats every 30 minutes
+Deno.cron("live-update", "*/30 * * * *", async () => {
+  console.log("⏰ [CRON] Running scheduled live update...");
+  const supabase = getSupabase();
+  try {
+    const result = await updateLive(supabase);
+    console.log("✅ [CRON] Live update complete:", result);
+  } catch (e) {
+    console.error("❌ [CRON] Live update failed:", e);
+  }
+});
+
+// Schedule 2: Generate fresh props every 6 hours
+Deno.cron("props-generate", "0 */6 * * *", async () => {
+  console.log("⏰ [CRON] Running scheduled props generation...");
+  const supabase = getSupabase();
+  const sports = ["nba", "nfl", "mlb", "nhl", "soccer"];
+  for (const sport of sports) {
+    try {
+      const result = await generateProps(supabase, sport);
+      console.log(`✅ [CRON] Props generated for ${sport}:`, result);
+    } catch (e) {
+      console.error(`❌ [CRON] Props failed for ${sport}:`, e);
+    }
+  }
+});
+
+// Schedule 3: Full daily refresh at 4 AM (ensures everything is updated)
+Deno.cron("daily-full", "0 4 * * *", async () => {
+  console.log("⏰ [CRON] Running full daily refresh...");
+  const supabase = getSupabase();
+  const sports = ["nba", "nfl", "mlb", "nhl", "soccer"];
+  const date = new Date().toISOString().split('T')[0];
+  
+  for (const sport of sports) {
+    try {
+      await ingestTeams(supabase, sport);
+      await ingestPlayers(supabase, sport);
+      await ingestGames(supabase, sport, date);
+      await ingestInjuries(supabase, sport);
+      await ingestStats(supabase, sport, date);
+      await generateProps(supabase, sport);
+      console.log(`✅ [CRON] Daily refresh complete for ${sport}`);
+    } catch (e) {
+      console.error(`❌ [CRON] Daily refresh failed for ${sport}:`, e);
+    }
+  }
+});
+
+// ── HISTORICAL BACKFILL (RUNS ONCE ON FIRST DEPLOYMENT) ──────
+let isBackfilled = false;
+
+async function ensureHistoricalData(supabase: any) {
+  if (isBackfilled) return;
+  
+  // Check if we already have stats
+  const { count } = await supabase
+    .from("player_game_stats")
+    .select("*", { count: "exact", head: true });
+  
+  if (count && count > 1000) {
+    console.log(`✅ Historical data already exists (${count} stats), skipping backfill`);
+    isBackfilled = true;
+    return;
+  }
+  
+  console.log("📦 First run detected - backfilling last 30 days of stats...");
+  const sports = ["nba", "nfl", "mlb", "nhl", "soccer"];
+  const today = new Date();
+  
+  for (const sport of sports) {
+    console.log(`  Backfilling ${sport}...`);
+    for (let i = 1; i <= 30; i++) {
+      const date = new Date(today);
+      date.setDate(today.getDate() - i);
+      const dateStr = date.toISOString().split('T')[0];
+      try {
+        // First ensure games exist for that date
+        await ingestGames(supabase, sport, dateStr);
+        // Then get stats for finished games
+        const statsCount = await ingestStats(supabase, sport, dateStr);
+        if (statsCount > 0) {
+          console.log(`    📊 ${dateStr}: ${statsCount} stats ingested`);
+        }
+        await new Promise(r => setTimeout(r, 100)); // rate limit
+      } catch (e) {
+        // Silently skip dates with no games
+      }
+    }
+  }
+  
+  // Generate initial props after backfill
+  console.log("🎲 Generating initial props for all sports...");
+  for (const sport of sports) {
+    await generateProps(supabase, sport);
+    console.log(`  ✅ Props generated for ${sport}`);
+  }
+  
+  isBackfilled = true;
+  console.log("✅ Historical backfill complete! System is now fully automated.");
+}
+
 // ── MAIN HANDLER ──────────────────────────────────────────────
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -544,6 +638,9 @@ Deno.serve(async (req) => {
   }
 
   const supabase = getSupabase()
+  
+  // 🔥 AUTO-BACKFILL on first request (non-blocking)
+  ensureHistoricalData(supabase).catch(console.error);
 
   try {
     const body = await req.json().catch(() => ({}))
@@ -580,9 +677,6 @@ Deno.serve(async (req) => {
         break
 
       case 'boxscores':
-        result = { count: await ingestStats(supabase, sport, date || new Date().toISOString().split('T')[0]) }
-        break
-
       case 'stats':
         result = { count: await ingestStats(supabase, sport, date || new Date().toISOString().split('T')[0]) }
         break
