@@ -1,6 +1,7 @@
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { sportsApi } from "@/lib/api/sportsApi";
+import { syncAllSports, syncSport, updateAllLiveScores, quickSync } from "@/lib/liveData";
 import { useEffect, useState } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { toast } from "sonner";
@@ -28,7 +29,7 @@ export default function Admin() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"users" | "analytics" | "data" | "settings">("users");
-  const [stats, setStats] = useState({ totalUsers: 0, totalParlays: 0, admins: 0, totalPlayers: 0, totalGames: 0 });
+  const [stats, setStats] = useState({ totalUsers: 0, totalParlays: 0, admins: 0, totalPlayers: 0, totalGames: 0, totalTeams: 0 });
   const [ingesting, setIngesting] = useState<string | null>(null);
   const [logs, setLogs] = useState<any[]>([]);
 
@@ -57,6 +58,7 @@ export default function Admin() {
       const { count: parlayCount } = await supabase.from("saved_parlays").select("*", { count: "exact", head: true });
       const { count: playerCount } = await supabase.from("players").select("*", { count: "exact", head: true });
       const { count: gameCount } = await supabase.from("games_data").select("*", { count: "exact", head: true });
+      const { count: teamCount } = await supabase.from("teams").select("*", { count: "exact", head: true });
 
       setStats({
         totalUsers: merged.length,
@@ -64,6 +66,7 @@ export default function Admin() {
         admins: merged.filter((u) => u.role === "admin").length,
         totalPlayers: playerCount || 0,
         totalGames: gameCount || 0,
+        totalTeams: teamCount || 0,
       });
       setLoading(false);
     };
@@ -146,7 +149,6 @@ export default function Admin() {
     }
   };
 
-  // NEW: Full system sync (all sports, all operations)
   const handleFullSystemSync = async () => {
     setIngesting("fullSync");
     try {
@@ -161,7 +163,6 @@ export default function Admin() {
     }
   };
 
-  // NEW: Load NBA props to console (for quick verification)
   const handleLoadNbaProps = async () => {
     setIngesting("loadProps");
     try {
@@ -194,6 +195,18 @@ export default function Admin() {
     } catch { /* ignore */ }
   };
 
+  const refreshStats = async () => {
+    const { count: playerCount } = await supabase.from("players").select("*", { count: "exact", head: true });
+    const { count: gameCount } = await supabase.from("games_data").select("*", { count: "exact", head: true });
+    const { count: teamCount } = await supabase.from("teams").select("*", { count: "exact", head: true });
+    setStats(prev => ({ 
+      ...prev, 
+      totalPlayers: playerCount || 0, 
+      totalGames: gameCount || 0,
+      totalTeams: teamCount || 0
+    }));
+  };
+
   useEffect(() => {
     if (activeTab === "data" && isAdmin) loadLogs();
   }, [activeTab, isAdmin]);
@@ -217,11 +230,12 @@ export default function Admin() {
           <Shield className="w-6 h-6 text-primary" /> Admin Dashboard
         </h1>
 
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 mb-6">
           {[
             { label: "Users", value: stats.totalUsers, color: "text-primary" },
             { label: "Admins", value: stats.admins, color: "text-accent" },
             { label: "Parlays", value: stats.totalParlays, color: "text-green-400" },
+            { label: "Teams", value: stats.totalTeams, color: "text-purple-400" },
             { label: "Players", value: stats.totalPlayers, color: "text-blue-400" },
             { label: "Games", value: stats.totalGames, color: "text-yellow-400" },
           ].map((s) => (
@@ -267,7 +281,7 @@ export default function Admin() {
                           <td className="py-3 px-4">
                             <div className="font-medium text-foreground">{u.display_name || "Unknown"}</div>
                             <div className="text-xs text-muted-foreground">{u.user_id.slice(0, 8)}...</div>
-                          </td>
+                           </td>
                           <td className="py-3 px-4 text-muted-foreground">{new Date(u.created_at).toLocaleDateString()}</td>
                           <td className="py-3 px-4">
                             <select value={u.role} onChange={(e) => handleRoleChange(u.user_id, e.target.value)}
@@ -309,7 +323,7 @@ export default function Admin() {
 
         {activeTab === "data" && (
           <div className="space-y-6">
-            {/* NEW SECTION: Quick Admin Actions */}
+            {/* Quick Admin Actions */}
             <div className="bg-card border border-border rounded-xl p-4">
               <h3 className="font-display font-bold text-foreground mb-4">⚡ Quick Admin Actions</h3>
               <div className="flex flex-wrap gap-3">
@@ -341,6 +355,201 @@ export default function Admin() {
               <p className="text-xs text-muted-foreground mt-3">
                 Full Sync = all sports (teams, players, games, injuries, live, boxscores, props). Daily = standard daily pipeline.
               </p>
+            </div>
+
+            {/* ESPN DATA SYNC SECTION - NEW */}
+            <div className="bg-card border border-border rounded-xl p-4">
+              <h3 className="font-display font-bold text-foreground mb-4">📡 ESPN Data Sync (Frontend Fetch)</h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                Fetches live data directly from ESPN and saves to database. This bypasses edge function fetch issues.
+              </p>
+              
+              <div className="flex flex-wrap gap-3 mb-4">
+                <button
+                  onClick={async () => {
+                    setIngesting("sync-nba");
+                    toast.info("Syncing NBA data from ESPN...");
+                    try {
+                      await syncSport("nba");
+                      toast.success("NBA data synced successfully!");
+                      await refreshStats();
+                      loadLogs();
+                    } catch (err: any) {
+                      toast.error(`NBA sync failed: ${err.message}`);
+                    } finally {
+                      setIngesting(null);
+                    }
+                  }}
+                  disabled={!!ingesting}
+                  className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {ingesting === "sync-nba" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
+                  Sync NBA
+                </button>
+
+                <button
+                  onClick={async () => {
+                    setIngesting("sync-nfl");
+                    toast.info("Syncing NFL data from ESPN...");
+                    try {
+                      await syncSport("nfl");
+                      toast.success("NFL data synced successfully!");
+                      await refreshStats();
+                      loadLogs();
+                    } catch (err: any) {
+                      toast.error(`NFL sync failed: ${err.message}`);
+                    } finally {
+                      setIngesting(null);
+                    }
+                  }}
+                  disabled={!!ingesting}
+                  className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-50"
+                >
+                  {ingesting === "sync-nfl" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
+                  Sync NFL
+                </button>
+
+                <button
+                  onClick={async () => {
+                    setIngesting("sync-mlb");
+                    toast.info("Syncing MLB data from ESPN...");
+                    try {
+                      await syncSport("mlb");
+                      toast.success("MLB data synced successfully!");
+                      await refreshStats();
+                      loadLogs();
+                    } catch (err: any) {
+                      toast.error(`MLB sync failed: ${err.message}`);
+                    } finally {
+                      setIngesting(null);
+                    }
+                  }}
+                  disabled={!!ingesting}
+                  className="flex items-center gap-2 bg-yellow-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-yellow-700 disabled:opacity-50"
+                >
+                  {ingesting === "sync-mlb" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
+                  Sync MLB
+                </button>
+
+                <button
+                  onClick={async () => {
+                    setIngesting("sync-nhl");
+                    toast.info("Syncing NHL data from ESPN...");
+                    try {
+                      await syncSport("nhl");
+                      toast.success("NHL data synced successfully!");
+                      await refreshStats();
+                      loadLogs();
+                    } catch (err: any) {
+                      toast.error(`NHL sync failed: ${err.message}`);
+                    } finally {
+                      setIngesting(null);
+                    }
+                  }}
+                  disabled={!!ingesting}
+                  className="flex items-center gap-2 bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-orange-700 disabled:opacity-50"
+                >
+                  {ingesting === "sync-nhl" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
+                  Sync NHL
+                </button>
+
+                <button
+                  onClick={async () => {
+                    setIngesting("sync-soccer");
+                    toast.info("Syncing Soccer data from ESPN...");
+                    try {
+                      await syncSport("soccer");
+                      toast.success("Soccer data synced successfully!");
+                      await refreshStats();
+                      loadLogs();
+                    } catch (err: any) {
+                      toast.error(`Soccer sync failed: ${err.message}`);
+                    } finally {
+                      setIngesting(null);
+                    }
+                  }}
+                  disabled={!!ingesting}
+                  className="flex items-center gap-2 bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-purple-700 disabled:opacity-50"
+                >
+                  {ingesting === "sync-soccer" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
+                  Sync Soccer
+                </button>
+              </div>
+
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={async () => {
+                    setIngesting("sync-all");
+                    toast.info("Syncing ALL sports from ESPN (this may take a few minutes)...");
+                    try {
+                      await syncAllSports();
+                      toast.success("All sports synced successfully!");
+                      await refreshStats();
+                      loadLogs();
+                    } catch (err: any) {
+                      toast.error(`Sync failed: ${err.message}`);
+                    } finally {
+                      setIngesting(null);
+                    }
+                  }}
+                  disabled={!!ingesting}
+                  className="flex items-center gap-2 bg-gradient-to-r from-red-600 to-purple-600 text-white px-6 py-2 rounded-lg text-sm font-semibold hover:from-red-700 hover:to-purple-700 disabled:opacity-50"
+                >
+                  {ingesting === "sync-all" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
+                  🔥 Sync ALL Sports (Teams + Players + Games)
+                </button>
+
+                <button
+                  onClick={async () => {
+                    setIngesting("live-scores");
+                    toast.info("Updating live scores...");
+                    try {
+                      await updateAllLiveScores();
+                      toast.success("Live scores updated!");
+                      await refreshStats();
+                      loadLogs();
+                    } catch (err: any) {
+                      toast.error(`Live scores update failed: ${err.message}`);
+                    } finally {
+                      setIngesting(null);
+                    }
+                  }}
+                  disabled={!!ingesting}
+                  className="flex items-center gap-2 bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-cyan-700 disabled:opacity-50"
+                >
+                  {ingesting === "live-scores" ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                  Update Live Scores
+                </button>
+
+                <button
+                  onClick={async () => {
+                    setIngesting("quick-sync");
+                    toast.info("Quick syncing NBA teams + games...");
+                    try {
+                      await quickSync("nba");
+                      toast.success("Quick sync complete!");
+                      await refreshStats();
+                      loadLogs();
+                    } catch (err: any) {
+                      toast.error(`Quick sync failed: ${err.message}`);
+                    } finally {
+                      setIngesting(null);
+                    }
+                  }}
+                  disabled={!!ingesting}
+                  className="flex items-center gap-2 bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-700 disabled:opacity-50"
+                >
+                  {ingesting === "quick-sync" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                  Quick Sync (NBA Teams + Games)
+                </button>
+              </div>
+
+              <div className="mt-4 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                <p className="text-xs text-blue-400">
+                  💡 This method fetches data directly from ESPN to your browser, then sends to Supabase via edge function. 
+                  It bypasses the SSL issues that were causing edge function fetch failures.
+                </p>
+              </div>
             </div>
 
             <div className="bg-card border border-border rounded-xl p-4">
@@ -424,10 +633,12 @@ export default function Admin() {
             <h3 className="font-display font-bold text-foreground mb-4">Platform Analytics</h3>
             <div className="grid grid-cols-2 gap-4">
               {[
+                { label: "Total Teams in DB", value: stats.totalTeams },
                 { label: "Total Players in DB", value: stats.totalPlayers },
                 { label: "Total Games Tracked", value: stats.totalGames },
                 { label: "Parlays Created", value: stats.totalParlays },
                 { label: "Registered Users", value: stats.totalUsers },
+                { label: "Admins", value: stats.admins },
               ].map((item) => (
                 <div key={item.label} className="bg-secondary/30 rounded-lg p-4">
                   <div className="text-xs text-muted-foreground">{item.label}</div>
