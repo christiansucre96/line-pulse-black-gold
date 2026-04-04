@@ -1,5 +1,5 @@
 // src/lib/liveData.ts
-// Multi-sport data sync from ESPN to Supabase
+// Multi-sport data sync from ESPN to Supabase 
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
