@@ -179,14 +179,72 @@ export default function Admin() {
 
   const handleGenerateProps = async (sport: string) => {
     setIngesting(`props-${sport}`);
+    toast.info(`Generating ${sport.toUpperCase()} props...`);
     try {
-      const result = await sportsApi.generateProps(sport);
-      toast.success(`${sport.toUpperCase()} props: ${result?.props_generated || 0} generated`);
+      const result = await fetch(EDGE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operation: "props", sport })
+      });
+      const data = await result.json();
+      toast.success(`${sport.toUpperCase()}: ${data.props_generated || 0} props generated`);
+      await refreshStats();
     } catch (e: any) {
       toast.error(`Props failed: ${e.message}`);
     } finally {
       setIngesting(null);
     }
+  };
+
+  const handleGenerateAllProps = async () => {
+    setIngesting("all-props");
+    toast.info("Generating props for ALL sports...");
+    const sports = ["nba", "nfl", "mlb", "nhl", "soccer"];
+    let total = 0;
+    
+    for (const sport of sports) {
+      try {
+        const result = await fetch(EDGE_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ operation: "props", sport })
+        });
+        const data = await result.json();
+        total += data.props_generated || 0;
+        toast.success(`${sport.toUpperCase()}: ${data.props_generated || 0} props`);
+      } catch (err: any) {
+        toast.error(`${sport.toUpperCase()} props failed: ${err.message}`);
+      }
+    }
+    
+    toast.success(`Total props generated: ${total}`);
+    await refreshStats();
+    setIngesting(null);
+  };
+
+  const handleFullSyncWithProps = async () => {
+    setIngesting("full-sync");
+    toast.info("Running full sync with props generation...");
+    const sports = ["nba", "nfl", "mlb", "nhl", "soccer"];
+    
+    for (const sport of sports) {
+      toast.info(`Syncing ${sport.toUpperCase()}...`);
+      try {
+        const result = await fetch(EDGE_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ operation: "full_sync", sport })
+        });
+        const data = await result.json();
+        toast.success(`${sport.toUpperCase()}: ${data.props_generated || 0} props`);
+      } catch (err: any) {
+        toast.error(`${sport.toUpperCase()} failed: ${err.message}`);
+      }
+    }
+    
+    await refreshStats();
+    toast.success("Full sync complete!");
+    setIngesting(null);
   };
 
   const loadLogs = async () => {
@@ -200,15 +258,51 @@ export default function Admin() {
     const { count: playerCount } = await supabase.from("players").select("*", { count: "exact", head: true });
     const { count: gameCount } = await supabase.from("games_data").select("*", { count: "exact", head: true });
     const { count: teamCount } = await supabase.from("teams").select("*", { count: "exact", head: true });
+    const { count: propsCount } = await supabase.from("player_props").select("*", { count: "exact", head: true });
     setStats(prev => ({ 
       ...prev, 
       totalPlayers: playerCount || 0, 
       totalGames: gameCount || 0,
-      totalTeams: teamCount || 0
+      totalTeams: teamCount || 0,
+      totalProps: propsCount || 0
     }));
   };
 
-  // DIRECT SYNC FUNCTIONS (no external imports needed)
+  // AUTO-SYNC EVERY 30 MINUTES
+  useEffect(() => {
+    if (!isAdmin) return;
+    
+    const autoSync = async () => {
+      console.log("🔄 Auto-syncing sports data (30 min interval)...");
+      const sports = ["nba", "nfl", "mlb", "nhl", "soccer"];
+      
+      for (const sport of sports) {
+        try {
+          await fetch(EDGE_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ operation: "full_sync", sport })
+          });
+          console.log(`✅ Auto-sync complete for ${sport}`);
+        } catch (err) {
+          console.error(`❌ Auto-sync failed for ${sport}:`, err);
+        }
+      }
+      
+      await refreshStats();
+      console.log("✅ Auto-sync cycle complete");
+    };
+    
+    // Run every 30 minutes
+    const interval = setInterval(autoSync, 30 * 60 * 1000);
+    
+    // Also run once when page loads
+    autoSync();
+    
+    return () => clearInterval(interval);
+  }, [isAdmin]);
+
+  // DIRECT SYNC FUNCTIONS
   const syncSportDirect = async (sport: string) => {
     const sportConfig: Record<string, { path: string; name: string }> = {
       nba: { path: "basketball/nba", name: "NBA" },
@@ -223,7 +317,6 @@ export default function Admin() {
 
     console.log(`🔄 Syncing ${config.name}...`);
 
-    // 1. Fetch teams
     const teamsRes = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${config.path}/teams`);
     const teamsJson = await teamsRes.json();
     const teams = teamsJson.sports?.[0]?.leagues?.[0]?.teams?.map((t: any) => ({
@@ -243,7 +336,6 @@ export default function Admin() {
       console.log(`✅ ${config.name} teams: ${teams.length}`);
     }
 
-    // 2. Fetch players
     let allPlayers: any[] = [];
     for (const t of teams) {
       try {
@@ -276,7 +368,6 @@ export default function Admin() {
       });
     }
 
-    // 3. Fetch games
     const gamesRes = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${config.path}/scoreboard`);
     const gamesJson = await gamesRes.json();
     const games = gamesJson.events?.map((g: any) => ({
@@ -339,7 +430,7 @@ export default function Admin() {
           <Shield className="w-6 h-6 text-primary" /> Admin Dashboard
         </h1>
 
-        <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-7 gap-3 mb-6">
           {[
             { label: "Users", value: stats.totalUsers, color: "text-primary" },
             { label: "Admins", value: stats.admins, color: "text-accent" },
@@ -347,6 +438,7 @@ export default function Admin() {
             { label: "Teams", value: stats.totalTeams, color: "text-purple-400" },
             { label: "Players", value: stats.totalPlayers, color: "text-blue-400" },
             { label: "Games", value: stats.totalGames, color: "text-yellow-400" },
+            { label: "Props", value: (stats as any).totalProps || 0, color: "text-pink-400" },
           ].map((s) => (
             <div key={s.label} className="bg-card border border-border rounded-xl p-3">
               <div className="text-xs text-muted-foreground">{s.label}</div>
@@ -432,6 +524,88 @@ export default function Admin() {
 
         {activeTab === "data" && (
           <div className="space-y-6">
+            {/* PROPS GENERATION SECTION */}
+            <div className="bg-card border border-border rounded-xl p-4">
+              <h3 className="font-display font-bold text-foreground mb-4">🎲 Props Generation</h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                Generate player prop lines from historical stats. Click "Generate ALL Props" to create props for all sports.
+              </p>
+              
+              <div className="flex flex-wrap gap-3 mb-4">
+                <button
+                  onClick={() => handleGenerateProps("nba")}
+                  disabled={!!ingesting}
+                  className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700"
+                >
+                  {ingesting === "props-nba" ? <Loader2 className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />}
+                  Generate NBA Props
+                </button>
+                
+                <button
+                  onClick={() => handleGenerateProps("nfl")}
+                  disabled={!!ingesting}
+                  className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-700"
+                >
+                  {ingesting === "props-nfl" ? <Loader2 className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />}
+                  Generate NFL Props
+                </button>
+                
+                <button
+                  onClick={() => handleGenerateProps("mlb")}
+                  disabled={!!ingesting}
+                  className="flex items-center gap-2 bg-yellow-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-yellow-700"
+                >
+                  {ingesting === "props-mlb" ? <Loader2 className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />}
+                  Generate MLB Props
+                </button>
+                
+                <button
+                  onClick={() => handleGenerateProps("nhl")}
+                  disabled={!!ingesting}
+                  className="flex items-center gap-2 bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-orange-700"
+                >
+                  {ingesting === "props-nhl" ? <Loader2 className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />}
+                  Generate NHL Props
+                </button>
+                
+                <button
+                  onClick={() => handleGenerateProps("soccer")}
+                  disabled={!!ingesting}
+                  className="flex items-center gap-2 bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-purple-700"
+                >
+                  {ingesting === "props-soccer" ? <Loader2 className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />}
+                  Generate Soccer Props
+                </button>
+              </div>
+              
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={handleGenerateAllProps}
+                  disabled={!!ingesting}
+                  className="flex items-center gap-2 bg-gradient-to-r from-green-600 to-blue-600 text-white px-6 py-2 rounded-lg text-sm font-semibold hover:from-green-700 hover:to-blue-700"
+                >
+                  {ingesting === "all-props" ? <Loader2 className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />}
+                  Generate ALL Props
+                </button>
+                
+                <button
+                  onClick={handleFullSyncWithProps}
+                  disabled={!!ingesting}
+                  className="flex items-center gap-2 bg-gradient-to-r from-red-600 to-purple-600 text-white px-6 py-2 rounded-lg text-sm font-semibold hover:from-red-700 hover:to-purple-700"
+                >
+                  {ingesting === "full-sync" ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                  🔥 Full Sync + Props (One Click)
+                </button>
+              </div>
+              
+              <div className="mt-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
+                <p className="text-xs text-green-400">
+                  🤖 Auto-sync runs every 30 minutes automatically. Props are generated from player stats.
+                  Click "Generate ALL Props" to create prop lines for all sports now.
+                </p>
+              </div>
+            </div>
+
             {/* Quick Admin Actions */}
             <div className="bg-card border border-border rounded-xl p-4">
               <h3 className="font-display font-bold text-foreground mb-4">⚡ Quick Admin Actions</h3>
@@ -466,11 +640,11 @@ export default function Admin() {
               </p>
             </div>
 
-            {/* ESPN DATA SYNC SECTION - DIRECT FETCH (NO IMPORTS NEEDED) */}
+            {/* ESPN DATA SYNC SECTION */}
             <div className="bg-card border border-border rounded-xl p-4">
-              <h3 className="font-display font-bold text-foreground mb-4">📡 ESPN Data Sync (Direct Fetch)</h3>
+              <h3 className="font-display font-bold text-foreground mb-4">📡 ESPN Data Sync</h3>
               <p className="text-sm text-muted-foreground mb-4">
-                Fetches live data directly from ESPN and saves to database. Works 100% reliably.
+                Fetches live data directly from ESPN and saves to database.
               </p>
               
               <div className="flex flex-wrap gap-3 mb-4">
@@ -480,9 +654,8 @@ export default function Admin() {
                     toast.info("Syncing NBA data...");
                     try {
                       const result = await syncSportDirect("nba");
-                      toast.success(`NBA: ${result.teams} teams, ${result.players} players, ${result.games} games`);
+                      toast.success(`NBA: ${result.teams} teams, ${result.players} players`);
                       await refreshStats();
-                      loadLogs();
                     } catch (err: any) {
                       toast.error(`NBA sync failed: ${err.message}`);
                     } finally {
@@ -490,7 +663,7 @@ export default function Admin() {
                     }
                   }}
                   disabled={!!ingesting}
-                  className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50"
+                  className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700"
                 >
                   {ingesting === "sync-nba" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
                   Sync NBA
@@ -511,7 +684,7 @@ export default function Admin() {
                     }
                   }}
                   disabled={!!ingesting}
-                  className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-50"
+                  className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-700"
                 >
                   {ingesting === "sync-nfl" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
                   Sync NFL
@@ -532,7 +705,7 @@ export default function Admin() {
                     }
                   }}
                   disabled={!!ingesting}
-                  className="flex items-center gap-2 bg-yellow-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-yellow-700 disabled:opacity-50"
+                  className="flex items-center gap-2 bg-yellow-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-yellow-700"
                 >
                   {ingesting === "sync-mlb" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
                   Sync MLB
@@ -553,7 +726,7 @@ export default function Admin() {
                     }
                   }}
                   disabled={!!ingesting}
-                  className="flex items-center gap-2 bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-orange-700 disabled:opacity-50"
+                  className="flex items-center gap-2 bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-orange-700"
                 >
                   {ingesting === "sync-nhl" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
                   Sync NHL
@@ -574,7 +747,7 @@ export default function Admin() {
                     }
                   }}
                   disabled={!!ingesting}
-                  className="flex items-center gap-2 bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-purple-700 disabled:opacity-50"
+                  className="flex items-center gap-2 bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-purple-700"
                 >
                   {ingesting === "sync-soccer" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
                   Sync Soccer
@@ -587,10 +760,9 @@ export default function Admin() {
                     setIngesting("sync-all");
                     toast.info("Syncing ALL sports (this may take 2-3 minutes)...");
                     try {
-                      const results = await syncAllSportsDirect();
+                      await syncAllSportsDirect();
                       toast.success("All sports synced successfully!");
                       await refreshStats();
-                      loadLogs();
                     } catch (err: any) {
                       toast.error(`Sync failed: ${err.message}`);
                     } finally {
@@ -598,74 +770,12 @@ export default function Admin() {
                     }
                   }}
                   disabled={!!ingesting}
-                  className="flex items-center gap-2 bg-gradient-to-r from-red-600 to-purple-600 text-white px-6 py-2 rounded-lg text-sm font-semibold hover:from-red-700 hover:to-purple-700 disabled:opacity-50"
+                  className="flex items-center gap-2 bg-gradient-to-r from-red-600 to-purple-600 text-white px-6 py-2 rounded-lg text-sm font-semibold hover:from-red-700 hover:to-purple-700"
                 >
                   {ingesting === "sync-all" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
                   🔥 Sync ALL Sports
                 </button>
-
-                <button
-                  onClick={async () => {
-                    setIngesting("live-scores");
-                    toast.info("Updating live scores...");
-                    try {
-                      const sportsList = ["nba", "nfl", "mlb", "nhl", "soccer"];
-                      for (const s of sportsList) {
-                        const path = s === "soccer" ? "soccer/eng.1" : 
-                                   s === "nba" ? "basketball/nba" :
-                                   s === "nfl" ? "football/nfl" :
-                                   s === "mlb" ? "baseball/mlb" : "hockey/nhl";
-                        const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${path}/scoreboard`);
-                        const json = await res.json();
-                        const games = json.events?.map((g: any) => ({
-                          external_id: g.id,
-                          sport: s,
-                          status: g.status?.type?.name || "upcoming",
-                        })) || [];
-                        
-                        const liveGames = games.filter((g: any) => g.status === "live" || g.status === "STATUS_IN_PROGRESS");
-                        if (liveGames.length) {
-                          await fetch(EDGE_URL, {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ operation: "games", data: liveGames })
-                          });
-                        }
-                      }
-                      toast.success("Live scores updated!");
-                      await refreshStats();
-                    } catch (err: any) {
-                      toast.error(`Live scores update failed: ${err.message}`);
-                    } finally {
-                      setIngesting(null);
-                    }
-                  }}
-                  disabled={!!ingesting}
-                  className="flex items-center gap-2 bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-cyan-700 disabled:opacity-50"
-                >
-                  {ingesting === "live-scores" ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                  Update Live Scores
-                </button>
               </div>
-
-              <div className="mt-4 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-                <p className="text-xs text-blue-400">
-                  💡 Data is fetched directly from ESPN to your browser, then saved to Supabase. 
-                  This works 100% reliably without any module import issues.
-                </p>
-              </div>
-            </div>
-
-            <div className="bg-card border border-border rounded-xl p-4">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-display font-bold text-foreground">Daily Automation</h3>
-                <button onClick={handleRunDaily} disabled={!!ingesting}
-                  className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-semibold hover:bg-primary/90 disabled:opacity-50">
-                  {ingesting === "daily" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                  Run Full Daily Update
-                </button>
-              </div>
-              <p className="text-sm text-muted-foreground">Fetches teams, rosters, games, injuries, and generates props for all sports.</p>
             </div>
 
             <div className="bg-card border border-border rounded-xl p-4">
@@ -682,11 +792,6 @@ export default function Admin() {
                           {op}
                         </button>
                       ))}
-                      <button onClick={() => handleGenerateProps(sport)} disabled={!!ingesting}
-                        className="flex items-center gap-1 bg-primary/20 border border-primary/30 px-3 py-1.5 rounded text-xs font-medium text-primary hover:bg-primary/30 disabled:opacity-50">
-                        {ingesting === `props-${sport}` ? <Loader2 className="w-3 h-3 animate-spin" /> : <BarChart3 className="w-3 h-3" />}
-                        props
-                      </button>
                     </div>
                   </div>
                 ))}
@@ -740,6 +845,7 @@ export default function Admin() {
                 { label: "Total Teams in DB", value: stats.totalTeams },
                 { label: "Total Players in DB", value: stats.totalPlayers },
                 { label: "Total Games Tracked", value: stats.totalGames },
+                { label: "Total Props Generated", value: (stats as any).totalProps || 0 },
                 { label: "Parlays Created", value: stats.totalParlays },
                 { label: "Registered Users", value: stats.totalUsers },
                 { label: "Admins", value: stats.admins },
