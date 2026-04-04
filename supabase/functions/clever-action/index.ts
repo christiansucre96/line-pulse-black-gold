@@ -1,6 +1,6 @@
 // supabase/functions/clever-action/index.ts
-// Merged version – supports all operations:
-// full, teams, players, games, injuries, boxscores, stats, props, live, schedule, daily, make_admin, make_first_admin
+// Merged version – supports all operations.
+// Uses PROJECT_URL and SERVICE_ROLE_KEY (no SUPABASE_ prefix).
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
@@ -18,11 +18,16 @@ const NBA_HEADERS = {
   'x-nba-stats-token': 'true',
 }
 
+// ✅ Use the same environment variable names as the first file
 function getSupabase() {
-  return createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-  )
+  const url = Deno.env.get('PROJECT_URL')
+  const key = Deno.env.get('SERVICE_ROLE_KEY')
+
+  if (!url || !key) {
+    throw new Error("Missing PROJECT_URL or SERVICE_ROLE_KEY in secrets")
+  }
+
+  return createClient(url, key)
 }
 
 // ── SPORT CONFIG ──────────────────────────────────────────────
@@ -266,7 +271,7 @@ async function ingestGames(supabase: any, sport: string, dateStr?: string) {
   return games.length
 }
 
-// ── GENERIC STATS INGESTION (from second file, enhanced) ──────
+// ── GENERIC STATS INGESTION ───────────────────────────────────
 async function ingestStats(supabase: any, sport: string, date: string) {
   const path = ESPN_PATHS[sport]
   if (!path) return 0
@@ -276,7 +281,7 @@ async function ingestStats(supabase: any, sport: string, date: string) {
     .select('id, external_id')
     .eq('sport', sport)
     .eq('game_date', date)
-    .eq('status', 'finished') // only finished games have full box scores
+    .eq('status', 'finished')
 
   const { data: allPlayers } = await supabase
     .from('players')
@@ -524,7 +529,6 @@ async function updateLive(supabase: any, sport?: string) {
   for (const s of sports) {
     try {
       gamesUpdated += await ingestGames(supabase, s, date)
-      // Also fetch detailed stats for finished games (all sports)
       statsUpdated += await ingestStats(supabase, s, date)
     } catch (e) {
       console.error(`Live update error [${s}]:`, e)
@@ -550,7 +554,6 @@ Deno.serve(async (req) => {
     let result: any
 
     switch (operation) {
-      // ── teams + players + games + injuries for a sport ──────────────────
       case 'full': {
         const teams   = await ingestTeams(supabase, sport)
         const players = await ingestPlayers(supabase, sport)
@@ -577,7 +580,6 @@ Deno.serve(async (req) => {
         break
 
       case 'boxscores':
-        // Legacy alias – use 'stats' for the generic version
         result = { count: await ingestStats(supabase, sport, date || new Date().toISOString().split('T')[0]) }
         break
 
@@ -585,17 +587,14 @@ Deno.serve(async (req) => {
         result = { count: await ingestStats(supabase, sport, date || new Date().toISOString().split('T')[0]) }
         break
 
-      // ── props engine ─────────────────────────────────────────
       case 'props':
         result = await generateProps(supabase, sport, player_id)
         break
 
-      // ── live score + stats update ─────────────────────────────
       case 'live':
         result = await updateLive(supabase, sport)
         break
 
-      // ── schedule (all sports today) ───────────────────────────
       case 'schedule': {
         const sports = sport ? [sport] : ['nba','mlb','nhl','nfl','soccer']
         const date_  = date || new Date().toISOString().split('T')[0]
@@ -607,7 +606,6 @@ Deno.serve(async (req) => {
         break
       }
 
-      // ── daily full refresh (all sports) – now includes stats ──
       case 'daily': {
         const sports = ['nba','mlb','nhl','nfl','soccer']
         const date_  = new Date().toISOString().split('T')[0]
@@ -629,7 +627,6 @@ Deno.serve(async (req) => {
         break
       }
 
-      // ── admin: make first admin ───────────────────────────────
       case 'make_first_admin': {
         const { data: profiles } = await supabase
           .from('profiles').select('user_id').order('created_at').limit(1)
