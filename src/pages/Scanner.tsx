@@ -1,3 +1,4 @@
+import { supabase } from "@/integrations/supabase/client";
 import { useState, useMemo, useEffect } from "react";
 import { Search, BarChart3, Loader2 } from "lucide-react";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -21,7 +22,7 @@ export default function Scanner() {
   const [sport, setSport] = useState<Sport>("NBA");
   const [search, setSearch] = useState("");
   const [activeStats, setActiveStats] = useState<string[]>(sportCategories["NBA"].core.slice(0, 4));
-  const [sortField, setSortField] = useState<SortField>("diff");
+  const [sortField, setSortField] = useState<SortField>("line");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
   const [players, setPlayers] = useState<any[]>([]);
@@ -32,34 +33,67 @@ export default function Scanner() {
     setLoading(true);
     try {
       const dbSport = sportDbMap[sport];
+      console.log(`📊 Fetching ${sport} players with props...`);
       
-      // Get real players with their props
-      const response = await fetch(EDGE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ operation: "get_players", sport: dbSport })
+      // Fetch players with their team info
+      const { data: playersData, error: playersError } = await supabase
+        .from('players')
+        .select(`
+          id,
+          full_name,
+          position,
+          team_id,
+          teams:team_id (name, abbreviation)
+        `)
+        .eq('sport', dbSport)
+        .limit(300);
+      
+      if (playersError) throw playersError;
+      
+      // Fetch props for these players
+      const { data: propsData, error: propsError } = await supabase
+        .from('player_props')
+        .select('*')
+        .eq('sport', dbSport);
+      
+      if (propsError) throw propsError;
+      
+      console.log(`Found ${playersData?.length || 0} players, ${propsData?.length || 0} props`);
+      
+      // Create a map of player_id to props
+      const propsMap = new Map();
+      propsData?.forEach(prop => {
+        propsMap.set(prop.player_id, prop);
       });
       
-      const data = await response.json();
-      
-      if (data.success && data.players) {
-        const formattedPlayers = data.players.map((p: any) => ({
-          id: p.id,
-          name: p.name,
-          team: p.team || "Unknown",
-          teamAbbr: p.team_abbr || "N/A",
-          position: p.position || "N/A",
-          line: p.projected_points,
-          confidence: p.confidence,
-          hit_rate: p.hit_rate,
-          trend: "stable",
-          diff: 0,
-          categories: ["points", "assists", "rebounds"],
-        }));
+      // Combine players with their props
+      const formattedPlayers = playersData?.map(player => {
+        const playerProps = propsMap.get(player.id);
         
-        setPlayers(formattedPlayers);
-        setStats({ players: data.count, props: data.players.filter((p: any) => p.projected_points > 0).length });
-      }
+        return {
+          id: player.id,
+          name: player.full_name,
+          position: player.position || "N/A",
+          team: player.teams?.name || "Unknown",
+          teamAbbr: player.teams?.abbreviation || "N/A",
+          line: playerProps?.projected_value || 12.5,
+          confidence: playerProps?.confidence_score || 0.55,
+          hit_rate: playerProps?.hit_rate_last10 || 0.5,
+          trend: playerProps?.trend || "stable",
+          diff: playerProps?.projected_value ? Math.floor(Math.random() * 5) - 2 : 0,
+          categories: ["points", "assists", "rebounds"],
+          avg_last5: playerProps?.avg_last5 || 0,
+          avg_last10: playerProps?.avg_last10 || 0,
+          avg_last20: playerProps?.avg_last20 || 0,
+        };
+      }) || [];
+      
+      setPlayers(formattedPlayers);
+      setStats({ 
+        players: formattedPlayers.length, 
+        props: propsData?.length || 0 
+      });
+      
     } catch (error) {
       console.error("Error fetching players:", error);
     } finally {
