@@ -103,6 +103,11 @@ export const sportsApi = {
     return invoke({ sport, operation: "boxscores" });
   },
 
+  // ✅ FIX: Add this missing method for stats ingestion
+  async ingestStats(sport: string, date?: string) {
+    return invoke({ sport, operation: "stats", date });
+  },
+
   async generateProps(sport: string, player_id?: string) {
     return invoke({ sport, operation: "props", player_id });
   },
