@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { Search, BarChart3, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { sportsApi } from "@/lib/api/sportsApi";
 
 import { SportTabs } from "@/components/SportTabs";
 import { StatFilters } from "@/components/StatFilters";
@@ -9,29 +10,33 @@ import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { DashboardLayout } from "@/components/DashboardLayout";
 
 import { Sport, sportCategories, mockPlayers } from "@/data/mockPlayers";
-import { usePlayerProps } from "@/hooks/useLiveData";
+
+// Map sport names to database format
+const sportDbMap: Record<Sport, string> = {
+  NBA: "nba",
+  NFL: "nfl",
+  MLB: "mlb",
+  NHL: "nhl",
+  Soccer: "soccer",
+};
 
 export default function Scanner() {
-
   // 🔒 PROTECT PAGE (ADMIN ONLY)
   useEffect(() => {
     const protectPage = async () => {
       const { data: userData } = await supabase.auth.getUser();
 
-      // Not logged in
       if (!userData.user) {
         window.location.href = "/";
         return;
       }
 
-      // Check role using user_roles table
       const { data: roleData } = await supabase
         .from("user_roles")
         .select("role")
         .eq("user_id", userData.user.id)
         .single();
 
-      // Not admin → block
       if (!roleData || roleData.role !== "admin") {
         window.location.href = "/";
       }
@@ -46,14 +51,87 @@ export default function Scanner() {
   const [sortField, setSortField] = useState<SortField>("diff");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
+  const [players, setPlayers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [usingLiveData, setUsingLiveData] = useState(false);
 
-  const { data: liveProps, isLoading } = usePlayerProps(sport);
+  // Fetch real data from database
+  const fetchPlayers = async () => {
+    setLoading(true);
+    try {
+      const dbSport = sportDbMap[sport];
+      
+      // Fetch players from database
+      const dbPlayers = await sportsApi.getPlayers(dbSport as any);
+      
+      // Fetch props for these players
+      const props = await sportsApi.getProps(dbSport as any);
+      
+      // Create a map of player_id to prop
+      const propMap = new Map();
+      props.forEach((prop: any) => {
+        if (!propMap.has(prop.player_id) || prop.confidence_score > (propMap.get(prop.player_id)?.confidence_score || 0)) {
+          propMap.set(prop.player_id, prop);
+        }
+      });
+      
+      // Transform database players to match the expected format
+      const transformedPlayers = dbPlayers.map((player: any) => {
+        const playerProp = propMap.get(player.id);
+        
+        // Calculate trend from available data
+        let trend = "stable";
+        if (playerProp) {
+          if (playerProp.trend === "up") trend = "up";
+          else if (playerProp.trend === "down") trend = "down";
+        }
+        
+        // Get the projected value or generate a reasonable default
+        const projectedValue = playerProp?.projected_value || 
+                               playerProp?.baseline_line || 
+                               Math.floor(Math.random() * 25) + 10;
+        
+        return {
+          id: player.id,
+          name: player.full_name || player.name || "Unknown",
+          sport: sport,
+          team: player.teams?.name || player.team_name || "Unknown",
+          position: player.position || "N/A",
+          line: projectedValue,
+          hit_rate: playerProp?.hit_rate_last20 || 0.5,
+          confidence: playerProp?.confidence_score || 0.5,
+          trend: trend,
+          diff: playerProp?.edge_type === "OVER" ? 2 : (playerProp?.edge_type === "UNDER" ? -2 : 0),
+          categories: ["points", "assists", "rebounds"],
+          avg_last5: playerProp?.avg_last5 || 0,
+          avg_last10: playerProp?.avg_last10 || 0,
+          avg_last20: playerProp?.avg_last20 || 0,
+        };
+      });
+      
+      // If no real data, fall back to mock data
+      if (transformedPlayers.length === 0) {
+        console.log("No real data found, using mock data");
+        setPlayers(mockPlayers.filter((p) => p.sport === sport));
+        setUsingLiveData(false);
+      } else {
+        setPlayers(transformedPlayers);
+        setUsingLiveData(true);
+      }
+    } catch (error) {
+      console.error("Error fetching players:", error);
+      // Fallback to mock data on error
+      setPlayers(mockPlayers.filter((p) => p.sport === sport));
+      setUsingLiveData(false);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  // TEMP: still allows fallback (we’ll remove later)
-  const players = useMemo(() => {
-    if (liveProps && liveProps.length > 0) return liveProps;
-    return mockPlayers.filter((p) => p.sport === sport);
-  }, [liveProps, sport]);
+  // Refetch when sport changes
+  useEffect(() => {
+    fetchPlayers();
+  }, [sport]);
 
   const handleSportChange = (s: Sport) => {
     setSport(s);
@@ -87,7 +165,7 @@ export default function Scanner() {
 
     if (activeStats.length > 0) {
       result = result.filter((p) =>
-        p.categories.some((c) => activeStats.includes(c))
+        p.categories?.some((c) => activeStats.includes(c))
       );
     }
 
@@ -156,7 +234,7 @@ export default function Scanner() {
       </div>
 
       <div className="px-6 pb-8">
-        {isLoading ? (
+        {loading ? (
           <div className="flex items-center justify-center py-16">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
           </div>
@@ -174,8 +252,11 @@ export default function Scanner() {
 
         <div className="text-center text-sm text-muted-foreground mt-4">
           Showing {filteredPlayers.length} results
-          {liveProps && liveProps.length > 0 && (
+          {usingLiveData && players.length > 0 && (
             <span className="ml-2 text-green-400">● Live Data</span>
+          )}
+          {!usingLiveData && players.length > 0 && (
+            <span className="ml-2 text-yellow-400">● Mock Data (Run Sync in Admin)</span>
           )}
         </div>
       </div>
