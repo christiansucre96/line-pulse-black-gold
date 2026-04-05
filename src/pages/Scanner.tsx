@@ -66,7 +66,9 @@ export default function Scanner() {
         }));
         
         console.log(`✅ Loaded ${formattedPlayers.length} players`);
-        console.log("Sample player:", formattedPlayers[0]);
+        if (formattedPlayers[0]) {
+          console.log("Sample player:", formattedPlayers[0].name, "Avg L10:", formattedPlayers[0].avgL10);
+        }
         
         setPlayers(formattedPlayers);
         setDbStats({
