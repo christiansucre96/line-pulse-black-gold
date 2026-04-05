@@ -60,11 +60,11 @@ export function PlayerTable({ players, sortField, sortDir, onSort, onPlayerClick
               <td className="py-3 px-3">
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 rounded-full bg-primary/20 border border-primary/30 flex items-center justify-center text-xs font-bold text-primary">
-                    {player.initials}
+                    {player.initials || player.name?.substring(0,2).toUpperCase()}
                   </div>
                   <div>
                     <div className="font-semibold text-foreground">{player.name} <span className="text-muted-foreground font-normal">({player.position})</span></div>
-                    <div className="text-xs text-muted-foreground">{player.team} vs {player.opponent}</div>
+                    <div className="text-xs text-muted-foreground">{player.team} vs {player.opponent || "TBD"}</div>
                     <div className="text-xs text-primary">{player.categories?.join(" · ") || "points · assists · rebounds"}</div>
                   </div>
                 </div>
@@ -110,7 +110,7 @@ export function PlayerTable({ players, sortField, sortDir, onSort, onPlayerClick
                   {player.trend === "up" ? "↑" : player.trend === "down" ? "↓" : "→"}
                 </span>
               </td>
-            </table>
+            </tr>
           ))}
         </tbody>
       </table>
