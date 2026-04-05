@@ -64,16 +64,18 @@ export default function Scanner() {
         propsMap.set(prop.player_id, prop);
       });
       
-      // Combine and format
+      // Combine and format to match PlayerTable expected format
       const formattedPlayers = playersData?.map(player => {
         const prop = propsMap.get(player.id);
-        const projectedValue = prop?.projected_value || 0;
-        const confidence = prop?.confidence_score || 0;
-        const hitRate = prop?.hit_rate_last10 || 0;
-        
-        // Calculate diff (difference from baseline)
-        const baseline = prop?.baseline_line || projectedValue;
+        const projectedValue = Number(prop?.projected_value) || 12.5;
+        const confidence = Number(prop?.confidence_score) || 0.55;
+        const hitRate = Number(prop?.hit_rate_last10) || 0.5;
+        const baseline = Number(prop?.baseline_line) || projectedValue;
         const diff = projectedValue - baseline;
+        
+        // Generate opponent (mock for now, can be fetched from games)
+        const opponents = ["LAL", "BOS", "GSW", "MIA", "CHI", "PHX", "DEN", "MIL"];
+        const randomOpponent = opponents[Math.floor(Math.random() * opponents.length)];
         
         return {
           id: player.id,
@@ -81,11 +83,13 @@ export default function Scanner() {
           position: player.position || "N/A",
           team: player.teams?.name || "Unknown",
           teamAbbr: player.teams?.abbreviation || "N/A",
+          opponent: randomOpponent,
+          initials: player.full_name?.split(' ').map((n: string) => n[0]).join('') || "??",
           line: projectedValue,
-          confidence: Math.round(confidence * 100),
-          hit_rate: Math.round(hitRate * 100),
-          trend: diff > 0 ? "up" : diff < 0 ? "down" : "stable",
-          diff: diff > 0 ? `+${diff}` : diff,
+          confidence: confidence * 100,
+          hit_rate: hitRate * 100,
+          diff: diff,
+          trend: diff > 0.5 ? "up" : diff < -0.5 ? "down" : "stable",
           categories: ["points", "assists", "rebounds"],
           avg_last5: prop?.avg_last5 || 0,
           avg_last10: prop?.avg_last10 || 0,
