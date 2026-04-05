@@ -66,33 +66,33 @@ export function PlayerTable({ players, sortField, sortDir, onSort, onPlayerClick
                     <div className="text-xs text-primary">{player.categories?.join(" · ") || "points · assists · rebounds"}</div>
                   </div>
                 </div>
-              </td>
+               </td>
               <td className="text-center py-3 px-2">
                 <span className="px-3 py-1 rounded text-xs font-semibold bg-primary/20 text-primary">
                   {typeof player.line === 'number' ? player.line.toFixed(1) : player.line || 0}
                 </span>
-              </td>
+               </td>
               <td className="text-center py-3 px-2">
                 <span className={`px-2 py-1 rounded text-xs font-semibold ${(player.confidence || 0) >= 70 ? "bg-green-500/20 text-green-400" : (player.confidence || 0) >= 50 ? "bg-yellow-500/20 text-yellow-400" : "bg-red-500/20 text-red-400"}`}>
                   {Math.round(player.confidence || 0)}%
                 </span>
-              </td>
+               </td>
               <td className="text-center py-3 px-2">
                 <span className={`px-2 py-1 rounded text-xs font-semibold ${(player.hit_rate || 0) >= 70 ? "bg-green-500/20 text-green-400" : (player.hit_rate || 0) >= 50 ? "bg-yellow-500/20 text-yellow-400" : "bg-red-500/20 text-red-400"}`}>
                   {Math.round(player.hit_rate || 0)}%
                 </span>
-              </td>
+               </td>
               <td className="text-center py-3 px-2">
                 <span className={`font-semibold ${(player.diff || 0) > 0 ? "text-green-400" : (player.diff || 0) < 0 ? "text-red-400" : "text-muted-foreground"}`}>
                   {(player.diff || 0) > 0 ? `+${(player.diff || 0).toFixed(1)}` : (player.diff || 0).toFixed(1)}
                 </span>
-              </td>
+               </td>
               <td className="text-center py-3 px-2">
                 <span className={`font-bold font-display text-lg ${player.trend === "up" ? "text-green-400" : player.trend === "down" ? "text-red-400" : "text-muted-foreground"}`}>
                   {player.trend === "up" ? "↑" : player.trend === "down" ? "↓" : "→"}
                 </span>
-              </td>
-            </tr>
+               </td>
+             </tr>
           ))}
         </tbody>
       </table>
