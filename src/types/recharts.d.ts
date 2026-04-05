@@ -7,6 +7,4 @@ declare module 'recharts' {
   export const ResponsiveContainer: any;
   export const ReferenceLine: any;
   export const Cell: any;
-  export const Legend: any;
-  export type LegendProps = any;
 }
