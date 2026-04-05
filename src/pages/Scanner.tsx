@@ -43,6 +43,7 @@ export default function Scanner() {
       const data = await response.json();
       
       if (data.success && data.players) {
+        // IMPORTANT: Use the data DIRECTLY from the API - don't override line/confidence/hit_rate
         const formattedPlayers = data.players.map((p: any) => ({
           id: p.id,
           name: p.name,
@@ -51,10 +52,10 @@ export default function Scanner() {
           teamAbbr: p.team_abbr || "N/A",
           opponent: p.opponent || "TBD",
           initials: p.name?.split(' ').map((n: string) => n[0]).join('') || "??",
-          line: p.line,
-          confidence: p.confidence,
-          hit_rate: p.hit_rate,
-          diff: p.diff,
+          line: p.line,                    // USE API VALUE (11, 21, 13, etc.)
+          confidence: p.confidence,         // USE API VALUE (68, 63, 55, etc.)
+          hit_rate: p.hit_rate,             // USE API VALUE (58, 53, 45, etc.)
+          diff: p.diff,                     // USE API VALUE (2.5)
           trend: p.trend || "stable",
           categories: sport === "NBA" ? ["points", "assists", "rebounds"] :
                       sport === "NFL" ? ["passing", "rushing", "receiving"] :
@@ -62,6 +63,7 @@ export default function Scanner() {
                       sport === "NHL" ? ["goals", "assists", "shots"] : ["goals", "assists", "shots"],
         }));
         
+        console.log("First 3 formatted players:", formattedPlayers.slice(0, 3));
         setPlayers(formattedPlayers);
         setDbStats({
           players: data.count,
