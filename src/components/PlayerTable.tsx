@@ -1,6 +1,6 @@
 import { ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 
-export type SortField = "line" | "confidence" | "hit_rate" | "diff" | "name";
+export type SortField = "avgL10" | "l5" | "l10" | "l15" | "l20" | "trend";
 export type SortDir = "asc" | "desc";
 
 interface PlayerTableProps {
@@ -17,6 +17,12 @@ export function PlayerTable({ players, sortField, sortDir, onSort, onPlayerClick
     return sortDir === "desc" ? <ArrowDown className="w-3.5 h-3.5 text-primary" /> : <ArrowUp className="w-3.5 h-3.5 text-primary" />;
   };
 
+  const getHitRateClass = (rate: number) => {
+    if (rate >= 70) return "bg-green-500/20 text-green-400";
+    if (rate >= 50) return "bg-yellow-500/20 text-yellow-400";
+    return "bg-red-500/20 text-red-400";
+  };
+
   if (!players || players.length === 0) {
     return (
       <div className="text-center py-12 text-muted-foreground">
@@ -30,22 +36,25 @@ export function PlayerTable({ players, sortField, sortDir, onSort, onPlayerClick
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-border text-muted-foreground">
-            <th className="text-left py-3 px-3 font-semibold cursor-pointer" onClick={() => onSort("name")}>
-              <span className="inline-flex items-center gap-1">Player <SortIcon field="name" /></span>
+            <th className="text-left py-3 px-3 font-semibold">Player</th>
+            <th className="text-center py-3 px-2 font-semibold cursor-pointer" onClick={() => onSort("avgL10")}>
+              <span className="inline-flex items-center gap-1">Avg L10 <SortIcon field="avgL10" /></span>
             </th>
-            <th className="text-center py-3 px-2 font-semibold cursor-pointer" onClick={() => onSort("line")}>
-              <span className="inline-flex items-center gap-1">Line <SortIcon field="line" /></span>
+            <th className="text-center py-3 px-2 font-semibold cursor-pointer" onClick={() => onSort("l5")}>
+              <span className="inline-flex items-center gap-1">L5 <SortIcon field="l5" /></span>
             </th>
-            <th className="text-center py-3 px-2 font-semibold cursor-pointer" onClick={() => onSort("confidence")}>
-              <span className="inline-flex items-center gap-1">Conf <SortIcon field="confidence" /></span>
+            <th className="text-center py-3 px-2 font-semibold cursor-pointer" onClick={() => onSort("l10")}>
+              <span className="inline-flex items-center gap-1">L10 <SortIcon field="l10" /></span>
             </th>
-            <th className="text-center py-3 px-2 font-semibold cursor-pointer" onClick={() => onSort("hit_rate")}>
-              <span className="inline-flex items-center gap-1">Hit Rate <SortIcon field="hit_rate" /></span>
+            <th className="text-center py-3 px-2 font-semibold cursor-pointer" onClick={() => onSort("l15")}>
+              <span className="inline-flex items-center gap-1">L15 <SortIcon field="l15" /></span>
             </th>
-            <th className="text-center py-3 px-2 font-semibold cursor-pointer" onClick={() => onSort("diff")}>
-              <span className="inline-flex items-center gap-1">Diff <SortIcon field="diff" /></span>
+            <th className="text-center py-3 px-2 font-semibold cursor-pointer" onClick={() => onSort("l20")}>
+              <span className="inline-flex items-center gap-1">L20 <SortIcon field="l20" /></span>
             </th>
-            <th className="text-center py-3 px-2 font-semibold">Trend</th>
+            <th className="text-center py-3 px-2 font-semibold cursor-pointer" onClick={() => onSort("trend")}>
+              <span className="inline-flex items-center gap-1">Trend <SortIcon field="trend" /></span>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -66,36 +75,41 @@ export function PlayerTable({ players, sortField, sortDir, onSort, onPlayerClick
                     <div className="text-xs text-primary">{player.categories?.join(" · ") || "points · assists · rebounds"}</div>
                   </div>
                 </div>
-               </td>
+              </td>
               <td className="text-center py-3 px-2">
                 <span className="px-3 py-1 rounded text-xs font-semibold bg-primary/20 text-primary">
-                  {typeof player.line === 'number' ? player.line.toFixed(1) : player.line || 0}
+                  {typeof player.avgL10 === 'number' ? player.avgL10.toFixed(1) : player.avgL10 || 0}
                 </span>
-               </td>
+              </td>
               <td className="text-center py-3 px-2">
-                <span className={`px-2 py-1 rounded text-xs font-semibold ${(player.confidence || 0) >= 70 ? "bg-green-500/20 text-green-400" : (player.confidence || 0) >= 50 ? "bg-yellow-500/20 text-yellow-400" : "bg-red-500/20 text-red-400"}`}>
-                  {Math.round(player.confidence || 0)}%
+                <span className={`px-2 py-1 rounded text-xs font-semibold ${getHitRateClass(player.l5)}`}>
+                  {player.l5 || 0}%
                 </span>
-               </td>
+              </td>
               <td className="text-center py-3 px-2">
-                <span className={`px-2 py-1 rounded text-xs font-semibold ${(player.hit_rate || 0) >= 70 ? "bg-green-500/20 text-green-400" : (player.hit_rate || 0) >= 50 ? "bg-yellow-500/20 text-yellow-400" : "bg-red-500/20 text-red-400"}`}>
-                  {Math.round(player.hit_rate || 0)}%
+                <span className={`px-2 py-1 rounded text-xs font-semibold ${getHitRateClass(player.l10)}`}>
+                  {player.l10 || 0}%
                 </span>
-               </td>
+              </td>
               <td className="text-center py-3 px-2">
-                <span className={`font-semibold ${(player.diff || 0) > 0 ? "text-green-400" : (player.diff || 0) < 0 ? "text-red-400" : "text-muted-foreground"}`}>
-                  {(player.diff || 0) > 0 ? `+${(player.diff || 0).toFixed(1)}` : (player.diff || 0).toFixed(1)}
+                <span className={`px-2 py-1 rounded text-xs font-semibold ${getHitRateClass(player.l15)}`}>
+                  {player.l15 || 0}%
                 </span>
-               </td>
+              </td>
+              <td className="text-center py-3 px-2">
+                <span className={`px-2 py-1 rounded text-xs font-semibold ${getHitRateClass(player.l20)}`}>
+                  {player.l20 || 0}%
+                </span>
+              </td>
               <td className="text-center py-3 px-2">
                 <span className={`font-bold font-display text-lg ${player.trend === "up" ? "text-green-400" : player.trend === "down" ? "text-red-400" : "text-muted-foreground"}`}>
                   {player.trend === "up" ? "↑" : player.trend === "down" ? "↓" : "→"}
                 </span>
-               </td>
-             </tr>
+              </td>
+            </tr>
           ))}
         </tbody>
-      </table>
+      <table>
     </div>
   );
 }
