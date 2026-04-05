@@ -1,8 +1,7 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Search, BarChart3, Loader2 } from "lucide-react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { SportTabs } from "@/components/SportTabs";
-import { StatFilters } from "@/components/StatFilters";
 import { PlayerTable, SortField, SortDir } from "@/components/PlayerTable";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { Sport, sportCategories } from "@/data/mockPlayers";
@@ -21,7 +20,7 @@ export default function Scanner() {
   const [sport, setSport] = useState<Sport>("NBA");
   const [search, setSearch] = useState("");
   const [activeStats, setActiveStats] = useState<string[]>(sportCategories["NBA"].core.slice(0, 4));
-  const [sortField, setSortField] = useState<SortField>("avgL10");
+  const [sortField, setSortField] = useState<SortField>("confidence");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
   const [players, setPlayers] = useState<any[]>([]);
@@ -32,19 +31,15 @@ export default function Scanner() {
     setLoading(true);
     try {
       const dbSport = sportDbMap[sport];
-      console.log(`📊 Fetching ${sport} (${dbSport}) data...`);
-      
       const response = await fetch(EDGE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ operation: "get_players", sport: dbSport })
       });
-      
       const data = await response.json();
       
       if (data.success && data.players) {
-        // IMPORTANT: Use the EXACT field names from the API
-        const formattedPlayers = data.players.map((p: any) => ({
+        const formatted = data.players.map((p: any) => ({
           id: p.id,
           name: p.name,
           position: p.position || "N/A",
@@ -52,21 +47,14 @@ export default function Scanner() {
           teamAbbr: p.team_abbr || "N/A",
           opponent: p.opponent || "TBD",
           initials: p.name?.split(' ').map((n: string) => n[0]).join('') || "??",
-          // These field names MUST match what PlayerTable expects
-          avgL10: p.avg_last10 || 15.5,
-          l5: p.hit_rate_last5 || 55,
-          l10: p.hit_rate_last10 || 55,
-          l15: p.hit_rate_last15 || 55,
-          l20: p.hit_rate_last20 || 55,
+          line: p.line,
+          edge_type: p.edge_type,
+          confidence: p.confidence,
+          hit_rate: p.hit_rate,
           trend: p.trend || "stable",
-          categories: sport === "NBA" ? ["points", "assists", "rebounds"] :
-                      sport === "NFL" ? ["passing", "rushing", "receiving"] :
-                      sport === "MLB" ? ["hits", "runs", "rbi"] :
-                      sport === "NHL" ? ["goals", "assists", "shots"] : ["goals", "assists", "shots"],
+          categories: ["points", "assists", "rebounds"],
         }));
-        
-        console.log("First 3 formatted players:", formattedPlayers.slice(0, 3));
-        setPlayers(formattedPlayers);
+        setPlayers(formatted);
         setDbStats({ players: data.count });
       }
     } catch (error) {
@@ -101,18 +89,16 @@ export default function Scanner() {
     }
   };
 
-  const filteredPlayers = useMemo(() => {
-    let result = [...players];
-    if (search) {
-      result = result.filter(p => p.name?.toLowerCase().includes(search.toLowerCase()));
-    }
-    result.sort((a, b) => {
-      const aVal = a[sortField as keyof typeof a] as number;
-      const bVal = b[sortField as keyof typeof b] as number;
-      return sortDir === "desc" ? (bVal || 0) - (aVal || 0) : (aVal || 0) - (bVal || 0);
+  const filteredPlayers = players
+    .filter(p => !search || p.name.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => {
+      const aVal = a[sortField];
+      const bVal = b[sortField];
+      if (typeof aVal === 'number' && typeof bVal === 'number') {
+        return sortDir === "desc" ? bVal - aVal : aVal - bVal;
+      }
+      return 0;
     });
-    return result;
-  }, [players, search, sortField, sortDir]);
 
   if (selectedPlayer) {
     return (
