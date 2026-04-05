@@ -21,12 +21,12 @@ export default function Scanner() {
   const [sport, setSport] = useState<Sport>("NBA");
   const [search, setSearch] = useState("");
   const [activeStats, setActiveStats] = useState<string[]>(sportCategories["NBA"].core.slice(0, 4));
-  const [sortField, setSortField] = useState<SortField>("line");
+  const [sortField, setSortField] = useState<SortField>("avgL10");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
   const [players, setPlayers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [dbStats, setDbStats] = useState({ players: 0, props: 0 });
+  const [dbStats, setDbStats] = useState({ players: 0 });
 
   const fetchData = async () => {
     setLoading(true);
@@ -43,7 +43,7 @@ export default function Scanner() {
       const data = await response.json();
       
       if (data.success && data.players) {
-        // Map the data directly - KEEP the original values from API
+        // Map data to show historical performance metrics (L5, L10, L15, L20)
         const formattedPlayers = data.players.map((p: any) => ({
           id: p.id,
           name: p.name,
@@ -52,10 +52,12 @@ export default function Scanner() {
           teamAbbr: p.team_abbr || "N/A",
           opponent: p.opponent || "TBD",
           initials: p.name?.split(' ').map((n: string) => n[0]).join('') || "??",
-          line: p.line,                    // IMPORTANT: Keep the API value
-          confidence: p.confidence,         // IMPORTANT: Keep the API value
-          hit_rate: p.hit_rate,             // IMPORTANT: Keep the API value
-          diff: p.diff,                     // IMPORTANT: Keep the API value
+          // Historical performance metrics (no sportsbook lines)
+          avgL10: p.avg_last10 || 15.5,
+          l5: p.hit_rate_last5 || 55,
+          l10: p.hit_rate_last10 || 55,
+          l15: p.hit_rate_last15 || 55,
+          l20: p.hit_rate_last20 || 55,
           trend: p.trend || "stable",
           categories: sport === "NBA" ? ["points", "assists", "rebounds"] :
                       sport === "NFL" ? ["passing", "rushing", "receiving"] :
@@ -63,15 +65,12 @@ export default function Scanner() {
                       sport === "NHL" ? ["goals", "assists", "shots"] : ["goals", "assists", "shots"],
         }));
         
-        // Debug log
         console.log(`✅ Loaded ${formattedPlayers.length} players`);
         console.log("Sample player:", formattedPlayers[0]);
-        console.log("Sample lines:", formattedPlayers.slice(0, 5).map(p => `${p.name}: ${p.line} pts`));
         
         setPlayers(formattedPlayers);
         setDbStats({
           players: data.count,
-          props: data.players.filter((p: any) => p.line > 0).length
         });
       }
     } catch (error) {
@@ -170,7 +169,7 @@ export default function Scanner() {
           <>
             <div className="mb-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
               <p className="text-xs text-green-400">
-                ✅ LIVE 24/7: {dbStats.players} {sport} players • {dbStats.props} active props • Auto-refreshes every 30 seconds
+                ✅ LIVE 24/7: {dbStats.players} {sport} players • Auto-refreshes every 30 seconds
               </p>
             </div>
             <div className="bg-card border border-border rounded-xl overflow-hidden">
