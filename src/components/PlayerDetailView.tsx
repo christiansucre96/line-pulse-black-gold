@@ -7,6 +7,39 @@ interface PlayerDetailViewProps {
   onBack: () => void;
 }
 
+interface Player {
+  id: string;
+  full_name: string;
+  position: string;
+  sport: string;
+  team_id: string;
+  teams?: { name: string; abbreviation: string };
+  opponent?: string;
+  teamName?: string;
+  teamAbbr?: string;
+  initials?: string;
+}
+
+interface Prop {
+  id: string;
+  player_id: string;
+  stat_type: string;
+  projected_value: number;
+  confidence_score: number;
+  is_combo?: boolean;
+}
+
+interface GameStat {
+  id: string;
+  player_id: string;
+  points: number;
+  rebounds: number;
+  assists: number;
+  steals: number;
+  blocks: number;
+  game_date: string;
+}
+
 const STAT_TYPES = [
   { key: "points", label: "Points" },
   { key: "rebounds", label: "Rebounds" },
@@ -16,17 +49,17 @@ const STAT_TYPES = [
 ];
 
 const COMBO_TYPES = [
-  { key: "pts_reb", label: "Pts+Reb", formula: (s: any) => (s.points || 0) + (s.rebounds || 0) },
-  { key: "pts_ast", label: "Pts+Ast", formula: (s: any) => (s.points || 0) + (s.assists || 0) },
-  { key: "reb_ast", label: "Reb+Ast", formula: (s: any) => (s.rebounds || 0) + (s.assists || 0) },
-  { key: "pts_reb_ast", label: "Pts+Reb+Ast", formula: (s: any) => (s.points || 0) + (s.rebounds || 0) + (s.assists || 0) },
+  { key: "pts_reb", label: "Pts+Reb", formula: (s: GameStat) => (s.points || 0) + (s.rebounds || 0) },
+  { key: "pts_ast", label: "Pts+Ast", formula: (s: GameStat) => (s.points || 0) + (s.assists || 0) },
+  { key: "reb_ast", label: "Reb+Ast", formula: (s: GameStat) => (s.rebounds || 0) + (s.assists || 0) },
+  { key: "pts_reb_ast", label: "Pts+Reb+Ast", formula: (s: GameStat) => (s.points || 0) + (s.rebounds || 0) + (s.assists || 0) },
 ];
 
 export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
-  const [player, setPlayer] = useState<any>(null);
-  const [props, setProps] = useState<any[]>([]);
-  const [comboProps, setComboProps] = useState<any[]>([]);
-  const [stats, setStats] = useState<any[]>([]);
+  const [player, setPlayer] = useState<Player | null>(null);
+  const [props, setProps] = useState<Prop[]>([]);
+  const [comboProps, setComboProps] = useState<Prop[]>([]);
+  const [stats, setStats] = useState<GameStat[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedStat, setSelectedStat] = useState("points");
   const [selectedCombo, setSelectedCombo] = useState<string | null>(null);
@@ -63,8 +96,8 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
       
       if (propsError) throw propsError;
       
-      const standardProps = propsData?.filter((p: any) => !p.is_combo) || [];
-      const comboPropsData = propsData?.filter((p: any) => p.is_combo) || [];
+      const standardProps = propsData?.filter((p: Prop) => !p.is_combo) || [];
+      const comboPropsData = propsData?.filter((p: Prop) => p.is_combo) || [];
       
       const { data: statsData, error: statsError } = await supabase
         .from('player_game_stats')
@@ -91,7 +124,7 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
         }
       }
       
-      const pointsProp = standardProps.find((p: any) => p.stat_type === 'points');
+      const pointsProp = standardProps.find((p: Prop) => p.stat_type === 'points');
       if (pointsProp) {
         setLine(pointsProp.projected_value || 15.5);
       }
@@ -114,14 +147,16 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
     }
   };
 
-  const getStatValue = (stat: any, type: string): number => {
+  const getStatValue = (stat: GameStat, type: string): number => {
     if (type === 'points') return stat.points || 0;
     if (type === 'rebounds') return stat.rebounds || 0;
     if (type === 'assists') return stat.assists || 0;
+    if (type === 'steals') return stat.steals || 0;
+    if (type === 'blocks') return stat.blocks || 0;
     return 0;
   };
 
-  const getComboValue = (stat: any, comboKey: string): number => {
+  const getComboValue = (stat: GameStat, comboKey: string): number => {
     const combo = COMBO_TYPES.find(c => c.key === comboKey);
     return combo ? combo.formula(stat) : 0;
   };
