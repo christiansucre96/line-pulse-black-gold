@@ -1,12 +1,13 @@
 import { useState, useMemo, useEffect } from "react";
 import { Search, BarChart3, Loader2 } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { SportTabs } from "@/components/SportTabs";
 import { StatFilters } from "@/components/StatFilters";
 import { PlayerTable, SortField, SortDir } from "@/components/PlayerTable";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { Sport, sportCategories } from "@/data/mockPlayers";
+
+const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
 const sportDbMap: Record<Sport, string> = {
   NBA: "nba",
@@ -33,84 +34,47 @@ export default function Scanner() {
       const dbSport = sportDbMap[sport];
       console.log(`📊 Fetching ${sport} (${dbSport}) data...`);
       
-      // Fetch players with their team info
-      const { data: playersData, error: playersError } = await supabase
-        .from('players')
-        .select(`
-          id,
-          full_name,
-          position,
-          team_id,
-          teams:team_id (name, abbreviation)
-        `)
-        .eq('sport', dbSport)
-        .limit(300);
-      
-      if (playersError) throw playersError;
-      
-      // Fetch props for this specific sport
-      const { data: propsData, error: propsError } = await supabase
-        .from('player_props')
-        .select('*')
-        .eq('sport', dbSport);
-      
-      if (propsError) throw propsError;
-      
-      console.log(`${sport}: ${playersData?.length || 0} players, ${propsData?.length || 0} props`);
-      
-      // Create prop map
-      const propsMap = new Map();
-      propsData?.forEach(prop => {
-        propsMap.set(prop.player_id, prop);
+      const response = await fetch(EDGE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operation: "get_players", sport: dbSport })
       });
       
-      // Combine and format to match PlayerTable expected format
-      const formattedPlayers = playersData?.map(player => {
-        const prop = propsMap.get(player.id);
-        const projectedValue = Number(prop?.projected_value) || 12.5;
-        const confidence = Number(prop?.confidence_score) || 0.55;
-        const hitRate = Number(prop?.hit_rate_last10) || 0.5;
-        const baseline = Number(prop?.baseline_line) || projectedValue;
-        const diff = projectedValue - baseline;
-        
-        // Generate opponent (mock for now, can be fetched from games)
-        const opponents = ["LAL", "BOS", "GSW", "MIA", "CHI", "PHX", "DEN", "MIL"];
-        const randomOpponent = opponents[Math.floor(Math.random() * opponents.length)];
-        
-        return {
-          id: player.id,
-          name: player.full_name,
-          position: player.position || "N/A",
-          team: player.teams?.name || "Unknown",
-          teamAbbr: player.teams?.abbreviation || "N/A",
-          opponent: randomOpponent,
-          initials: player.full_name?.split(' ').map((n: string) => n[0]).join('') || "??",
-          line: projectedValue,
-          confidence: confidence * 100,
-          hit_rate: hitRate * 100,
-          diff: diff,
-          trend: diff > 0.5 ? "up" : diff < -0.5 ? "down" : "stable",
-          categories: ["points", "assists", "rebounds"],
-          avg_last5: prop?.avg_last5 || 0,
-          avg_last10: prop?.avg_last10 || 0,
-          avg_last20: prop?.avg_last20 || 0,
-        };
-      }) || [];
+      const data = await response.json();
       
-      setPlayers(formattedPlayers);
-      setDbStats({
-        players: playersData?.length || 0,
-        props: propsData?.length || 0
-      });
-      
+      if (data.success && data.players) {
+        const formattedPlayers = data.players.map((p: any) => ({
+          id: p.id,
+          name: p.name,
+          position: p.position || "N/A",
+          team: p.team || "Unknown",
+          teamAbbr: p.team_abbr || "N/A",
+          opponent: p.opponent || "TBD",
+          initials: p.name?.split(' ').map((n: string) => n[0]).join('') || "??",
+          line: p.line,
+          confidence: p.confidence,
+          hit_rate: p.hit_rate,
+          diff: p.diff,
+          trend: p.trend || "stable",
+          categories: sport === "NBA" ? ["points", "assists", "rebounds"] :
+                      sport === "NFL" ? ["passing", "rushing", "receiving"] :
+                      sport === "MLB" ? ["hits", "runs", "rbi"] :
+                      sport === "NHL" ? ["goals", "assists", "shots"] : ["goals", "assists", "shots"],
+        }));
+        
+        setPlayers(formattedPlayers);
+        setDbStats({
+          players: data.count,
+          props: data.players.filter((p: any) => p.line > 0).length
+        });
+      }
     } catch (error) {
-      console.error("Error:", error);
+      console.error("Error fetching players:", error);
     } finally {
       setLoading(false);
     }
   };
 
-  // Refresh every 30 seconds
   useEffect(() => {
     fetchData();
     const interval = setInterval(fetchData, 30000);
