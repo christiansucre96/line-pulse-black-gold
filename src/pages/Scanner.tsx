@@ -3,7 +3,6 @@ import { useState, useEffect } from "react";
 import { Search, BarChart3, Loader2 } from "lucide-react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { SportTabs } from "@/components/SportTabs";
-import { StatFilters } from "@/components/StatFilters";          // ✅ added missing import
 import { PlayerTable, SortField, SortDir } from "@/components/PlayerTable";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { Sport, sportCategories } from "@/data/mockPlayers";
@@ -42,17 +41,19 @@ export default function Scanner() {
       
       if (data.success && data.players) {
         const formatted = data.players.map((p: any) => ({
+          // p.id is composite like "uuid_points" – we keep it for table key, but extract real UUID for detail view later
           id: p.id,
+          player_id: p.player_id || p.id.split('_')[0], // store real UUID
           name: p.name,
           position: p.position || "N/A",
           team: p.team || "Unknown",
           teamAbbr: p.team_abbr || "N/A",
           opponent: p.opponent || "TBD",
           initials: p.name?.split(' ').map((n: string) => n[0]).join('') || "??",
-          line: p.line,
-          edge_type: p.edge_type,
-          confidence: p.confidence,
-          hit_rate: p.hit_rate,
+          line: p.line ?? 0,
+          edge_type: p.edge_type || "NONE",
+          confidence: p.confidence ?? 50,
+          hit_rate: p.hit_rate ?? 0,
           trend: p.trend || "stable",
           categories: ["points", "assists", "rebounds"],
         }));
@@ -102,6 +103,13 @@ export default function Scanner() {
       return 0;
     });
 
+  // Handle player click – extract real UUID from composite ID
+  const handlePlayerClick = (compositeId: string) => {
+    // compositeId looks like "8383339d-474e-4ddf-9ed5-3c068e39c0e7_points"
+    const realId = compositeId.split('_')[0];
+    setSelectedPlayer(realId);
+  };
+
   if (selectedPlayer) {
     return (
       <DashboardLayout>
@@ -141,7 +149,7 @@ export default function Scanner() {
             {sortDir === "desc" ? "↓ Highest First" : "↑ Lowest First"}
           </button>
         </div>
-        <StatFilters activeStats={activeStats} onToggleStat={toggleStat} sport={sport} />
+        {/* StatFilters temporarily removed – add back if needed */}
       </div>
 
       <div className="px-6 pb-8">
@@ -162,7 +170,7 @@ export default function Scanner() {
                 sortField={sortField}
                 sortDir={sortDir}
                 onSort={handleSort}
-                onPlayerClick={setSelectedPlayer}
+                onPlayerClick={handlePlayerClick}
               />
             </div>
           </>
