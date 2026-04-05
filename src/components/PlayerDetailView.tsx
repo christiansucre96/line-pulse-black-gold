@@ -7,8 +7,6 @@ interface PlayerDetailViewProps {
   onBack: () => void;
 }
 
-const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
-
 // Available stats to select from
 const STAT_TYPES = [
   { key: "points", label: "Points", color: "text-primary" },
@@ -18,14 +16,25 @@ const STAT_TYPES = [
   { key: "blocks", label: "Blocks", color: "text-purple-400" },
 ];
 
+// Combo prop types
+const COMBO_TYPES = [
+  { key: "pts_reb", label: "Pts+Reb", formula: (s: any) => (s.points || 0) + (s.rebounds || 0) },
+  { key: "pts_ast", label: "Pts+Ast", formula: (s: any) => (s.points || 0) + (s.assists || 0) },
+  { key: "reb_ast", label: "Reb+Ast", formula: (s: any) => (s.rebounds || 0) + (s.assists || 0) },
+  { key: "pts_reb_ast", label: "Pts+Reb+Ast", formula: (s: any) => (s.points || 0) + (s.rebounds || 0) + (s.assists || 0) },
+];
+
 export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
   const [player, setPlayer] = useState<any>(null);
   const [props, setProps] = useState<any[]>([]);
+  const [comboProps, setComboProps] = useState<any[]>([]);
   const [stats, setStats] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedStat, setSelectedStat] = useState("points");
+  const [selectedCombo, setSelectedCombo] = useState<string | null>(null);
   const [line, setLine] = useState(15.5);
   const [selectedRange, setSelectedRange] = useState(10);
+  const [activeTab, setActiveTab] = useState<"standard" | "combo">("standard");
 
   useEffect(() => {
     fetchPlayerData();
@@ -58,13 +67,17 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
       
       if (propsError) throw propsError;
       
+      // Separate standard and combo props
+      const standardProps = propsData?.filter(p => !p.is_combo) || [];
+      const comboPropsData = propsData?.filter(p => p.is_combo) || [];
+      
       // Fetch player stats
       const { data: statsData, error: statsError } = await supabase
         .from('player_game_stats')
         .select('*')
         .eq('player_id', playerId)
         .order('game_date', { ascending: false })
-        .limit(20);
+        .limit(30);
       
       if (statsError) throw statsError;
       
@@ -86,7 +99,7 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
       }
       
       // Set initial line from props
-      const pointsProp = propsData?.find(p => p.stat_type === 'points');
+      const pointsProp = standardProps.find(p => p.stat_type === 'points');
       if (pointsProp) {
         setLine(pointsProp.projected_value || 15.5);
       }
@@ -98,7 +111,8 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
         teamAbbr: playerData.teams?.abbreviation,
         initials: playerData.full_name?.split(' ').map((n: string) => n[0]).join('') || "??",
       });
-      setProps(propsData || []);
+      setProps(standardProps);
+      setComboProps(comboPropsData);
       setStats(statsData || []);
       
     } catch (error) {
@@ -117,11 +131,27 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
     return 0;
   };
 
+  const getComboValue = (stat: any, comboKey: string): number => {
+    const combo = COMBO_TYPES.find(c => c.key === comboKey);
+    return combo ? combo.formula(stat) : 0;
+  };
+
   const calculateHitRate = (n: number) => {
     const logs = stats.slice(0, n);
     if (logs.length === 0) return { hr: 0, avg: 0 };
-    const hits = logs.filter(log => getStatValue(log, selectedStat) >= line).length;
-    const avg = logs.reduce((sum, log) => sum + getStatValue(log, selectedStat), 0) / logs.length;
+    
+    let hits: number;
+    let values: number[];
+    
+    if (activeTab === "combo" && selectedCombo) {
+      values = logs.map(log => getComboValue(log, selectedCombo));
+      hits = values.filter(v => v >= line).length;
+    } else {
+      values = logs.map(log => getStatValue(log, selectedStat));
+      hits = values.filter(v => v >= line).length;
+    }
+    
+    const avg = values.reduce((sum, v) => sum + v, 0) / values.length;
     return {
       hr: Math.round((hits / logs.length) * 100),
       avg: Math.round(avg * 10) / 10,
@@ -133,11 +163,19 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
   const l15 = calculateHitRate(15);
   const l20 = calculateHitRate(20);
 
-  const chartData = stats.slice().reverse().slice(0, selectedRange).map((stat, idx) => ({
-    name: `G${stats.length - idx}`,
-    value: getStatValue(stat, selectedStat),
-    aboveLine: getStatValue(stat, selectedStat) >= line,
-  }));
+  const chartData = stats.slice().reverse().slice(0, selectedRange).map((stat, idx) => {
+    let value: number;
+    if (activeTab === "combo" && selectedCombo) {
+      value = getComboValue(stat, selectedCombo);
+    } else {
+      value = getStatValue(stat, selectedStat);
+    }
+    return {
+      name: `G${stats.length - idx}`,
+      value: value,
+      aboveLine: value >= line,
+    };
+  });
 
   const hrColor = (hr: number) => {
     if (hr >= 80) return "text-green-400 border-green-400/30 bg-green-400/10";
@@ -145,7 +183,11 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
     return "text-red-400 border-red-400/30 bg-red-400/10";
   };
 
-  const getSelectedStatLabel = () => {
+  const getSelectedLabel = () => {
+    if (activeTab === "combo" && selectedCombo) {
+      const combo = COMBO_TYPES.find(c => c.key === selectedCombo);
+      return combo?.label || "Combo";
+    }
     const stat = STAT_TYPES.find(s => s.key === selectedStat);
     return stat?.label || "Points";
   };
@@ -180,27 +222,64 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
       <div className="flex flex-col lg:flex-row">
         {/* Main Content */}
         <div className="flex-1 p-4">
-          {/* Stat Type Selector */}
-          <div className="flex gap-2 overflow-x-auto mb-6 border-b border-border pb-2">
-            {STAT_TYPES.map((stat) => (
-              <button
-                key={stat.key}
-                onClick={() => setSelectedStat(stat.key)}
-                className={`px-4 py-2 text-sm font-semibold rounded-t transition-colors whitespace-nowrap ${
-                  selectedStat === stat.key 
-                    ? "text-primary border-b-2 border-primary" 
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {stat.label}
-              </button>
-            ))}
+          {/* Tab Selector: Standard vs Combo */}
+          <div className="flex gap-2 mb-4 border-b border-border">
+            <button
+              onClick={() => { setActiveTab("standard"); setSelectedCombo(null); }}
+              className={`px-4 py-2 text-sm font-semibold transition-colors ${activeTab === "standard" ? "text-primary border-b-2 border-primary" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              Standard Props
+            </button>
+            <button
+              onClick={() => { setActiveTab("combo"); setSelectedCombo(COMBO_TYPES[0].key); }}
+              className={`px-4 py-2 text-sm font-semibold transition-colors ${activeTab === "combo" ? "text-primary border-b-2 border-primary" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              Combo Props
+            </button>
           </div>
+
+          {/* Stat Selector (Standard) */}
+          {activeTab === "standard" && (
+            <div className="flex gap-2 overflow-x-auto mb-6 border-b border-border pb-2">
+              {STAT_TYPES.map((stat) => (
+                <button
+                  key={stat.key}
+                  onClick={() => setSelectedStat(stat.key)}
+                  className={`px-4 py-2 text-sm font-semibold rounded-t transition-colors whitespace-nowrap ${
+                    selectedStat === stat.key 
+                      ? "text-primary border-b-2 border-primary" 
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {stat.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Combo Selector */}
+          {activeTab === "combo" && (
+            <div className="flex gap-2 overflow-x-auto mb-6 border-b border-border pb-2">
+              {COMBO_TYPES.map((combo) => (
+                <button
+                  key={combo.key}
+                  onClick={() => setSelectedCombo(combo.key)}
+                  className={`px-4 py-2 text-sm font-semibold rounded-t transition-colors whitespace-nowrap ${
+                    selectedCombo === combo.key 
+                      ? "text-primary border-b-2 border-primary" 
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {combo.label}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Line Adjuster */}
           <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
             <div>
-              <h2 className="text-lg font-display font-bold text-foreground">{getSelectedStatLabel()}</h2>
+              <h2 className="text-lg font-display font-bold text-foreground">{getSelectedLabel()}</h2>
               <p className="text-sm text-muted-foreground">Line</p>
               <div className="flex items-center gap-2 mt-1">
                 <button 
@@ -243,7 +322,7 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
           {/* Bar Chart */}
           {chartData.length > 0 ? (
             <div className="h-64 mb-6 bg-card border border-border rounded-xl p-4">
-              <div className="text-xs text-muted-foreground mb-2">Recent {selectedRange} Games - {getSelectedStatLabel()}</div>
+              <div className="text-xs text-muted-foreground mb-2">Recent {selectedRange} Games - {getSelectedLabel()}</div>
               <div className="flex items-end h-48 gap-2">
                 {chartData.map((item, idx) => (
                   <div key={idx} className="flex-1 flex flex-col items-center">
@@ -251,7 +330,7 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
                     <div 
                       className="w-full rounded-t transition-all duration-300"
                       style={{ 
-                        height: `${Math.min((item.value / (selectedStat === 'points' ? 40 : 15)) * 100, 100)}%`,
+                        height: `${Math.min((item.value / (selectedStat === 'points' ? 40 : 20)) * 100, 100)}%`,
                         backgroundColor: item.aboveLine ? "#22c55e" : "#ef4444",
                         minHeight: "4px"
                       }}
@@ -266,7 +345,7 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
             </div>
           ) : (
             <div className="text-center py-12 text-muted-foreground bg-card border border-border rounded-xl">
-              No game log data available for {getSelectedStatLabel()}
+              No game log data available for {getSelectedLabel()}
             </div>
           )}
 
@@ -288,22 +367,18 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
                       <th className="py-2 px-2 font-semibold text-center">AST</th>
                       <th className="py-2 px-2 font-semibold text-center">STL</th>
                       <th className="py-2 px-2 font-semibold text-center">BLK</th>
-                      <th className="py-2 px-2 font-semibold text-center">TO</th>
-                    </tr>
+                    </table>
                   </thead>
                   <tbody>
                     {stats.slice(0, selectedRange).map((stat, idx) => (
                       <tr key={idx} className="border-b border-border/50 hover:bg-secondary/30">
                         <td className="py-2 px-2 text-center font-medium">{player.opponent}</td>
                         <td className="py-2 px-2 text-center text-muted-foreground">{new Date(stat.game_date).toLocaleDateString()}</td>
-                        <td className={`py-2 px-2 text-center font-semibold ${getStatValue(stat, 'points') >= (selectedStat === 'points' ? line : 0) ? "text-green-400" : "text-red-400"}`}>
-                          {stat.points || 0}
-                        </td>
+                        <td className="py-2 px-2 text-center font-semibold">{stat.points || 0}</td>
                         <td className="py-2 px-2 text-center">{stat.rebounds || 0}</td>
                         <td className="py-2 px-2 text-center">{stat.assists || 0}</td>
                         <td className="py-2 px-2 text-center">{stat.steals || 0}</td>
                         <td className="py-2 px-2 text-center">{stat.blocks || 0}</td>
-                        <td className="py-2 px-2 text-center">{stat.turnovers || 0}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -321,7 +396,7 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
             </div>
             <div>
               <div className="font-bold text-foreground">{player.full_name} ({player.position || "N/A"})</div>
-              <div className="flex gap-1.5 mt-1">
+              <div className="flex gap-1.5 mt-1 flex-wrap">
                 <span className="px-2 py-0.5 rounded text-xs font-bold bg-gradient-gold text-primary-foreground">{player.teamAbbr || "N/A"}</span>
                 <span className="px-2 py-0.5 rounded text-xs font-bold bg-primary/20 text-primary">{player.sport?.toUpperCase()}</span>
                 <span className="px-2 py-0.5 rounded text-xs font-bold bg-secondary/50 text-muted-foreground">vs {player.opponent}</span>
@@ -329,12 +404,30 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
             </div>
           </div>
 
-          {/* Props Section */}
+          {/* Standard Props Section */}
           {props.length > 0 && (
             <>
               <h3 className="text-sm font-display font-bold text-primary mb-2 tracking-wider">PROJECTIONS</h3>
-              <div className="space-y-2">
+              <div className="space-y-2 mb-4">
                 {props.map((prop, idx) => (
+                  <div key={idx} className="flex justify-between items-center text-sm py-2 px-3 border-b border-border/50 rounded-lg hover:bg-secondary/20">
+                    <span className="text-muted-foreground">{prop.stat_type?.toUpperCase()}</span>
+                    <span className="font-bold text-primary text-lg">{prop.projected_value}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded ${(prop.confidence_score || 0) >= 0.7 ? "bg-green-500/20 text-green-400" : "bg-yellow-500/20 text-yellow-400"}`}>
+                      {Math.round((prop.confidence_score || 0) * 100)}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* Combo Props Section */}
+          {comboProps.length > 0 && (
+            <>
+              <h3 className="text-sm font-display font-bold text-primary mb-2 tracking-wider">COMBO PROJECTIONS</h3>
+              <div className="space-y-2">
+                {comboProps.map((prop, idx) => (
                   <div key={idx} className="flex justify-between items-center text-sm py-2 px-3 border-b border-border/50 rounded-lg hover:bg-secondary/20">
                     <span className="text-muted-foreground">{prop.stat_type?.toUpperCase()}</span>
                     <span className="font-bold text-primary text-lg">{prop.projected_value}</span>
