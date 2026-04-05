@@ -1,7 +1,9 @@
+// src/pages/Scanner.tsx
 import { useState, useEffect } from "react";
 import { Search, BarChart3, Loader2 } from "lucide-react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { SportTabs } from "@/components/SportTabs";
+import { StatFilters } from "@/components/StatFilters";          // ✅ added missing import
 import { PlayerTable, SortField, SortDir } from "@/components/PlayerTable";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { Sport, sportCategories } from "@/data/mockPlayers";
