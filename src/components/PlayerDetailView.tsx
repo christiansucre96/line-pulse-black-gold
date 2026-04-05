@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, Minus, Plus, TrendingUp, TrendingDown } from "lucide-react";
+import { ArrowLeft, Minus, Plus, TrendingUp, TrendingDown, Activity } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
 interface PlayerDetailViewProps {
@@ -9,11 +9,21 @@ interface PlayerDetailViewProps {
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
+// Available stats to select from
+const STAT_TYPES = [
+  { key: "points", label: "Points", color: "text-primary" },
+  { key: "rebounds", label: "Rebounds", color: "text-blue-400" },
+  { key: "assists", label: "Assists", color: "text-green-400" },
+  { key: "steals", label: "Steals", color: "text-yellow-400" },
+  { key: "blocks", label: "Blocks", color: "text-purple-400" },
+];
+
 export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
   const [player, setPlayer] = useState<any>(null);
   const [props, setProps] = useState<any[]>([]);
   const [stats, setStats] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedStat, setSelectedStat] = useState("points");
   const [line, setLine] = useState(15.5);
   const [selectedRange, setSelectedRange] = useState(10);
 
@@ -62,24 +72,23 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
       const today = new Date().toISOString().split('T')[0];
       const { data: games } = await supabase
         .from('games_data')
-        .select('*')
+        .select('*, home_team:teams!games_data_home_team_id_fkey(name, abbreviation), away_team:teams!games_data_away_team_id_fkey(name, abbreviation)')
         .eq('sport', playerData.sport)
         .eq('game_date', today);
       
       let opponent = "TBD";
       if (games && games[0]) {
         if (games[0].home_team_id === playerData.team_id) {
-          const { data: awayTeam } = await supabase.from('teams').select('abbreviation').eq('id', games[0].away_team_id).single();
-          opponent = awayTeam?.abbreviation || "TBD";
+          opponent = games[0].away_team?.abbreviation || "TBD";
         } else {
-          const { data: homeTeam } = await supabase.from('teams').select('abbreviation').eq('id', games[0].home_team_id).single();
-          opponent = homeTeam?.abbreviation || "TBD";
+          opponent = games[0].home_team?.abbreviation || "TBD";
         }
       }
       
       // Set initial line from props
-      if (propsData && propsData[0]) {
-        setLine(propsData[0].projected_value || 15.5);
+      const pointsProp = propsData?.find(p => p.stat_type === 'points');
+      if (pointsProp) {
+        setLine(pointsProp.projected_value || 15.5);
       }
       
       setPlayer({
@@ -111,8 +120,8 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
   const calculateHitRate = (n: number) => {
     const logs = stats.slice(0, n);
     if (logs.length === 0) return { hr: 0, avg: 0 };
-    const hits = logs.filter(log => getStatValue(log, 'points') >= line).length;
-    const avg = logs.reduce((sum, log) => sum + getStatValue(log, 'points'), 0) / logs.length;
+    const hits = logs.filter(log => getStatValue(log, selectedStat) >= line).length;
+    const avg = logs.reduce((sum, log) => sum + getStatValue(log, selectedStat), 0) / logs.length;
     return {
       hr: Math.round((hits / logs.length) * 100),
       avg: Math.round(avg * 10) / 10,
@@ -125,15 +134,20 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
   const l20 = calculateHitRate(20);
 
   const chartData = stats.slice().reverse().slice(0, selectedRange).map((stat, idx) => ({
-    name: `Game ${idx + 1}`,
-    value: stat.points || 0,
-    aboveLine: (stat.points || 0) >= line,
+    name: `G${stats.length - idx}`,
+    value: getStatValue(stat, selectedStat),
+    aboveLine: getStatValue(stat, selectedStat) >= line,
   }));
 
   const hrColor = (hr: number) => {
     if (hr >= 80) return "text-green-400 border-green-400/30 bg-green-400/10";
     if (hr >= 60) return "text-primary border-primary/30 bg-primary/10";
     return "text-red-400 border-red-400/30 bg-red-400/10";
+  };
+
+  const getSelectedStatLabel = () => {
+    const stat = STAT_TYPES.find(s => s.key === selectedStat);
+    return stat?.label || "Points";
   };
 
   if (loading) {
@@ -155,6 +169,7 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Header */}
       <div className="flex items-center gap-4 p-4 border-b border-border">
         <button onClick={onBack} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary text-secondary-foreground hover:bg-muted transition-colors text-sm font-medium">
           <ArrowLeft className="w-4 h-4" /> Back
@@ -163,22 +178,48 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
       </div>
 
       <div className="flex flex-col lg:flex-row">
+        {/* Main Content */}
         <div className="flex-1 p-4">
-          {/* Hit Rate Selector */}
+          {/* Stat Type Selector */}
+          <div className="flex gap-2 overflow-x-auto mb-6 border-b border-border pb-2">
+            {STAT_TYPES.map((stat) => (
+              <button
+                key={stat.key}
+                onClick={() => setSelectedStat(stat.key)}
+                className={`px-4 py-2 text-sm font-semibold rounded-t transition-colors whitespace-nowrap ${
+                  selectedStat === stat.key 
+                    ? "text-primary border-b-2 border-primary" 
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {stat.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Line Adjuster */}
           <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
             <div>
-              <h2 className="text-lg font-display font-bold text-foreground">Points</h2>
+              <h2 className="text-lg font-display font-bold text-foreground">{getSelectedStatLabel()}</h2>
               <p className="text-sm text-muted-foreground">Line</p>
               <div className="flex items-center gap-2 mt-1">
-                <button onClick={() => setLine(l => +(l - 0.5).toFixed(1))} className="w-8 h-8 rounded bg-secondary flex items-center justify-center hover:bg-muted">
+                <button 
+                  onClick={() => setLine(l => +(l - 0.5).toFixed(1))} 
+                  className="w-8 h-8 rounded bg-secondary flex items-center justify-center hover:bg-muted transition-colors"
+                >
                   <Minus className="w-4 h-4" />
                 </button>
                 <span className="w-16 text-center font-bold text-primary font-display text-xl">{line}</span>
-                <button onClick={() => setLine(l => +(l + 0.5).toFixed(1))} className="w-8 h-8 rounded bg-secondary flex items-center justify-center hover:bg-muted">
+                <button 
+                  onClick={() => setLine(l => +(l + 0.5).toFixed(1))} 
+                  className="w-8 h-8 rounded bg-secondary flex items-center justify-center hover:bg-muted transition-colors"
+                >
                   <Plus className="w-4 h-4" />
                 </button>
               </div>
             </div>
+
+            {/* Hit Rate Selectors */}
             <div className="flex gap-2 flex-wrap">
               {[
                 { label: "L5", n: 5, ...l5 },
@@ -199,38 +240,43 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
             </div>
           </div>
 
-          {/* Chart */}
-          {chartData.length > 0 && (
-            <div className="h-64 mb-6">
-              <div className="w-full h-full bg-card border border-border rounded-xl p-4">
-                <div className="text-xs text-muted-foreground mb-2">Recent Games</div>
-                <div className="flex items-end h-48 gap-2">
-                  {chartData.map((item, idx) => (
-                    <div key={idx} className="flex-1 flex flex-col items-center">
-                      <div className="text-xs text-muted-foreground mb-1">{item.value}</div>
-                      <div 
-                        className="w-full rounded-t transition-all duration-300"
-                        style={{ 
-                          height: `${Math.min((item.value / 40) * 100, 100)}%`,
-                          backgroundColor: item.aboveLine ? "#22c55e" : "#ef4444",
-                          minHeight: "4px"
-                        }}
-                      />
-                      <div className="text-xs text-muted-foreground mt-1 truncate w-full text-center">{item.name}</div>
-                    </div>
-                  ))}
-                </div>
-                <div className="border-t border-dashed border-primary/50 mt-2 pt-1">
-                  <div className="text-xs text-primary text-center">Line: {line}</div>
-                </div>
+          {/* Bar Chart */}
+          {chartData.length > 0 ? (
+            <div className="h-64 mb-6 bg-card border border-border rounded-xl p-4">
+              <div className="text-xs text-muted-foreground mb-2">Recent {selectedRange} Games - {getSelectedStatLabel()}</div>
+              <div className="flex items-end h-48 gap-2">
+                {chartData.map((item, idx) => (
+                  <div key={idx} className="flex-1 flex flex-col items-center">
+                    <div className="text-xs text-muted-foreground mb-1">{item.value}</div>
+                    <div 
+                      className="w-full rounded-t transition-all duration-300"
+                      style={{ 
+                        height: `${Math.min((item.value / (selectedStat === 'points' ? 40 : 15)) * 100, 100)}%`,
+                        backgroundColor: item.aboveLine ? "#22c55e" : "#ef4444",
+                        minHeight: "4px"
+                      }}
+                    />
+                    <div className="text-xs text-muted-foreground mt-1 truncate w-full text-center">{item.name}</div>
+                  </div>
+                ))}
               </div>
+              <div className="border-t border-dashed border-primary/50 mt-2 pt-1">
+                <div className="text-xs text-primary text-center">Line: {line}</div>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-12 text-muted-foreground bg-card border border-border rounded-xl">
+              No game log data available for {getSelectedStatLabel()}
             </div>
           )}
 
           {/* Game Logs Table */}
           {stats.length > 0 && (
             <div className="border-t border-border pt-4">
-              <h3 className="text-center font-display font-bold text-foreground mb-3">Game Log — Last {Math.min(selectedRange, stats.length)} Games</h3>
+              <h3 className="text-center font-display font-bold text-foreground mb-3 flex items-center justify-center gap-2">
+                <Activity className="w-4 h-4" />
+                Game Log — Last {Math.min(selectedRange, stats.length)} Games
+              </h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -242,6 +288,7 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
                       <th className="py-2 px-2 font-semibold text-center">AST</th>
                       <th className="py-2 px-2 font-semibold text-center">STL</th>
                       <th className="py-2 px-2 font-semibold text-center">BLK</th>
+                      <th className="py-2 px-2 font-semibold text-center">TO</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -249,22 +296,25 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
                       <tr key={idx} className="border-b border-border/50 hover:bg-secondary/30">
                         <td className="py-2 px-2 text-center font-medium">{player.opponent}</td>
                         <td className="py-2 px-2 text-center text-muted-foreground">{new Date(stat.game_date).toLocaleDateString()}</td>
-                        <td className="py-2 px-2 text-center font-semibold">{stat.points || 0}</td>
+                        <td className={`py-2 px-2 text-center font-semibold ${getStatValue(stat, 'points') >= (selectedStat === 'points' ? line : 0) ? "text-green-400" : "text-red-400"}`}>
+                          {stat.points || 0}
+                        </td>
                         <td className="py-2 px-2 text-center">{stat.rebounds || 0}</td>
                         <td className="py-2 px-2 text-center">{stat.assists || 0}</td>
                         <td className="py-2 px-2 text-center">{stat.steals || 0}</td>
                         <td className="py-2 px-2 text-center">{stat.blocks || 0}</td>
-                       </tr>
+                        <td className="py-2 px-2 text-center">{stat.turnovers || 0}</td>
+                      </tr>
                     ))}
                   </tbody>
-                 </table>
+                </table>
               </div>
             </div>
           )}
         </div>
 
-        {/* Sidebar - Player Info */}
-        <div className="w-full lg:w-72 border-t lg:border-t-0 lg:border-l border-border p-4">
+        {/* Sidebar - Player Info & Props */}
+        <div className="w-full lg:w-80 border-t lg:border-t-0 lg:border-l border-border p-4">
           <div className="flex items-center gap-3 mb-4">
             <div className="w-12 h-12 rounded-full bg-primary/20 border border-primary/30 flex items-center justify-center text-lg font-bold text-primary">
               {player.initials}
@@ -274,21 +324,50 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
               <div className="flex gap-1.5 mt-1">
                 <span className="px-2 py-0.5 rounded text-xs font-bold bg-gradient-gold text-primary-foreground">{player.teamAbbr || "N/A"}</span>
                 <span className="px-2 py-0.5 rounded text-xs font-bold bg-primary/20 text-primary">{player.sport?.toUpperCase()}</span>
+                <span className="px-2 py-0.5 rounded text-xs font-bold bg-secondary/50 text-muted-foreground">vs {player.opponent}</span>
               </div>
             </div>
           </div>
 
+          {/* Props Section */}
           {props.length > 0 && (
             <>
               <h3 className="text-sm font-display font-bold text-primary mb-2 tracking-wider">PROJECTIONS</h3>
-              <div className="space-y-1.5">
-                {props.slice(0, 3).map((prop, idx) => (
-                  <div key={idx} className="flex justify-between text-sm py-1 border-b border-border/50">
-                    <span className="text-muted-foreground">{prop.stat_type?.toUpperCase() || "POINTS"}</span>
-                    <span className="font-semibold text-foreground">{prop.projected_value}</span>
-                    <span className="text-xs text-muted-foreground">Conf: {Math.round((prop.confidence_score || 0) * 100)}%</span>
+              <div className="space-y-2">
+                {props.map((prop, idx) => (
+                  <div key={idx} className="flex justify-between items-center text-sm py-2 px-3 border-b border-border/50 rounded-lg hover:bg-secondary/20">
+                    <span className="text-muted-foreground">{prop.stat_type?.toUpperCase()}</span>
+                    <span className="font-bold text-primary text-lg">{prop.projected_value}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded ${(prop.confidence_score || 0) >= 0.7 ? "bg-green-500/20 text-green-400" : "bg-yellow-500/20 text-yellow-400"}`}>
+                      {Math.round((prop.confidence_score || 0) * 100)}%
+                    </span>
                   </div>
                 ))}
+              </div>
+            </>
+          )}
+
+          {/* Season Averages */}
+          {stats.length > 0 && (
+            <>
+              <h3 className="text-sm font-display font-bold text-primary mb-2 mt-4 tracking-wider">SEASON AVG</h3>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="text-center p-2 bg-secondary/30 rounded-lg">
+                  <div className="text-xs text-muted-foreground">PPG</div>
+                  <div className="font-bold text-foreground">{Math.round(stats.reduce((s, stat) => s + (stat.points || 0), 0) / stats.length * 10) / 10}</div>
+                </div>
+                <div className="text-center p-2 bg-secondary/30 rounded-lg">
+                  <div className="text-xs text-muted-foreground">RPG</div>
+                  <div className="font-bold text-foreground">{Math.round(stats.reduce((s, stat) => s + (stat.rebounds || 0), 0) / stats.length * 10) / 10}</div>
+                </div>
+                <div className="text-center p-2 bg-secondary/30 rounded-lg">
+                  <div className="text-xs text-muted-foreground">APG</div>
+                  <div className="font-bold text-foreground">{Math.round(stats.reduce((s, stat) => s + (stat.assists || 0), 0) / stats.length * 10) / 10}</div>
+                </div>
+                <div className="text-center p-2 bg-secondary/30 rounded-lg">
+                  <div className="text-xs text-muted-foreground">SPG</div>
+                  <div className="font-bold text-foreground">{Math.round(stats.reduce((s, stat) => s + (stat.steals || 0), 0) / stats.length * 10) / 10}</div>
+                </div>
               </div>
             </>
           )}
