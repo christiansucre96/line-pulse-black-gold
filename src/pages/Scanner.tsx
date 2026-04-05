@@ -43,7 +43,7 @@ export default function Scanner() {
       const data = await response.json();
       
       if (data.success && data.players) {
-        // Map data to show historical performance metrics (L5, L10, L15, L20)
+        // IMPORTANT: Use the EXACT field names from the API
         const formattedPlayers = data.players.map((p: any) => ({
           id: p.id,
           name: p.name,
@@ -52,7 +52,7 @@ export default function Scanner() {
           teamAbbr: p.team_abbr || "N/A",
           opponent: p.opponent || "TBD",
           initials: p.name?.split(' ').map((n: string) => n[0]).join('') || "??",
-          // Historical performance metrics (no sportsbook lines)
+          // These field names MUST match what PlayerTable expects
           avgL10: p.avg_last10 || 15.5,
           l5: p.hit_rate_last5 || 55,
           l10: p.hit_rate_last10 || 55,
@@ -65,15 +65,9 @@ export default function Scanner() {
                       sport === "NHL" ? ["goals", "assists", "shots"] : ["goals", "assists", "shots"],
         }));
         
-        console.log(`✅ Loaded ${formattedPlayers.length} players`);
-        if (formattedPlayers[0]) {
-          console.log("Sample player:", formattedPlayers[0].name, "Avg L10:", formattedPlayers[0].avgL10);
-        }
-        
+        console.log("First 3 formatted players:", formattedPlayers.slice(0, 3));
         setPlayers(formattedPlayers);
-        setDbStats({
-          players: data.count,
-        });
+        setDbStats({ players: data.count });
       }
     } catch (error) {
       console.error("Error fetching players:", error);
