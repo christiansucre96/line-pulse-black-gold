@@ -75,41 +75,41 @@ export function PlayerTable({ players, sortField, sortDir, onSort, onPlayerClick
                     <div className="text-xs text-primary">{player.categories?.join(" · ") || "points · assists · rebounds"}</div>
                   </div>
                 </div>
-              </td>
+               </td>
               <td className="text-center py-3 px-2">
                 <span className="px-3 py-1 rounded text-xs font-semibold bg-primary/20 text-primary">
                   {typeof player.avgL10 === 'number' ? player.avgL10.toFixed(1) : player.avgL10 || 0}
                 </span>
-              </td>
+               </td>
               <td className="text-center py-3 px-2">
                 <span className={`px-2 py-1 rounded text-xs font-semibold ${getHitRateClass(player.l5)}`}>
                   {player.l5 || 0}%
                 </span>
-              </td>
+               </td>
               <td className="text-center py-3 px-2">
                 <span className={`px-2 py-1 rounded text-xs font-semibold ${getHitRateClass(player.l10)}`}>
                   {player.l10 || 0}%
                 </span>
-              </td>
+               </td>
               <td className="text-center py-3 px-2">
                 <span className={`px-2 py-1 rounded text-xs font-semibold ${getHitRateClass(player.l15)}`}>
                   {player.l15 || 0}%
                 </span>
-              </td>
+               </td>
               <td className="text-center py-3 px-2">
                 <span className={`px-2 py-1 rounded text-xs font-semibold ${getHitRateClass(player.l20)}`}>
                   {player.l20 || 0}%
                 </span>
-              </td>
+               </td>
               <td className="text-center py-3 px-2">
                 <span className={`font-bold font-display text-lg ${player.trend === "up" ? "text-green-400" : player.trend === "down" ? "text-red-400" : "text-muted-foreground"}`}>
                   {player.trend === "up" ? "↑" : player.trend === "down" ? "↓" : "→"}
                 </span>
-              </td>
-            </tr>
+               </td>
+             </tr>
           ))}
         </tbody>
-      <table>
+      </table>
     </div>
   );
 }
