@@ -8,7 +8,7 @@ import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { sportsApi } from "@/lib/api/sportsApi";
 import { Sport, sportCategories } from "@/data/mockPlayers";
 
-// Simple stat filter component inline (replaces missing StatFilters)
+// Simple stat filter component (replaces missing StatFilters)
 const SimpleStatFilters = ({ activeStats, onToggleStat, sport }: any) => {
   const stats = sport === "NBA" 
     ? ["points", "assists", "rebounds", "steals"]
