@@ -1,4 +1,3 @@
-// src/pages/Scanner.tsx
 import { useState, useEffect } from "react";
 import { Search, BarChart3, Loader2, RefreshCw } from "lucide-react";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -17,7 +16,7 @@ const sportDbMap: Record<Sport, string> = {
   Soccer: "soccer",
 };
 
-// Simple cache outside component (persists across remounts)
+// Cache persists across component remounts
 const playerCache = new Map<string, any[]>();
 
 export default function Scanner() {
@@ -35,7 +34,7 @@ export default function Scanner() {
   const fetchData = async (force = false) => {
     const cacheKey = sport;
     if (!force && playerCache.has(cacheKey)) {
-      const cached = playerCache.get(cacheKey);
+      const cached = playerCache.get(cacheKey)!;
       setPlayers(cached);
       setDbStats({ players: cached.length });
       setLoading(false);
@@ -94,7 +93,7 @@ export default function Scanner() {
     }
   };
 
-  // Load on mount and when sport changes – uses cache
+  // Load on mount and when sport changes – uses cache, no interval
   useEffect(() => {
     fetchData(false);
   }, [sport]);
@@ -213,7 +212,7 @@ export default function Scanner() {
               <p className="text-xs text-green-400">
                 ✅ LIVE: {dbStats.players} {sport} players with upcoming games (next 3 days)
                 <br />
-                <span className="text-muted-foreground">Data cached per sport – use Refresh to update</span>
+                <span className="text-muted-foreground">Data cached per sport – click Refresh to update</span>
               </p>
             </div>
             <div className="bg-card border border-border rounded-xl overflow-hidden">
