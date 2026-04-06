@@ -268,7 +268,7 @@ export default function Admin() {
     }));
   };
 
-  // ✅ FIXED AUTO-SYNC (checks response status, logs real errors)
+  // ✅ AUTO-SYNC – now uses sync_upcoming (lightweight, only upcoming games)
   useEffect(() => {
     if (!isAdmin) return;
     
@@ -281,7 +281,7 @@ export default function Admin() {
           const res = await fetch(EDGE_URL, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ operation: "daily", sport })   // 👈 use "daily", not "full_sync"
+            body: JSON.stringify({ operation: "sync_upcoming", sport })
           });
           
           if (!res.ok) {
@@ -289,7 +289,7 @@ export default function Admin() {
             console.error(`❌ Auto-sync failed for ${sport}:`, errorText);
           } else {
             const data = await res.json();
-            console.log(`✅ Auto-sync complete for ${sport}`, data);
+            console.log(`✅ Auto-sync complete for ${sport}: ${data.teams} teams, ${data.players} players`);
           }
         } catch (err) {
           console.error(`❌ Auto-sync error for ${sport}:`, err);
@@ -300,113 +300,35 @@ export default function Admin() {
       console.log("✅ Auto-sync cycle complete");
     };
     
-    // Run once immediately, then every 30 minutes
-    autoSync();
+    autoSync(); // run immediately
     const interval = setInterval(autoSync, 30 * 60 * 1000);
     return () => clearInterval(interval);
   }, [isAdmin]);
 
-  // DIRECT SYNC FUNCTIONS (unchanged)
-  const syncSportDirect = async (sport: string) => {
-    const sportConfig: Record<string, { path: string; name: string }> = {
-      nba: { path: "basketball/nba", name: "NBA" },
-      nfl: { path: "football/nfl", name: "NFL" },
-      mlb: { path: "baseball/mlb", name: "MLB" },
-      nhl: { path: "hockey/nhl", name: "NHL" },
-      soccer: { path: "soccer/eng.1", name: "Soccer" },
-    };
-
-    const config = sportConfig[sport];
-    if (!config) throw new Error(`Unknown sport: ${sport}`);
-
-    console.log(`🔄 Syncing ${config.name}...`);
-
-    const teamsRes = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${config.path}/teams`);
-    const teamsJson = await teamsRes.json();
-    const teams = teamsJson.sports?.[0]?.leagues?.[0]?.teams?.map((t: any) => ({
-      external_id: t.team.id,
-      sport: sport,
-      name: t.team.displayName,
-      abbreviation: t.team.abbreviation,
-      logo_url: t.team.logos?.[0]?.href || null,
-    })) || [];
-
-    if (teams.length) {
-      await fetch(EDGE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ operation: "teams", data: teams })
-      });
-      console.log(`✅ ${config.name} teams: ${teams.length}`);
-    }
-
-    let allPlayers: any[] = [];
-    for (const t of teams) {
-      try {
-        const rosterRes = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${config.path}/teams/${t.external_id}/roster`);
-        const rosterJson = await rosterRes.json();
-        const athletes = rosterJson.athletes?.flatMap((g: any) => g.items || []) || rosterJson.athletes || [];
-        
-        const players = athletes.map((p: any) => ({
-          external_id: p.id,
-          sport: sport,
-          full_name: p.fullName || p.displayName,
-          position: p.position?.abbreviation || null,
-          headshot_url: p.headshot?.href || null,
-        }));
-        allPlayers.push(...players);
-      } catch (e) {
-        console.log(`  Error for team ${t.abbreviation}`);
-      }
-      await new Promise(r => setTimeout(r, 50));
-    }
-
-    console.log(`✅ ${config.name} players: ${allPlayers.length}`);
-    
-    for (let i = 0; i < allPlayers.length; i += 500) {
-      const batch = allPlayers.slice(i, i + 500);
-      await fetch(EDGE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ operation: "players", data: batch })
-      });
-    }
-
-    const gamesRes = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${config.path}/scoreboard`);
-    const gamesJson = await gamesRes.json();
-    const games = gamesJson.events?.map((g: any) => ({
-      external_id: g.id,
-      sport: sport,
-      game_date: new Date().toISOString().split('T')[0],
-      start_time: g.date,
-      status: g.status?.type?.name || "upcoming",
-    })) || [];
-
-    if (games.length) {
-      await fetch(EDGE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ operation: "games", data: games })
-      });
-      console.log(`✅ ${config.name} games: ${games.length}`);
-    }
-
-    return { teams: teams.length, players: allPlayers.length, games: games.length };
+  // 🔥 NEW: Sync upcoming games for a single sport (lightweight, only teams/players with games in next 3 days)
+  const syncUpcoming = async (sport: string) => {
+    const res = await fetch(EDGE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ operation: "sync_upcoming", sport })
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    return data;
   };
 
-  const syncAllSportsDirect = async () => {
+  // Sync all sports (upcoming only)
+  const syncAllUpcoming = async () => {
     const sports = ["nba", "nfl", "mlb", "nhl", "soccer"];
     const results: any = {};
-    
     for (const sport of sports) {
       try {
-        const result = await syncSportDirect(sport);
+        const result = await syncUpcoming(sport);
         results[sport] = result;
       } catch (err: any) {
         results[sport] = { error: err.message };
       }
     }
-    
     await refreshStats();
     return results;
   };
@@ -476,7 +398,7 @@ export default function Admin() {
                       <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Role</th>
                       <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Subscription</th>
                       <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Grant Access</th>
-                    </tr>
+                    </td>
                   </thead>
                   <tbody>
                     {users.map((u) => {
@@ -604,8 +526,7 @@ export default function Admin() {
               
               <div className="mt-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
                 <p className="text-xs text-green-400">
-                  🤖 Auto-sync runs every 30 minutes automatically. Props are generated from player stats.
-                  Click "Generate ALL Props" to create prop lines for all sports now.
+                  🤖 Auto-sync runs every 30 minutes automatically (only upcoming games). Props are generated from player stats.
                 </p>
               </div>
             </div>
@@ -644,21 +565,21 @@ export default function Admin() {
               </p>
             </div>
 
-            {/* ESPN DATA SYNC SECTION */}
+            {/* ESPN DATA SYNC SECTION – UPDATED TO USE sync_upcoming */}
             <div className="bg-card border border-border rounded-xl p-4">
-              <h3 className="font-display font-bold text-foreground mb-4">📡 ESPN Data Sync</h3>
+              <h3 className="font-display font-bold text-foreground mb-4">📡 ESPN Data Sync (Upcoming Games Only)</h3>
               <p className="text-sm text-muted-foreground mb-4">
-                Fetches live data directly from ESPN and saves to database.
+                Fetches only teams and players that have games in the next 3 days. Lightweight and fast.
               </p>
               
               <div className="flex flex-wrap gap-3 mb-4">
                 <button
                   onClick={async () => {
                     setIngesting("sync-nba");
-                    toast.info("Syncing NBA data...");
+                    toast.info("Syncing NBA upcoming games...");
                     try {
-                      const result = await syncSportDirect("nba");
-                      toast.success(`NBA: ${result.teams} teams, ${result.players} players`);
+                      const data = await syncUpcoming("nba");
+                      toast.success(`NBA: ${data.teams} teams, ${data.players} players synced`);
                       await refreshStats();
                     } catch (err: any) {
                       toast.error(`NBA sync failed: ${err.message}`);
@@ -676,10 +597,10 @@ export default function Admin() {
                 <button
                   onClick={async () => {
                     setIngesting("sync-nfl");
-                    toast.info("Syncing NFL data...");
+                    toast.info("Syncing NFL upcoming games...");
                     try {
-                      const result = await syncSportDirect("nfl");
-                      toast.success(`NFL: ${result.teams} teams, ${result.players} players`);
+                      const data = await syncUpcoming("nfl");
+                      toast.success(`NFL: ${data.teams} teams, ${data.players} players synced`);
                       await refreshStats();
                     } catch (err: any) {
                       toast.error(`NFL sync failed: ${err.message}`);
@@ -697,10 +618,10 @@ export default function Admin() {
                 <button
                   onClick={async () => {
                     setIngesting("sync-mlb");
-                    toast.info("Syncing MLB data...");
+                    toast.info("Syncing MLB upcoming games...");
                     try {
-                      const result = await syncSportDirect("mlb");
-                      toast.success(`MLB: ${result.teams} teams, ${result.players} players`);
+                      const data = await syncUpcoming("mlb");
+                      toast.success(`MLB: ${data.teams} teams, ${data.players} players synced`);
                       await refreshStats();
                     } catch (err: any) {
                       toast.error(`MLB sync failed: ${err.message}`);
@@ -718,10 +639,10 @@ export default function Admin() {
                 <button
                   onClick={async () => {
                     setIngesting("sync-nhl");
-                    toast.info("Syncing NHL data...");
+                    toast.info("Syncing NHL upcoming games...");
                     try {
-                      const result = await syncSportDirect("nhl");
-                      toast.success(`NHL: ${result.teams} teams, ${result.players} players`);
+                      const data = await syncUpcoming("nhl");
+                      toast.success(`NHL: ${data.teams} teams, ${data.players} players synced`);
                       await refreshStats();
                     } catch (err: any) {
                       toast.error(`NHL sync failed: ${err.message}`);
@@ -739,10 +660,10 @@ export default function Admin() {
                 <button
                   onClick={async () => {
                     setIngesting("sync-soccer");
-                    toast.info("Syncing Soccer data...");
+                    toast.info("Syncing Soccer upcoming games...");
                     try {
-                      const result = await syncSportDirect("soccer");
-                      toast.success(`Soccer: ${result.teams} teams, ${result.players} players`);
+                      const data = await syncUpcoming("soccer");
+                      toast.success(`Soccer: ${data.teams} teams, ${data.players} players synced`);
                       await refreshStats();
                     } catch (err: any) {
                       toast.error(`Soccer sync failed: ${err.message}`);
@@ -762,9 +683,9 @@ export default function Admin() {
                 <button
                   onClick={async () => {
                     setIngesting("sync-all");
-                    toast.info("Syncing ALL sports (this may take 2-3 minutes)...");
+                    toast.info("Syncing ALL sports (upcoming games only)...");
                     try {
-                      await syncAllSportsDirect();
+                      const results = await syncAllUpcoming();
                       toast.success("All sports synced successfully!");
                       await refreshStats();
                     } catch (err: any) {
@@ -777,7 +698,7 @@ export default function Admin() {
                   className="flex items-center gap-2 bg-gradient-to-r from-red-600 to-purple-600 text-white px-6 py-2 rounded-lg text-sm font-semibold hover:from-red-700 hover:to-purple-700"
                 >
                   {ingesting === "sync-all" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
-                  🔥 Sync ALL Sports
+                  🔥 Sync ALL Sports (Upcoming)
                 </button>
               </div>
             </div>
@@ -816,7 +737,7 @@ export default function Admin() {
                         <th className="text-left py-2 px-3 text-muted-foreground">Status</th>
                         <th className="text-left py-2 px-3 text-muted-foreground">Records</th>
                         <th className="text-left py-2 px-3 text-muted-foreground">Time</th>
-                       </tr>
+                      </tr>
                     </thead>
                     <tbody>
                       {logs.slice(0, 15).map((log: any) => (
