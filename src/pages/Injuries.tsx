@@ -30,10 +30,11 @@ export default function Injuries() {
     const fetchInjuries = async () => {
       setLoading(true);
       try {
+        // ✅ ADD mode: "all" to get all players (including those without upcoming games)
         const res = await fetch(EDGE_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ operation: "get_players", sport }),
+          body: JSON.stringify({ operation: "get_players", sport, mode: "all" }),
         });
         const data = await res.json();
         if (data.success && data.players) {
