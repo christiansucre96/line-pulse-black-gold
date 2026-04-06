@@ -5,38 +5,16 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { SportTabs } from "@/components/SportTabs";
 import { PlayerTable, SortField, SortDir } from "@/components/PlayerTable";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
-import { sportsApi } from "@/lib/api/sportsApi";
 import { Sport, sportCategories } from "@/data/mockPlayers";
 
-// Simple stat filter component (replaces missing StatFilters)
-const SimpleStatFilters = ({ activeStats, onToggleStat, sport }: any) => {
-  const stats = sport === "NBA" 
-    ? ["points", "assists", "rebounds", "steals"]
-    : sport === "NFL" 
-    ? ["passing", "rushing", "receiving"]
-    : sport === "MLB" 
-    ? ["hits", "runs", "rbi"]
-    : sport === "NHL" 
-    ? ["goals", "assists", "shots"]
-    : ["goals", "assists", "shots"];
-    
-  return (
-    <div className="flex flex-wrap gap-2 py-2">
-      {stats.map(stat => (
-        <button
-          key={stat}
-          onClick={() => onToggleStat(stat)}
-          className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-            activeStats.includes(stat)
-              ? "bg-primary text-primary-foreground"
-              : "bg-secondary text-secondary-foreground hover:bg-muted"
-          }`}
-        >
-          {stat.charAt(0).toUpperCase() + stat.slice(1)}
-        </button>
-      ))}
-    </div>
-  );
+const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
+
+const sportDbMap: Record<Sport, string> = {
+  NBA: "nba",
+  NFL: "nfl",
+  MLB: "mlb",
+  NHL: "nhl",
+  Soccer: "soccer",
 };
 
 export default function Scanner() {
@@ -48,18 +26,47 @@ export default function Scanner() {
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
   const [players, setPlayers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [topPicks, setTopPicks] = useState<any[]>([]);
   const [dbStats, setDbStats] = useState({ players: 0 });
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const dbSport = sport.toLowerCase() as any;
-      const data = await sportsApi.getPlayers(dbSport);
-      setPlayers(data);
-      setDbStats({ players: data.length });
-      const top = await sportsApi.getTopPicks(dbSport);
-      setTopPicks(top);
+      const dbSport = sportDbMap[sport];
+      console.log(`📊 Fetching ${sport} (${dbSport}) data...`);
+
+      const response = await fetch(EDGE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operation: "get_players", sport: dbSport })
+      });
+
+      const data = await response.json();
+      console.log("Edge response:", data);
+
+      if (data.success && data.players && data.players.length > 0) {
+        const formatted = data.players.map((p: any) => ({
+          id: p.id,
+          name: p.name,
+          position: p.position || "N/A",
+          team: p.team || "Unknown",
+          teamAbbr: p.team_abbr || "N/A",
+          opponent: p.opponent || "TBD",
+          initials: p.name?.split(' ').map((n: string) => n[0]).join('') || "??",
+          line: p.line,
+          edge_type: p.edge_type,
+          confidence: p.confidence,
+          hit_rate: p.hit_rate,
+          trend: p.trend || "stable",
+          categories: ["points", "assists", "rebounds"],
+          status: p.status || "active",
+          is_starter: p.is_starter ?? false,
+        }));
+        setPlayers(formatted);
+        setDbStats({ players: data.count });
+      } else {
+        console.warn("No players in response");
+        setPlayers([]);
+      }
     } catch (error) {
       console.error("Error fetching players:", error);
     } finally {
@@ -151,7 +158,22 @@ export default function Scanner() {
             {sortDir === "desc" ? "↓ Highest First" : "↑ Lowest First"}
           </button>
         </div>
-        <SimpleStatFilters activeStats={activeStats} onToggleStat={toggleStat} sport={sport} />
+        {/* Simple stat filters */}
+        <div className="flex flex-wrap gap-2 py-2">
+          {["points", "assists", "rebounds", "steals"].map(stat => (
+            <button
+              key={stat}
+              onClick={() => toggleStat(stat)}
+              className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                activeStats.includes(stat)
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-secondary text-secondary-foreground hover:bg-muted"
+              }`}
+            >
+              {stat.charAt(0).toUpperCase() + stat.slice(1)}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="px-6 pb-8">
@@ -175,18 +197,6 @@ export default function Scanner() {
                 onPlayerClick={handlePlayerClick}
               />
             </div>
-            {topPicks.length > 0 && (
-              <div className="mt-6 p-4 bg-gradient-to-r from-yellow-500/10 to-orange-500/10 border border-yellow-500/30 rounded-lg">
-                <h3 className="font-bold text-foreground mb-2">🔥 Top Picks Today</h3>
-                <div className="flex flex-wrap gap-2">
-                  {topPicks.slice(0, 10).map((pick, i) => (
-                    <span key={i} className="px-2 py-1 bg-primary/20 rounded text-xs">
-                      {pick.name} – {pick.edge_type} {pick.line}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
           </>
         )}
         <div className="text-center text-sm text-muted-foreground mt-4">
