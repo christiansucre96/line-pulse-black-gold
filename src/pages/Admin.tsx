@@ -268,7 +268,7 @@ export default function Admin() {
     }));
   };
 
-  // AUTO-SYNC EVERY 30 MINUTES
+  // ✅ FIXED AUTO-SYNC (checks response status, logs real errors)
   useEffect(() => {
     if (!isAdmin) return;
     
@@ -278,14 +278,21 @@ export default function Admin() {
       
       for (const sport of sports) {
         try {
-          await fetch(EDGE_URL, {
+          const res = await fetch(EDGE_URL, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ operation: "full_sync", sport })
+            body: JSON.stringify({ operation: "daily", sport })   // 👈 use "daily", not "full_sync"
           });
-          console.log(`✅ Auto-sync complete for ${sport}`);
+          
+          if (!res.ok) {
+            const errorText = await res.text();
+            console.error(`❌ Auto-sync failed for ${sport}:`, errorText);
+          } else {
+            const data = await res.json();
+            console.log(`✅ Auto-sync complete for ${sport}`, data);
+          }
         } catch (err) {
-          console.error(`❌ Auto-sync failed for ${sport}:`, err);
+          console.error(`❌ Auto-sync error for ${sport}:`, err);
         }
       }
       
@@ -293,16 +300,13 @@ export default function Admin() {
       console.log("✅ Auto-sync cycle complete");
     };
     
-    // Run every 30 minutes
-    const interval = setInterval(autoSync, 30 * 60 * 1000);
-    
-    // Also run once when page loads
+    // Run once immediately, then every 30 minutes
     autoSync();
-    
+    const interval = setInterval(autoSync, 30 * 60 * 1000);
     return () => clearInterval(interval);
   }, [isAdmin]);
 
-  // DIRECT SYNC FUNCTIONS
+  // DIRECT SYNC FUNCTIONS (unchanged)
   const syncSportDirect = async (sport: string) => {
     const sportConfig: Record<string, { path: string; name: string }> = {
       nba: { path: "basketball/nba", name: "NBA" },
@@ -812,7 +816,7 @@ export default function Admin() {
                         <th className="text-left py-2 px-3 text-muted-foreground">Status</th>
                         <th className="text-left py-2 px-3 text-muted-foreground">Records</th>
                         <th className="text-left py-2 px-3 text-muted-foreground">Time</th>
-                      </tr>
+                       </tr>
                     </thead>
                     <tbody>
                       {logs.slice(0, 15).map((log: any) => (
