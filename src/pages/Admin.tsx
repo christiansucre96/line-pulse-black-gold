@@ -268,7 +268,7 @@ export default function Admin() {
     }));
   };
 
-  // ✅ AUTO-SYNC – now uses sync_upcoming (lightweight, only upcoming games)
+  // AUTO-SYNC every 30 minutes (lightweight – only upcoming games)
   useEffect(() => {
     if (!isAdmin) return;
     
@@ -278,19 +278,22 @@ export default function Admin() {
       
       for (const sport of sports) {
         try {
+          // Try the lightweight sync_upcoming first; if not available, fallback to daily
           const res = await fetch(EDGE_URL, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ operation: "sync_upcoming", sport })
           });
-          
           if (!res.ok) {
-            const errorText = await res.text();
-            console.error(`❌ Auto-sync failed for ${sport}:`, errorText);
-          } else {
-            const data = await res.json();
-            console.log(`✅ Auto-sync complete for ${sport}: ${data.teams} teams, ${data.players} players`);
+            // fallback to daily if sync_upcoming doesn't exist
+            const fallbackRes = await fetch(EDGE_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ operation: "daily", sport })
+            });
+            if (!fallbackRes.ok) throw new Error(`HTTP ${fallbackRes.status}`);
           }
+          console.log(`✅ Auto-sync complete for ${sport}`);
         } catch (err) {
           console.error(`❌ Auto-sync error for ${sport}:`, err);
         }
@@ -300,12 +303,12 @@ export default function Admin() {
       console.log("✅ Auto-sync cycle complete");
     };
     
-    autoSync(); // run immediately
+    autoSync();
     const interval = setInterval(autoSync, 30 * 60 * 1000);
     return () => clearInterval(interval);
   }, [isAdmin]);
 
-  // 🔥 NEW: Sync upcoming games for a single sport (lightweight, only teams/players with games in next 3 days)
+  // Sync upcoming games for a single sport (lightweight)
   const syncUpcoming = async (sport: string) => {
     const res = await fetch(EDGE_URL, {
       method: "POST",
@@ -313,8 +316,7 @@ export default function Admin() {
       body: JSON.stringify({ operation: "sync_upcoming", sport })
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    return data;
+    return await res.json();
   };
 
   // Sync all sports (upcoming only)
@@ -398,7 +400,7 @@ export default function Admin() {
                       <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Role</th>
                       <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Subscription</th>
                       <th className="text-left py-3 px-4 font-semibold text-muted-foreground">Grant Access</th>
-                    </td>
+                    </tr>
                   </thead>
                   <tbody>
                     {users.map((u) => {
@@ -565,7 +567,7 @@ export default function Admin() {
               </p>
             </div>
 
-            {/* ESPN DATA SYNC SECTION – UPDATED TO USE sync_upcoming */}
+            {/* ESPN DATA SYNC SECTION – Lightweight (upcoming games) */}
             <div className="bg-card border border-border rounded-xl p-4">
               <h3 className="font-display font-bold text-foreground mb-4">📡 ESPN Data Sync (Upcoming Games Only)</h3>
               <p className="text-sm text-muted-foreground mb-4">
