@@ -30,14 +30,14 @@ export default function Roster() {
     const fetchRoster = async () => {
       setLoading(true);
       try {
+        // ✅ ADD mode: "all" to get all teams/players (not just upcoming games)
         const res = await fetch(EDGE_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ operation: "get_players", sport }),
+          body: JSON.stringify({ operation: "get_players", sport, mode: "all" }),
         });
         const data = await res.json();
         if (data.success && data.players) {
-          // Group by team name
           const grouped = new Map<string, any[]>();
           data.players.forEach((p: any) => {
             const teamKey = p.team || "Unknown";
