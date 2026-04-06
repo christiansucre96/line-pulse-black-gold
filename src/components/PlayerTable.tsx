@@ -54,7 +54,13 @@ export function PlayerTable({ players, sortField, sortDir, onSort, onPlayerClick
           {players.map((player) => (
             <tr
               key={player.id}
-              className="border-b border-border/50 hover:bg-secondary/50 cursor-pointer transition-colors"
+              className={`border-b cursor-pointer ${
+                player.status === "injured"
+                  ? "bg-red-500/10 hover:bg-red-500/20"
+                  : player.is_starter
+                  ? "bg-green-500/10 hover:bg-green-500/20"
+                  : "bg-gray-500/10 hover:bg-gray-500/20"
+              } transition-colors`}
               onClick={() => onPlayerClick(player.id)}
             >
               <td className="py-3 px-3">
