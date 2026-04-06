@@ -21,70 +21,42 @@ const ESPN_PATH: Record<string, string> = {
   soccer: 'soccer/eng.1',
 }
 
-// ---------- NBA STATS API (balldontlie) ----------
-async function fetchNBAStatsForPlayer(playerId: string): Promise<any[]> {
-  // Map ESPN player ID to balldontlie ID? This is complex. For demo, we'll use a fallback.
-  // In production, you'd need a mapping table or use ESPN's own stats API.
-  // For now, return empty (will use placeholder).
-  return []
-}
-
-// ---------- Generic Stats Fetcher ----------
-async function fetchPlayerStats(sport: string, externalId: string): Promise<any[]> {
-  if (sport === 'nba') {
-    return fetchNBAStatsForPlayer(externalId)
-  }
-  // Other sports: ESPN stats endpoint (needs league ID, season)
-  return []
-}
-
-// ---------- Compute Rolling Averages ----------
-function computeRollingAverages(stats: any[], statKey: string): { last5: number, last10: number, last15: number, last20: number } {
-  const values = stats.map(s => s[statKey]).filter(v => v !== null && !isNaN(v))
-  const avg = (arr: number[]) => arr.reduce((a,b) => a+b,0) / (arr.length || 1)
-  return {
-    last5: avg(values.slice(0,5)),
-    last10: avg(values.slice(0,10)),
-    last15: avg(values.slice(0,15)),
-    last20: avg(values.slice(0,20)),
-  }
-}
-
-// ---------- Update Player Averages in DB ----------
-async function updatePlayerAverages(sb: any, playerId: string, sport: string) {
-  // Fetch last 20 games from player_stats
-  const { data: stats } = await sb
-    .from('player_stats')
-    .select('points, rebounds, assists, steals, minutes, game_date')
-    .eq('player_id', playerId)
-    .order('game_date', { ascending: false })
-    .limit(20)
-
-  if (!stats || stats.length === 0) return
-
-  const pointsAvg = computeRollingAverages(stats, 'points')
-  const reboundsAvg = computeRollingAverages(stats, 'rebounds')
-  const assistsAvg = computeRollingAverages(stats, 'assists')
-
-  await sb.from('player_averages').upsert({
-    player_id: playerId,
-    avg_points: pointsAvg.last20,
-    avg_rebounds: reboundsAvg.last20,
-    avg_assists: assistsAvg.last20,
-    last5_avg_points: pointsAvg.last5,
-    last10_avg_points: pointsAvg.last10,
-    last15_avg_points: pointsAvg.last15,
-    last20_avg_points: pointsAvg.last20,
-    last5_avg_rebounds: reboundsAvg.last5,
-    last10_avg_rebounds: reboundsAvg.last10,
-    last15_avg_rebounds: reboundsAvg.last15,
-    last20_avg_rebounds: reboundsAvg.last20,
-    last5_avg_assists: assistsAvg.last5,
-    last10_avg_assists: assistsAvg.last10,
-    last15_avg_assists: assistsAvg.last15,
-    last20_avg_assists: assistsAvg.last20,
-    updated_at: new Date().toISOString(),
-  }, { onConflict: 'player_id' })
+// ---------- Helper: fetch all teams for a sport (for roster/injuries) ----------
+async function getAllTeams(sb: any, sport: string): Promise<string[]> {
+  const teamExtIds: string[] = []
+  try {
+    let url = ''
+    if (sport === 'soccer') {
+      // For soccer, get teams from the league's team list
+      url = `https://site.api.espn.com/apis/site/v2/sports/${ESPN_PATH[sport]}/teams`
+    } else {
+      url = `https://site.api.espn.com/apis/site/v2/sports/${ESPN_PATH[sport]}/teams`
+    }
+    const res = await fetch(url)
+    if (!res.ok) return []
+    const data = await res.json()
+    // ESPN structure varies: sometimes data.sports[0].leagues[0].teams
+    let teams = data.sports?.[0]?.leagues?.[0]?.teams || data.teams || []
+    if (teams.length === 0 && data.leagues) {
+      // Alternative structure
+      for (const league of data.leagues) {
+        teams.push(...(league.teams || []))
+      }
+    }
+    for (const t of teams) {
+      const team = t.team || t
+      const extId = String(team.id)
+      teamExtIds.push(extId)
+      await sb.from('teams').upsert({
+        external_id: extId,
+        sport,
+        name: team.displayName,
+        abbreviation: team.abbreviation,
+        logo_url: team.logos?.[0]?.href || null,
+      }, { onConflict: 'sport,external_id' })
+    }
+  } catch (e) { console.error('getAllTeams error', e) }
+  return teamExtIds
 }
 
 // ---------- Fetch games for next N days ----------
@@ -139,30 +111,10 @@ async function fetchInjuries(sport: string): Promise<Map<string, { status: strin
   return injuryMap
 }
 
-// ---------- Get all teams for a sport (no date filter) ----------
-async function getAllTeams(sb: any, sport: string) {
-  // Fetch from ESPN team list
-  const url = `https://site.api.espn.com/apis/site/v2/sports/${ESPN_PATH[sport]}/teams`
-  const res = await fetch(url)
-  if (!res.ok) return []
-  const data = await res.json()
-  const teams = data.sports?.[0]?.leagues?.[0]?.teams?.map((t: any) => t.team) || []
-  for (const team of teams) {
-    await sb.from('teams').upsert({
-      external_id: String(team.id),
-      sport,
-      name: team.displayName,
-      abbreviation: team.abbreviation,
-      logo_url: team.logos?.[0]?.href || null,
-    }, { onConflict: 'sport,external_id' })
-  }
-  return teams.map((t: any) => t.id)
-}
-
 // ---------- Get players (with optional upcoming games filter) ----------
 async function getPlayers(sb: any, sport: string, onlyUpcoming = true) {
-  let games = []
   let teamExtIds = new Set<string>()
+  let games: any[] = []
 
   if (onlyUpcoming) {
     games = await fetchGamesForRange(sport, 2)
@@ -171,16 +123,17 @@ async function getPlayers(sb: any, sport: string, onlyUpcoming = true) {
       if (g.away_team_ext_id) teamExtIds.add(g.away_team_ext_id)
     }
     if (teamExtIds.size === 0) {
-      // No upcoming games – return empty array for scanner
+      // No upcoming games – return empty for scanner, but for roster we'd call with onlyUpcoming=false
       return []
     }
   } else {
-    // For roster/injuries: get all teams
+    // For roster/injuries: fetch all teams
     const allTeamIds = await getAllTeams(sb, sport)
-    teamExtIds = new Set(allTeamIds.map(String))
+    teamExtIds = new Set(allTeamIds)
+    if (teamExtIds.size === 0) return []
   }
 
-  // Ensure teams in DB
+  // Ensure teams are in DB (already done in getAllTeams for all-teams mode, but do again for upcoming)
   for (const extId of teamExtIds) {
     try {
       const url = `https://site.api.espn.com/apis/site/v2/sports/${ESPN_PATH[sport]}/teams/${extId}`
@@ -224,7 +177,9 @@ async function getPlayers(sb: any, sport: string, onlyUpcoming = true) {
       if (!res.ok) continue
       const d = await res.json()
       const flat = Array.isArray(d.athletes) ? d.athletes.flatMap((g: any) => g.items || [g]) : []
-      for (const a of flat) {
+      // Use index to determine starter (first 5-7 players are likely starters)
+      for (let idx = 0; idx < flat.length; idx++) {
+        const a = flat[idx]
         const athleteId = String(a.id)
         const injury = injuryMap.get(athleteId)
         let status = 'active'
@@ -233,8 +188,19 @@ async function getPlayers(sb: any, sport: string, onlyUpcoming = true) {
           status = injury.status
           injuryDescription = injury.description
         }
-        const lineupOrder = a.lineupOrder || a.position?.order || 999
-        const isStarter = lineupOrder <= 7
+
+        // Starter logic:
+        // 1. If we have average minutes from stats (we'll fetch later) – but here we don't yet.
+        // 2. Use roster order: first 5 are starters (NBA/NFL typically lists starters first)
+        // 3. For soccer, first 11 are starters.
+        let isStarter = false
+        if (sport === 'soccer') {
+          isStarter = idx < 11
+        } else if (sport === 'nfl') {
+          isStarter = idx < 22 // Offense+defense starters
+        } else { // NBA, NHL, MLB
+          isStarter = idx < 5
+        }
 
         players.push({
           external_id: athleteId,
@@ -257,7 +223,7 @@ async function getPlayers(sb: any, sport: string, onlyUpcoming = true) {
     await sb.from('players').upsert(players, { onConflict: 'sport,external_id' })
   }
 
-  // Fetch from DB with averages
+  // Fetch from DB with averages (if any)
   const { data: dbPlayers } = await sb
     .from('players')
     .select(`
@@ -266,7 +232,8 @@ async function getPlayers(sb: any, sport: string, onlyUpcoming = true) {
       player_averages(
         last5_avg_points, last10_avg_points, last15_avg_points, last20_avg_points,
         last5_avg_rebounds, last10_avg_rebounds, last15_avg_rebounds, last20_avg_rebounds,
-        last5_avg_assists, last10_avg_assists, last15_avg_assists, last20_avg_assists
+        last5_avg_assists, last10_avg_assists, last15_avg_assists, last20_avg_assists,
+        avg_minutes
       )
     `)
     .eq('sport', sport)
@@ -274,7 +241,7 @@ async function getPlayers(sb: any, sport: string, onlyUpcoming = true) {
 
   if (!dbPlayers?.length) return []
 
-  // Build opponent map (for upcoming games only)
+  // Build opponent map (only for upcoming games)
   const opponentMap = new Map()
   if (onlyUpcoming) {
     for (const g of games) {
@@ -283,23 +250,22 @@ async function getPlayers(sb: any, sport: string, onlyUpcoming = true) {
     }
   }
 
-  // Default line based on sport and position
+  // Generate lines based on averages or sport defaults
   const getLine = (player: any) => {
-    const sportKey = sport as keyof typeof sportLines
-    const pos = player.position?.toLowerCase() || ''
+    const avg = player.player_averages || {}
+    const last20Points = avg.last20_avg_points || 15
     if (sport === 'nba') {
-      if (pos.includes('g')) return 22.5
-      if (pos.includes('f')) return 18.5
-      if (pos.includes('c')) return 15.5
-      return 20.5
+      const pos = player.position?.toLowerCase() || ''
+      if (pos.includes('g')) return Math.round(last20Points * 10) / 10
+      if (pos.includes('f')) return Math.round((last20Points - 3) * 10) / 10
+      return Math.round((last20Points - 5) * 10) / 10
     }
-    if (sport === 'nfl') return 225.5 // passing yards
-    if (sport === 'mlb') return 1.5   // hits
-    if (sport === 'nhl') return 0.5   // goals
+    if (sport === 'nfl') return 225.5
+    if (sport === 'mlb') return 1.5
+    if (sport === 'nhl') return 0.5
+    if (sport === 'soccer') return 0.5
     return 20.5
   }
-
-  const sportLines = { nba: 22.5, nfl: 225.5, mlb: 1.5, nhl: 0.5, soccer: 0.5 }
 
   return dbPlayers.map(p => {
     const avg = p.player_averages || {}
@@ -311,7 +277,13 @@ async function getPlayers(sb: any, sport: string, onlyUpcoming = true) {
 
     const teamExt = teams.find(t => t.id === p.team_id)?.external_id
     const oppExt = onlyUpcoming ? opponentMap.get(teamExt) : null
-    const opponent = oppExt ? (teamAbbrByExt.get(oppExt) || 'TBD') : 'N/A'
+    const opponent = oppExt ? (teamAbbrByExt.get(oppExt) || 'TBD') : (onlyUpcoming ? 'TBD' : 'N/A')
+
+    // Override starter if minutes > 20 (from stats)
+    let isStarter = p.is_starter
+    if (avg.avg_minutes && avg.avg_minutes >= 20) {
+      isStarter = true
+    }
 
     return {
       id: p.id,
@@ -327,7 +299,7 @@ async function getPlayers(sb: any, sport: string, onlyUpcoming = true) {
       trend: 'stable',
       status: p.status || 'active',
       injury_description: p.injury_description,
-      is_starter: p.is_starter || false,
+      is_starter: isStarter,
     }
   })
 }
@@ -338,34 +310,10 @@ async function syncUpcoming(sb: any, sport: string) {
   return { teams: 0, players: players.length }
 }
 
-// ---------- Full sync: fetch historical stats and update averages ----------
+// ---------- Full sync (placeholder) ----------
 async function fullSync(sb: any, sport: string) {
-  // Get all players for this sport
-  const { data: players } = await sb.from('players').select('id, external_id').eq('sport', sport)
-  if (!players) return { players: 0, props_generated: 0 }
-
-  let updated = 0
-  for (const player of players) {
-    const stats = await fetchPlayerStats(sport, player.external_id)
-    if (stats.length) {
-      // Insert stats into player_stats
-      for (const stat of stats) {
-        await sb.from('player_stats').upsert({
-          player_id: player.id,
-          game_date: stat.game_date,
-          points: stat.points,
-          rebounds: stat.rebounds,
-          assists: stat.assists,
-          steals: stat.steals,
-          minutes: stat.minutes,
-        }, { onConflict: 'player_id,game_date' })
-      }
-      await updatePlayerAverages(sb, player.id, sport)
-      updated++
-    }
-    await new Promise(r => setTimeout(r, 100))
-  }
-  return { players: updated, props_generated: updated * 3 }
+  // For now, just return
+  return { players: 0, props_generated: 0 }
 }
 
 // ---------- Main handler ----------
@@ -377,7 +325,7 @@ Deno.serve(async (req) => {
   try {
     const sb = getSB()
     const body = await req.json().catch(() => ({}))
-    let { operation, sport, mode } = body // mode: 'upcoming' or 'all'
+    let { operation, sport, mode } = body
 
     if (!operation && sport) operation = 'get_players'
     if (!operation) throw new Error('Missing operation')
@@ -387,7 +335,7 @@ Deno.serve(async (req) => {
 
     switch (operation) {
       case 'get_players': {
-        const onlyUpcoming = mode !== 'all' // 'all' for roster/injuries, default upcoming
+        const onlyUpcoming = mode !== 'all'
         const players = await getPlayers(sb, sport, onlyUpcoming)
         return new Response(JSON.stringify({ success: true, players, count: players.length }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
