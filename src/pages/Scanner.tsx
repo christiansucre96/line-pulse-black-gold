@@ -1,6 +1,6 @@
 // src/pages/Scanner.tsx
 import { useState, useEffect } from "react";
-import { Search, BarChart3, Loader2 } from "lucide-react";
+import { Search, BarChart3, Loader2, RefreshCw } from "lucide-react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { SportTabs } from "@/components/SportTabs";
 import { PlayerTable, SortField, SortDir } from "@/components/PlayerTable";
@@ -27,9 +27,11 @@ export default function Scanner() {
   const [players, setPlayers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [dbStats, setDbStats] = useState({ players: 0 });
+  const [refreshing, setRefreshing] = useState(false);
 
-  const fetchData = async () => {
-    setLoading(true);
+  const fetchData = async (showLoading = true) => {
+    if (showLoading) setLoading(true);
+    else setRefreshing(true);
     try {
       const dbSport = sportDbMap[sport];
       console.log(`📊 Fetching ${sport} (${dbSport}) data...`);
@@ -39,6 +41,10 @@ export default function Scanner() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ operation: "get_players", sport: dbSport })
       });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
 
       const data = await response.json();
       console.log("Edge response:", data);
@@ -70,14 +76,15 @@ export default function Scanner() {
     } catch (error) {
       console.error("Error fetching players:", error);
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
+      else setRefreshing(false);
     }
   };
 
+  // Load once on mount and when sport changes – NO AUTO-REFRESH
   useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 30000);
-    return () => clearInterval(interval);
+    fetchData(true);
+    // ✅ Removed the 30-second interval
   }, [sport]);
 
   const handleSportChange = (s: Sport) => {
@@ -151,6 +158,14 @@ export default function Scanner() {
             />
           </div>
           <button
+            onClick={() => fetchData(false)}
+            disabled={refreshing}
+            className="px-4 py-2.5 rounded-lg bg-secondary border border-border text-sm font-medium text-secondary-foreground hover:bg-muted transition-colors flex items-center gap-2"
+          >
+            {refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            {refreshing ? "Refreshing..." : "Refresh Now"}
+          </button>
+          <button
             onClick={() => setSortDir(d => (d === "desc" ? "asc" : "desc"))}
             className="px-4 py-2.5 rounded-lg bg-secondary border border-border text-sm font-medium text-secondary-foreground hover:bg-muted transition-colors flex items-center gap-2"
           >
@@ -158,7 +173,6 @@ export default function Scanner() {
             {sortDir === "desc" ? "↓ Highest First" : "↑ Lowest First"}
           </button>
         </div>
-        {/* Simple stat filters */}
         <div className="flex flex-wrap gap-2 py-2">
           {["points", "assists", "rebounds", "steals"].map(stat => (
             <button
@@ -185,7 +199,9 @@ export default function Scanner() {
           <>
             <div className="mb-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
               <p className="text-xs text-green-400">
-                ✅ LIVE 24/7: {dbStats.players} {sport} players • Auto-refreshes every 30 seconds
+                ✅ LIVE: {dbStats.players} {sport} players with upcoming games (next 3 days)
+                <br />
+                <span className="text-muted-foreground">Auto-refresh disabled – click "Refresh Now" to update</span>
               </p>
             </div>
             <div className="bg-card border border-border rounded-xl overflow-hidden">
