@@ -17,6 +17,9 @@ const sportDbMap: Record<Sport, string> = {
   Soccer: "soccer",
 };
 
+// Simple cache outside component (persists across remounts)
+const playerCache = new Map<string, any[]>();
+
 export default function Scanner() {
   const [sport, setSport] = useState<Sport>("NBA");
   const [search, setSearch] = useState("");
@@ -29,9 +32,19 @@ export default function Scanner() {
   const [dbStats, setDbStats] = useState({ players: 0 });
   const [refreshing, setRefreshing] = useState(false);
 
-  const fetchData = async (showLoading = true) => {
-    if (showLoading) setLoading(true);
-    else setRefreshing(true);
+  const fetchData = async (force = false) => {
+    const cacheKey = sport;
+    if (!force && playerCache.has(cacheKey)) {
+      const cached = playerCache.get(cacheKey);
+      setPlayers(cached);
+      setDbStats({ players: cached.length });
+      setLoading(false);
+      return;
+    }
+
+    if (force) setRefreshing(true);
+    else setLoading(true);
+
     try {
       const dbSport = sportDbMap[sport];
       console.log(`📊 Fetching ${sport} (${dbSport}) data...`);
@@ -42,9 +55,7 @@ export default function Scanner() {
         body: JSON.stringify({ operation: "get_players", sport: dbSport })
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
       const data = await response.json();
       console.log("Edge response:", data);
@@ -66,7 +77,9 @@ export default function Scanner() {
           categories: ["points", "assists", "rebounds"],
           status: p.status || "active",
           is_starter: p.is_starter ?? false,
+          injury_description: p.injury_description,
         }));
+        playerCache.set(cacheKey, formatted);
         setPlayers(formatted);
         setDbStats({ players: data.count });
       } else {
@@ -76,15 +89,14 @@ export default function Scanner() {
     } catch (error) {
       console.error("Error fetching players:", error);
     } finally {
-      if (showLoading) setLoading(false);
-      else setRefreshing(false);
+      setLoading(false);
+      setRefreshing(false);
     }
   };
 
-  // Load once on mount and when sport changes – NO AUTO-REFRESH
+  // Load on mount and when sport changes – uses cache
   useEffect(() => {
-    fetchData(true);
-    // ✅ Removed the 30-second interval
+    fetchData(false);
   }, [sport]);
 
   const handleSportChange = (s: Sport) => {
@@ -158,7 +170,7 @@ export default function Scanner() {
             />
           </div>
           <button
-            onClick={() => fetchData(false)}
+            onClick={() => fetchData(true)}
             disabled={refreshing}
             className="px-4 py-2.5 rounded-lg bg-secondary border border-border text-sm font-medium text-secondary-foreground hover:bg-muted transition-colors flex items-center gap-2"
           >
@@ -201,7 +213,7 @@ export default function Scanner() {
               <p className="text-xs text-green-400">
                 ✅ LIVE: {dbStats.players} {sport} players with upcoming games (next 3 days)
                 <br />
-                <span className="text-muted-foreground">Auto-refresh disabled – click "Refresh Now" to update</span>
+                <span className="text-muted-foreground">Data cached per sport – use Refresh to update</span>
               </p>
             </div>
             <div className="bg-card border border-border rounded-xl overflow-hidden">
