@@ -1,4 +1,3 @@
-// supabase/functions/clever-action/index.ts
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const corsHeaders = {
@@ -141,14 +140,9 @@ async function getPlayersWithUpcomingGames(sb: any, sport: string) {
           injuryDescription = injury.description
         }
 
-        // Determine starter status (heuristic: if avg_minutes > 20, but we don't have stats yet)
-        // We'll set a flag based on position or placeholder; you can later replace with real data.
-        // For now, assume all players are bench unless they are in the first 5 of the roster.
-        // Better: fetch average minutes from a stats API.
-        let isStarter = false
-        // TEMP: Use roster order as crude starter indicator (first 5-7 players)
-        const lineupOrder = a.lineupOrder || a.position?.order || 0
-        if (lineupOrder > 0 && lineupOrder <= 7) isStarter = true
+        // Starter heuristic: use roster order (first 7 players are likely starters)
+        const lineupOrder = a.lineupOrder || a.position?.order || 999
+        const isStarter = lineupOrder <= 7
 
         players.push({
           external_id: athleteId,
@@ -221,14 +215,12 @@ async function getPlayersWithUpcomingGames(sb: any, sport: string) {
 // Sync upcoming games only (teams + players)
 async function syncUpcoming(sb: any, sport: string) {
   const players = await getPlayersWithUpcomingGames(sb, sport)
-  // Also count teams (just for response)
   const { data: teams } = await sb.from('teams').select('id').eq('sport', sport)
   return { teams: teams?.length || 0, players: players.length }
 }
 
 // Full sync placeholder (for historical stats)
 async function fullSync(sb: any, sport: string) {
-  // TODO: implement real stats fetching and prop generation
   return { players: 0, props_generated: 0 }
 }
 
