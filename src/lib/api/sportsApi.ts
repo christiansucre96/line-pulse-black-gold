@@ -59,7 +59,7 @@ export const sportsApi = {
     return invoke({ operation: "health" });
   },
 
-  // Direct DB queries (still useful)
+  // Direct DB queries (fallback)
   async getPlayersFromDB(sport?: SportType) {
     let q = supabase.from("players").select("*, teams(name, abbreviation)");
     if (sport) q = q.eq("sport", sport);
