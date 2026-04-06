@@ -5,17 +5,8 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { SportTabs } from "@/components/SportTabs";
 import { PlayerTable, SortField, SortDir } from "@/components/PlayerTable";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
+import { sportsApi } from "@/lib/api/sportsApi";
 import { Sport, sportCategories } from "@/data/mockPlayers";
-
-const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
-
-const sportDbMap: Record<Sport, string> = {
-  NBA: "nba",
-  NFL: "nfl",
-  MLB: "mlb",
-  NHL: "nhl",
-  Soccer: "soccer",
-};
 
 export default function Scanner() {
   const [sport, setSport] = useState<Sport>("NBA");
@@ -26,40 +17,20 @@ export default function Scanner() {
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
   const [players, setPlayers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [topPicks, setTopPicks] = useState<any[]>([]);
   const [dbStats, setDbStats] = useState({ players: 0 });
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const dbSport = sportDbMap[sport];
-      const response = await fetch(EDGE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ operation: "get_players", sport: dbSport })
-      });
-      const data = await response.json();
-      
-      if (data.success && data.players) {
-        const formatted = data.players.map((p: any) => ({
-          // p.id is composite like "uuid_points" – we keep it for table key, but extract real UUID for detail view later
-          id: p.id,
-          player_id: p.player_id || p.id.split('_')[0], // store real UUID
-          name: p.name,
-          position: p.position || "N/A",
-          team: p.team || "Unknown",
-          teamAbbr: p.team_abbr || "N/A",
-          opponent: p.opponent || "TBD",
-          initials: p.name?.split(' ').map((n: string) => n[0]).join('') || "??",
-          line: p.line ?? 0,
-          edge_type: p.edge_type || "NONE",
-          confidence: p.confidence ?? 50,
-          hit_rate: p.hit_rate ?? 0,
-          trend: p.trend || "stable",
-          categories: ["points", "assists", "rebounds"],
-        }));
-        setPlayers(formatted);
-        setDbStats({ players: data.count });
-      }
+      const dbSport = sport.toLowerCase() as any;
+      const data = await sportsApi.getPlayers(dbSport);
+      setPlayers(data);
+      setDbStats({ players: data.length });
+
+      // Also fetch top picks if you want to display them separately
+      const top = await sportsApi.getTopPicks(dbSport);
+      setTopPicks(top);
     } catch (error) {
       console.error("Error fetching players:", error);
     } finally {
@@ -80,12 +51,14 @@ export default function Scanner() {
   };
 
   const toggleStat = (stat: string) => {
-    setActiveStats(prev => prev.includes(stat) ? prev.filter(s => s !== stat) : [...prev, stat]);
+    setActiveStats((prev) =>
+      prev.includes(stat) ? prev.filter((s) => s !== stat) : [...prev, stat]
+    );
   };
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
-      setSortDir(d => d === "desc" ? "asc" : "desc");
+      setSortDir((d) => (d === "desc" ? "asc" : "desc"));
     } else {
       setSortField(field);
       setSortDir("desc");
@@ -93,20 +66,18 @@ export default function Scanner() {
   };
 
   const filteredPlayers = players
-    .filter(p => !search || p.name.toLowerCase().includes(search.toLowerCase()))
+    .filter((p) => !search || p.name.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => {
       const aVal = a[sortField];
       const bVal = b[sortField];
-      if (typeof aVal === 'number' && typeof bVal === 'number') {
+      if (typeof aVal === "number" && typeof bVal === "number") {
         return sortDir === "desc" ? bVal - aVal : aVal - bVal;
       }
       return 0;
     });
 
-  // Handle player click – extract real UUID from composite ID
   const handlePlayerClick = (compositeId: string) => {
-    // compositeId looks like "8383339d-474e-4ddf-9ed5-3c068e39c0e7_points"
-    const realId = compositeId.split('_')[0];
+    const realId = compositeId.split("_")[0];
     setSelectedPlayer(realId);
   };
 
@@ -143,13 +114,15 @@ export default function Scanner() {
               className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-input border border-border text-foreground placeholder:text-muted-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
             />
           </div>
-          <button onClick={() => setSortDir(d => d === "desc" ? "asc" : "desc")}
-            className="px-4 py-2.5 rounded-lg bg-secondary border border-border text-sm font-medium text-secondary-foreground hover:bg-muted transition-colors flex items-center gap-2">
+          <button
+            onClick={() => setSortDir((d) => (d === "desc" ? "asc" : "desc"))}
+            className="px-4 py-2.5 rounded-lg bg-secondary border border-border text-sm font-medium text-secondary-foreground hover:bg-muted transition-colors flex items-center gap-2"
+          >
             <BarChart3 className="w-4 h-4" />
             {sortDir === "desc" ? "↓ Highest First" : "↑ Lowest First"}
           </button>
         </div>
-        {/* StatFilters temporarily removed – add back if needed */}
+        <StatFilters activeStats={activeStats} onToggleStat={toggleStat} sport={sport} />
       </div>
 
       <div className="px-6 pb-8">
@@ -173,6 +146,18 @@ export default function Scanner() {
                 onPlayerClick={handlePlayerClick}
               />
             </div>
+            {topPicks.length > 0 && (
+              <div className="mt-6 p-4 bg-gradient-to-r from-yellow-500/10 to-orange-500/10 border border-yellow-500/30 rounded-lg">
+                <h3 className="font-bold text-foreground mb-2">🔥 Top Picks Today</h3>
+                <div className="flex flex-wrap gap-2">
+                  {topPicks.map((pick, i) => (
+                    <span key={i} className="px-2 py-1 bg-primary/20 rounded text-xs">
+                      {pick.name} – {pick.edge_type} {pick.line}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         )}
         <div className="text-center text-sm text-muted-foreground mt-4">
