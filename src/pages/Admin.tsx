@@ -1,6 +1,5 @@
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
-import { sportsApi } from "@/lib/api/sportsApi";
 import { useEffect, useState } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { toast } from "sonner";
@@ -30,7 +29,7 @@ export default function Admin() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"users" | "analytics" | "data" | "settings">("users");
-  const [stats, setStats] = useState({ totalUsers: 0, totalParlays: 0, admins: 0, totalPlayers: 0, totalGames: 0, totalTeams: 0 });
+  const [stats, setStats] = useState({ totalUsers: 0, totalParlays: 0, admins: 0, totalPlayers: 0, totalGames: 0, totalTeams: 0, totalProps: 0 });
   const [ingesting, setIngesting] = useState<string | null>(null);
   const [logs, setLogs] = useState<any[]>([]);
 
@@ -60,6 +59,7 @@ export default function Admin() {
       const { count: playerCount } = await supabase.from("players").select("*", { count: "exact", head: true });
       const { count: gameCount } = await supabase.from("games_data").select("*", { count: "exact", head: true });
       const { count: teamCount } = await supabase.from("teams").select("*", { count: "exact", head: true });
+      const { count: propsCount } = await supabase.from("player_props").select("*", { count: "exact", head: true });
 
       setStats({
         totalUsers: merged.length,
@@ -68,6 +68,7 @@ export default function Admin() {
         totalPlayers: playerCount || 0,
         totalGames: gameCount || 0,
         totalTeams: teamCount || 0,
+        totalProps: propsCount || 0,
       });
       setLoading(false);
     };
@@ -123,13 +124,24 @@ export default function Admin() {
     return { label: "Expired", color: "bg-red-500/20 text-red-400" };
   };
 
+  // ---------- REPLACED sportsApi calls with direct fetch ----------
   const handleIngest = async (sport: string, operation: string) => {
     const key = `${sport}-${operation}`;
     setIngesting(key);
     try {
-      const result = await sportsApi.ingest(sport, operation);
-      toast.success(`${sport.toUpperCase()} ${operation}: ${result?.records || 0} records`);
-      loadLogs();
+      // Map legacy operations to edge function operations
+      let edgeOp = "sync_upcoming";
+      if (operation === "full") edgeOp = "full_sync";
+      // teams/players/games all use sync_upcoming (it syncs everything)
+      const res = await fetch(EDGE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operation: edgeOp, sport })
+      });
+      const data = await res.json();
+      toast.success(`${sport.toUpperCase()} ${operation}: ${data?.players || 0} records`);
+      await refreshStats();
+      // loadLogs would need a separate implementation – we'll skip for now
     } catch (e: any) {
       toast.error(`Ingestion failed: ${e.message}`);
     } finally {
@@ -140,9 +152,16 @@ export default function Admin() {
   const handleRunDaily = async () => {
     setIngesting("daily");
     try {
-      await sportsApi.runDailyAutomation();
+      const sports = ["nba", "nfl", "mlb", "nhl", "soccer"];
+      for (const sport of sports) {
+        await fetch(EDGE_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ operation: "sync_upcoming", sport })
+        });
+      }
       toast.success("Daily automation completed!");
-      loadLogs();
+      await refreshStats();
     } catch (e: any) {
       toast.error(`Daily run failed: ${e.message}`);
     } finally {
@@ -153,10 +172,16 @@ export default function Admin() {
   const handleFullSystemSync = async () => {
     setIngesting("fullSync");
     try {
-      const result = await sportsApi.fullSystemSync();
-      console.log("Full system sync result:", result);
+      const sports = ["nba", "nfl", "mlb", "nhl", "soccer"];
+      for (const sport of sports) {
+        await fetch(EDGE_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ operation: "full_sync", sport })
+        });
+      }
       toast.success("Full system sync completed for all sports!");
-      loadLogs();
+      await refreshStats();
     } catch (e: any) {
       toast.error(`Full sync failed: ${e.message}`);
     } finally {
@@ -167,9 +192,14 @@ export default function Admin() {
   const handleLoadNbaProps = async () => {
     setIngesting("loadProps");
     try {
-      const props = await sportsApi.getProps("nba");
-      console.log("NBA props:", props);
-      toast.success(`Loaded ${props.length} NBA props (check console)`);
+      const res = await fetch(EDGE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operation: "props", sport: "nba" })
+      });
+      const data = await res.json();
+      toast.success(`Loaded ${data.props_generated || 0} NBA props`);
+      await refreshStats();
     } catch (e: any) {
       toast.error(`Failed to load props: ${e.message}`);
     } finally {
@@ -247,11 +277,14 @@ export default function Admin() {
     setIngesting(null);
   };
 
+  // Simplified log loading – if you have an ingestion_logs table, you can query it directly
   const loadLogs = async () => {
     try {
-      const data = await sportsApi.getIngestionLogs();
+      const { data } = await supabase.from("ingestion_logs").select("*").order("started_at", { ascending: false }).limit(15);
       setLogs(data || []);
-    } catch { /* ignore */ }
+    } catch {
+      setLogs([]);
+    }
   };
 
   const refreshStats = async () => {
@@ -278,20 +311,13 @@ export default function Admin() {
       
       for (const sport of sports) {
         try {
-          // Try the lightweight sync_upcoming first; if not available, fallback to daily
           const res = await fetch(EDGE_URL, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ operation: "sync_upcoming", sport })
           });
           if (!res.ok) {
-            // fallback to daily if sync_upcoming doesn't exist
-            const fallbackRes = await fetch(EDGE_URL, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ operation: "daily", sport })
-            });
-            if (!fallbackRes.ok) throw new Error(`HTTP ${fallbackRes.status}`);
+            throw new Error(`HTTP ${res.status}`);
           }
           console.log(`✅ Auto-sync complete for ${sport}`);
         } catch (err) {
@@ -366,7 +392,7 @@ export default function Admin() {
             { label: "Teams", value: stats.totalTeams, color: "text-purple-400" },
             { label: "Players", value: stats.totalPlayers, color: "text-blue-400" },
             { label: "Games", value: stats.totalGames, color: "text-yellow-400" },
-            { label: "Props", value: (stats as any).totalProps || 0, color: "text-pink-400" },
+            { label: "Props", value: stats.totalProps || 0, color: "text-pink-400" },
           ].map((s) => (
             <div key={s.label} className="bg-card border border-border rounded-xl p-3">
               <div className="text-xs text-muted-foreground">{s.label}</div>
@@ -772,7 +798,7 @@ export default function Admin() {
                 { label: "Total Teams in DB", value: stats.totalTeams },
                 { label: "Total Players in DB", value: stats.totalPlayers },
                 { label: "Total Games Tracked", value: stats.totalGames },
-                { label: "Total Props Generated", value: (stats as any).totalProps || 0 },
+                { label: "Total Props Generated", value: stats.totalProps || 0 },
                 { label: "Parlays Created", value: stats.totalParlays },
                 { label: "Registered Users", value: stats.totalUsers },
                 { label: "Admins", value: stats.admins },
