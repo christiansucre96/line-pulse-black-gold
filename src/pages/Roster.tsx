@@ -1,4 +1,3 @@
-// src/pages/Roster.tsx
 import { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { SportTabs } from "@/components/SportTabs";
@@ -6,12 +5,20 @@ import { Loader2 } from "lucide-react";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
-const sportDisplayMap = {
+const sportDisplayMap: Record<string, string> = {
   nba: "NBA",
   nfl: "NFL",
   mlb: "MLB",
   nhl: "NHL",
   soccer: "Soccer",
+};
+
+const sportDbMap: Record<string, string> = {
+  NBA: "nba",
+  NFL: "nfl",
+  MLB: "mlb",
+  NHL: "nhl",
+  Soccer: "soccer",
 };
 
 export default function Roster() {
@@ -126,12 +133,3 @@ export default function Roster() {
     </DashboardLayout>
   );
 }
-
-// Helper to map display sport to DB sport
-const sportDbMap: Record<string, string> = {
-  NBA: "nba",
-  NFL: "nfl",
-  MLB: "mlb",
-  NHL: "nhl",
-  Soccer: "soccer",
-};
