@@ -7,7 +7,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/hooks/useAuth";
 
-// Lazy load all pages
+// Lazy load all pages – if a file is missing, it won't break the build
 const Index = lazy(() => import("./pages/Index"));
 const Scanner = lazy(() => import("./pages/Scanner"));
 const ParlayBuilder = lazy(() => import("./pages/ParlayBuilder"));
@@ -15,7 +15,7 @@ const Leaderboard = lazy(() => import("./pages/Leaderboard"));
 const Roster = lazy(() => import("./pages/Roster"));
 const Injuries = lazy(() => import("./pages/Injuries"));
 const TopPicks = lazy(() => import("./pages/TopPicks"));
-// const Auth = lazy(() => import("./pages/Auth"));   // Temporarily removed
+// Auth route removed for now
 const Profile = lazy(() => import("./pages/Profile"));
 const Admin = lazy(() => import("./pages/Admin"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
@@ -41,7 +41,7 @@ const App = () => {
             <Suspense fallback={<div className="flex items-center justify-center h-screen">Loading...</div>}>
               <Routes>
                 <Route path="/" element={<Index />} />
-                {/* <Route path="/auth" element={<Auth />} />  Temporarily disabled */}
+                {/* <Route path="/auth" element={<Auth />} />  REMOVED */}
                 <Route path="/reset-password" element={<ResetPassword />} />
 
                 <Route path="/scanner" element={<Scanner />} />
