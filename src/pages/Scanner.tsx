@@ -6,13 +6,13 @@ import { PlayerTable, SortField, SortDir } from "@/components/PlayerTable";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { Sport, sportCategories } from "@/data/mockPlayers";
 
-// Free public API – no key required, no CORS
+// ---------- NBA API (free, no key) ----------
 const BALDONTLIE_API = "https://www.balldontlie.io/api/v1";
 
-// For now, only NBA works with this API. We'll add other sports later.
 async function fetchNBAPlayers() {
   try {
     const res = await fetch(`${BALDONTLIE_API}/players?per_page=100`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     return data.data.map((p: any) => ({
       id: p.id,
@@ -20,9 +20,9 @@ async function fetchNBAPlayers() {
       position: p.position || "N/A",
       team: p.team?.full_name || "Unknown",
       teamAbbr: p.team?.abbreviation || "N/A",
-      opponent: "TBD", // We'll add game info later
+      opponent: "TBD", // game info would need a second API call
       initials: (p.first_name[0] + p.last_name[0]).toUpperCase(),
-      line: 22.5,       // placeholder
+      line: 22.5,          // placeholder – replace with real lines later
       edge_type: "NONE",
       confidence: 50,
       hit_rate: 0,
@@ -37,6 +37,23 @@ async function fetchNBAPlayers() {
   }
 }
 
+// ---------- Placeholders for other sports (you can add real APIs later) ----------
+async function fetchOtherSportPlayers(sport: Sport) {
+  // For NFL, MLB, NHL, Soccer – you can integrate odds-api.io or another free API
+  console.log(`${sport} API not yet implemented – add your key to fetch real data`);
+  return [];
+}
+
+// ---------- Main fetch dispatcher ----------
+async function fetchPlayersBySport(sport: Sport) {
+  if (sport === "NBA") {
+    return await fetchNBAPlayers();
+  }
+  // Add other sports here as you integrate them
+  return await fetchOtherSportPlayers(sport);
+}
+
+// Simple cache to avoid repeated network calls
 const playerCache = new Map<string, any[]>();
 
 export default function Scanner() {
@@ -65,13 +82,8 @@ export default function Scanner() {
     else setLoading(true);
 
     try {
-      let playersData = [];
-      if (sport === "NBA") {
-        playersData = await fetchNBAPlayers();
-      } else {
-        // For other sports, we'll use a fallback (can add more APIs later)
-        playersData = [];
-      }
+      console.log(`📊 Fetching ${sport} players...`);
+      const playersData = await fetchPlayersBySport(sport);
       playerCache.set(cacheKey, playersData);
       setPlayers(playersData);
       setDbStats({ players: playersData.length });
@@ -83,6 +95,7 @@ export default function Scanner() {
     }
   };
 
+  // Load once on mount and when sport changes
   useEffect(() => {
     fetchData(false);
   }, [sport]);
@@ -199,7 +212,11 @@ export default function Scanner() {
               <p className="text-xs text-green-400">
                 ✅ LIVE: {dbStats.players} {sport} players
                 <br />
-                <span className="text-muted-foreground">Data from balldontlie.io (NBA) – real player names & teams</span>
+                <span className="text-muted-foreground">
+                  {sport === "NBA"
+                    ? "Real player data from balldontlie.io (no API key needed)"
+                    : "Other sports coming soon – add your odds-api.io key for live props"}
+                </span>
               </p>
             </div>
             <div className="bg-card border border-border rounded-xl overflow-hidden">
@@ -214,7 +231,7 @@ export default function Scanner() {
           </>
         )}
         <div className="text-center text-sm text-muted-foreground mt-4">
-          Showing {filteredPlayers.length} {sport} players • Live data from balldontlie.io
+          Showing {filteredPlayers.length} {sport} players • {sport === "NBA" ? "Powered by balldontlie.io" : "Integration in progress"}
         </div>
       </div>
     </DashboardLayout>
