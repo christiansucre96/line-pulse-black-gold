@@ -6,78 +6,33 @@ import { PlayerTable, SortField, SortDir } from "@/components/PlayerTable";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { Sport, sportCategories } from "@/data/mockPlayers";
 
-// Your Vercel proxy endpoint
-const PROXY_URL = "/api/odds-proxy?path=";
+// Free public API – no key required, no CORS
+const BALDONTLIE_API = "https://www.balldontlie.io/api/v1";
 
-// Map your frontend sports to odds-api.io sport names
-const sportApiName: Record<Sport, string> = {
-  NBA: "basketball",
-  NFL: "americanfootball",
-  MLB: "baseball",
-  NHL: "icehockey",
-  Soccer: "soccer",
-};
-
-async function fetchPlayerProps(sport: Sport) {
-  const sportName = sportApiName[sport];
-  if (!sportName) return [];
-
+// For now, only NBA works with this API. We'll add other sports later.
+async function fetchNBAPlayers() {
   try {
-    // Step 1: Get active leagues for this sport
-    const leaguesRes = await fetch(`${PROXY_URL}leagues&sport=${sportName}&all=false`);
-    const leagues = await leaguesRes.json();
-    if (!leagues.length) return [];
-
-    // For simplicity, take the first league (e.g., "nba")
-    const leagueSlug = leagues[0].slug;
-    
-    // Step 2: Get upcoming events for that league
-    const eventsRes = await fetch(`${PROXY_URL}events&sport=${sportName}&league=${leagueSlug}&status=pending`);
-    const events = await eventsRes.json();
-    if (!events.length) return [];
-
-    // Step 3: For each event, fetch odds (player props)
-    const allPlayers = new Map();
-    for (const event of events.slice(0, 5)) { // limit to 5 events to avoid rate limits
-      const oddsRes = await fetch(`${PROXY_URL}odds&eventId=${event.id}&bookmakers=DraftKings,FanDuel`);
-      const oddsData = await oddsRes.json();
-      
-      // Parse player props from the response
-      for (const bookmaker of oddsData.bookmakers || []) {
-        for (const market of bookmaker.markets || []) {
-          if (market.name === "Player Props" || market.key === "player_points") {
-            for (const outcome of market.outcomes || []) {
-              const playerName = outcome.description;
-              if (playerName && !allPlayers.has(playerName)) {
-                allPlayers.set(playerName, {
-                  id: playerName.replace(/\s/g, '_').toLowerCase(),
-                  name: playerName,
-                  position: "N/A",
-                  team: event.home_team,
-                  teamAbbr: (event.home_team || "").slice(0,3).toUpperCase(),
-                  opponent: event.away_team,
-                  line: outcome.point,
-                  confidence: 65, // placeholder, can calculate later
-                });
-              }
-            }
-          }
-        }
-      }
-    }
-
-    return Array.from(allPlayers.values()).map(p => ({
-      ...p,
-      initials: p.name.split(' ').map((n: string) => n[0]).join('') || "??",
+    const res = await fetch(`${BALDONTLIE_API}/players?per_page=100`);
+    const data = await res.json();
+    return data.data.map((p: any) => ({
+      id: p.id,
+      name: `${p.first_name} ${p.last_name}`,
+      position: p.position || "N/A",
+      team: p.team?.full_name || "Unknown",
+      teamAbbr: p.team?.abbreviation || "N/A",
+      opponent: "TBD", // We'll add game info later
+      initials: (p.first_name[0] + p.last_name[0]).toUpperCase(),
+      line: 22.5,       // placeholder
       edge_type: "NONE",
+      confidence: 50,
       hit_rate: 0,
       trend: "stable",
       status: "active",
       is_starter: false,
       injury_description: null,
     }));
-  } catch (error) {
-    console.error("Odds API error:", error);
+  } catch (err) {
+    console.error("Balldontlie error:", err);
     return [];
   }
 }
@@ -110,8 +65,13 @@ export default function Scanner() {
     else setLoading(true);
 
     try {
-      console.log(`📊 Fetching ${sport} players from odds-api.io...`);
-      const playersData = await fetchPlayerProps(sport);
+      let playersData = [];
+      if (sport === "NBA") {
+        playersData = await fetchNBAPlayers();
+      } else {
+        // For other sports, we'll use a fallback (can add more APIs later)
+        playersData = [];
+      }
       playerCache.set(cacheKey, playersData);
       setPlayers(playersData);
       setDbStats({ players: playersData.length });
@@ -237,9 +197,9 @@ export default function Scanner() {
           <>
             <div className="mb-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
               <p className="text-xs text-green-400">
-                ✅ LIVE: {dbStats.players} {sport} players from odds-api.io
+                ✅ LIVE: {dbStats.players} {sport} players
                 <br />
-                <span className="text-muted-foreground">Real player props & lines – powered by your API key</span>
+                <span className="text-muted-foreground">Data from balldontlie.io (NBA) – real player names & teams</span>
               </p>
             </div>
             <div className="bg-card border border-border rounded-xl overflow-hidden">
@@ -254,7 +214,7 @@ export default function Scanner() {
           </>
         )}
         <div className="text-center text-sm text-muted-foreground mt-4">
-          Showing {filteredPlayers.length} {sport} players • Data from odds-api.io
+          Showing {filteredPlayers.length} {sport} players • Live data from balldontlie.io
         </div>
       </div>
     </DashboardLayout>
