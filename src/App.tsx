@@ -13,6 +13,7 @@ import ParlayBuilder from "./pages/ParlayBuilder";
 import Leaderboard from "./pages/Leaderboard";
 import Roster from "./pages/Roster";
 import Injuries from "./pages/Injuries";
+import TopPicks from "./pages/TopPicks";  // ✅ ADD THIS IMPORT
 import Auth from "./pages/Auth";
 import Profile from "./pages/Profile";
 import Admin from "./pages/Admin";
@@ -49,6 +50,7 @@ const App = () => {
               <Route path="/leaderboard" element={<Leaderboard />} />
               <Route path="/roster" element={<Roster />} />
               <Route path="/injuries" element={<Injuries />} />
+              <Route path="/top-picks" element={<TopPicks />} />  {/* ✅ ADD THIS ROUTE */}
               <Route path="/profile" element={<Profile />} />
               <Route path="/admin" element={<Admin />} />
 
