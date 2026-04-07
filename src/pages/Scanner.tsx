@@ -6,10 +6,9 @@ import { PlayerTable, SortField, SortDir } from "@/components/PlayerTable";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { Sport, sportCategories } from "@/data/mockPlayers";
 
-// ------------------------------------------------------------------
-// Helper: fetch from ESPN via your Vercel proxy
-// ------------------------------------------------------------------
-const PROXY_URL = "/api/espn-proxy?url=";
+// Use a public CORS proxy (free, no setup)
+const CORS_PROXY = "https://corsproxy.io/?";
+const ESPN_BASE = "https://site.api.espn.com/apis/site/v2/sports";
 
 const sportPath: Record<Sport, string> = {
   NBA: "basketball/nba",
@@ -19,15 +18,13 @@ const sportPath: Record<Sport, string> = {
   Soccer: "soccer/eng.1",
 };
 
-async function fetchESPNViaProxy(targetUrl: string) {
-  const res = await fetch(PROXY_URL + encodeURIComponent(targetUrl));
+async function fetchESPN(targetUrl: string) {
+  const proxyUrl = CORS_PROXY + encodeURIComponent(targetUrl);
+  const res = await fetch(proxyUrl);
   if (!res.ok) throw new Error(`ESPN proxy error: ${res.status}`);
   return res.json();
 }
 
-// ------------------------------------------------------------------
-// Get all players for a sport (teams that have games in next 3 days)
-// ------------------------------------------------------------------
 async function fetchPlayersFromESPN(sport: Sport) {
   const today = new Date();
   const dates = [];
@@ -38,13 +35,13 @@ async function fetchPlayersFromESPN(sport: Sport) {
   }
 
   const teamSet = new Set<string>();
-  const gamesByTeam = new Map<string, any>(); // store opponent info
+  const gamesByTeam = new Map<string, { opponent: string; gameDate: string }>();
 
-  // Step 1: Get all games in the next 3 days
+  // Step 1: Get games for next 3 days
   for (const date of dates) {
-    const scoreboardUrl = `https://site.api.espn.com/apis/site/v2/sports/${sportPath[sport]}/scoreboard?dates=${date}`;
+    const scoreboardUrl = `${ESPN_BASE}/${sportPath[sport]}/scoreboard?dates=${date}`;
     try {
-      const data = await fetchESPNViaProxy(scoreboardUrl);
+      const data = await fetchESPN(scoreboardUrl);
       for (const event of data.events || []) {
         const comp = event.competitions?.[0];
         const home = comp?.competitors?.find((c: any) => c.homeAway === 'home');
@@ -69,15 +66,14 @@ async function fetchPlayersFromESPN(sport: Sport) {
   const allPlayers: any[] = [];
   for (const teamId of teamSet) {
     try {
-      const rosterUrl = `https://site.api.espn.com/apis/site/v2/sports/${sportPath[sport]}/teams/${teamId}/roster`;
-      const rosterData = await fetchESPNViaProxy(rosterUrl);
+      const rosterUrl = `${ESPN_BASE}/${sportPath[sport]}/teams/${teamId}/roster`;
+      const rosterData = await fetchESPN(rosterUrl);
       const athletes = rosterData.athletes || [];
       const flat = Array.isArray(athletes) ? athletes.flatMap((g: any) => g.items || [g]) : [];
       const opponentInfo = gamesByTeam.get(teamId) || { opponent: 'TBD', gameDate: 'TBD' };
 
       for (let idx = 0; idx < flat.length; idx++) {
         const a = flat[idx];
-        // Determine starter status (first 5 are starters for most sports)
         const isStarter = idx < (sport === 'Soccer' ? 11 : sport === 'NFL' ? 22 : 5);
         allPlayers.push({
           id: a.id,
@@ -87,7 +83,7 @@ async function fetchPlayersFromESPN(sport: Sport) {
           teamAbbr: a.team?.abbreviation || 'N/A',
           opponent: opponentInfo.opponent,
           initials: (a.fullName || a.displayName)?.split(' ').map((n: string) => n[0]).join('') || '??',
-          line: 22.5,        // placeholder until real odds integration
+          line: 22.5,
           edge_type: 'NONE',
           confidence: 50,
           hit_rate: 0,
@@ -101,13 +97,10 @@ async function fetchPlayersFromESPN(sport: Sport) {
       console.warn(`Failed to fetch roster for team ${teamId}`, err);
     }
   }
-
   return allPlayers;
 }
 
-// ------------------------------------------------------------------
-// Scanner Component
-// ------------------------------------------------------------------
+// Cache
 const playerCache = new Map<string, any[]>();
 
 export default function Scanner() {
@@ -160,9 +153,7 @@ export default function Scanner() {
   };
 
   const toggleStat = (stat: string) => {
-    setActiveStats(prev =>
-      prev.includes(stat) ? prev.filter(s => s !== stat) : [...prev, stat]
-    );
+    setActiveStats(prev => prev.includes(stat) ? prev.filter(s => s !== stat) : [...prev, stat]);
   };
 
   const handleSort = (field: SortField) => {
@@ -267,7 +258,7 @@ export default function Scanner() {
               <p className="text-xs text-green-400">
                 ✅ LIVE: {dbStats.players} {sport} players with upcoming games (next 3 days)
                 <br />
-                <span className="text-muted-foreground">Data fetched directly from ESPN (cached per sport)</span>
+                <span className="text-muted-foreground">Data fetched directly from ESPN via public proxy</span>
               </p>
             </div>
             <div className="bg-card border border-border rounded-xl overflow-hidden">
