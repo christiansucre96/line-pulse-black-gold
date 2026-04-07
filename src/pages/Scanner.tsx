@@ -6,8 +6,8 @@ import { PlayerTable, SortField, SortDir } from "@/components/PlayerTable";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { Sport, sportCategories } from "@/data/mockPlayers";
 
-// Reliable public CORS proxy (no setup, returns JSON)
-const CORS_PROXY = "https://api.allorigins.win/raw?url=";
+// Public CORS proxy that works with ESPN
+const CORS_PROXY = "https://corsproxy.io/?";
 const ESPN_BASE = "https://site.api.espn.com/apis/site/v2/sports";
 
 const sportPath: Record<Sport, string> = {
@@ -21,13 +21,8 @@ const sportPath: Record<Sport, string> = {
 async function fetchESPN(targetUrl: string) {
   const proxyUrl = CORS_PROXY + encodeURIComponent(targetUrl);
   const res = await fetch(proxyUrl);
-  if (!res.ok) throw new Error(`Proxy error: ${res.status}`);
-  const text = await res.text();
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error("Invalid JSON response from proxy");
-  }
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
 }
 
 async function fetchPlayersFromESPN(sport: Sport) {
@@ -42,7 +37,7 @@ async function fetchPlayersFromESPN(sport: Sport) {
   const teamSet = new Set<string>();
   const gamesByTeam = new Map<string, { opponent: string; gameDate: string }>();
 
-  // Step 1: Get games for next 3 days
+  // Get all games in the next 3 days
   for (const date of dates) {
     const scoreboardUrl = `${ESPN_BASE}/${sportPath[sport]}/scoreboard?dates=${date}`;
     try {
@@ -67,7 +62,7 @@ async function fetchPlayersFromESPN(sport: Sport) {
 
   if (teamSet.size === 0) return [];
 
-  // Step 2: Fetch roster for each team
+  // Fetch roster for each team
   const allPlayers: any[] = [];
   for (const teamId of teamSet) {
     try {
@@ -88,7 +83,7 @@ async function fetchPlayersFromESPN(sport: Sport) {
           teamAbbr: a.team?.abbreviation || 'N/A',
           opponent: opponentInfo.opponent,
           initials: (a.fullName || a.displayName)?.split(' ').map((n: string) => n[0]).join('') || '??',
-          line: 22.5,
+          line: 22.5,          // placeholder, will be replaced with real odds later
           edge_type: 'NONE',
           confidence: 50,
           hit_rate: 0,
@@ -105,6 +100,7 @@ async function fetchPlayersFromESPN(sport: Sport) {
   return allPlayers;
 }
 
+// Simple cache to avoid repeated network calls
 const playerCache = new Map<string, any[]>();
 
 export default function Scanner() {
@@ -262,7 +258,7 @@ export default function Scanner() {
               <p className="text-xs text-green-400">
                 ✅ LIVE: {dbStats.players} {sport} players with upcoming games (next 3 days)
                 <br />
-                <span className="text-muted-foreground">Data fetched from ESPN via public CORS proxy</span>
+                <span className="text-muted-foreground">Data fetched from ESPN via public proxy – click Refresh to update</span>
               </p>
             </div>
             <div className="bg-card border border-border rounded-xl overflow-hidden">
