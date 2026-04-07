@@ -6,7 +6,7 @@ import { PlayerTable, SortField, SortDir } from "@/components/PlayerTable";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { Sport, sportCategories } from "@/data/mockPlayers";
 
-// Public CORS proxy that works with ESPN
+// ✅ Public CORS proxy – no Vercel API needed
 const CORS_PROXY = "https://corsproxy.io/?";
 const ESPN_BASE = "https://site.api.espn.com/apis/site/v2/sports";
 
@@ -37,7 +37,6 @@ async function fetchPlayersFromESPN(sport: Sport) {
   const teamSet = new Set<string>();
   const gamesByTeam = new Map<string, { opponent: string; gameDate: string }>();
 
-  // Get all games in the next 3 days
   for (const date of dates) {
     const scoreboardUrl = `${ESPN_BASE}/${sportPath[sport]}/scoreboard?dates=${date}`;
     try {
@@ -62,7 +61,6 @@ async function fetchPlayersFromESPN(sport: Sport) {
 
   if (teamSet.size === 0) return [];
 
-  // Fetch roster for each team
   const allPlayers: any[] = [];
   for (const teamId of teamSet) {
     try {
@@ -83,7 +81,7 @@ async function fetchPlayersFromESPN(sport: Sport) {
           teamAbbr: a.team?.abbreviation || 'N/A',
           opponent: opponentInfo.opponent,
           initials: (a.fullName || a.displayName)?.split(' ').map((n: string) => n[0]).join('') || '??',
-          line: 22.5,          // placeholder, will be replaced with real odds later
+          line: 22.5,
           edge_type: 'NONE',
           confidence: 50,
           hit_rate: 0,
@@ -100,7 +98,6 @@ async function fetchPlayersFromESPN(sport: Sport) {
   return allPlayers;
 }
 
-// Simple cache to avoid repeated network calls
 const playerCache = new Map<string, any[]>();
 
 export default function Scanner() {
@@ -258,7 +255,7 @@ export default function Scanner() {
               <p className="text-xs text-green-400">
                 ✅ LIVE: {dbStats.players} {sport} players with upcoming games (next 3 days)
                 <br />
-                <span className="text-muted-foreground">Data fetched from ESPN via public proxy – click Refresh to update</span>
+                <span className="text-muted-foreground">Data fetched from ESPN via public CORS proxy</span>
               </p>
             </div>
             <div className="bg-card border border-border rounded-xl overflow-hidden">
