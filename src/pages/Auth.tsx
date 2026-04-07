@@ -10,26 +10,19 @@ export default function Auth() {
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [loading, setLoading] = useState(false);
-
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  // ✅ AUTO REDIRECT IF LOGGED IN
   useEffect(() => {
     if (user) navigate("/scanner");
   }, [user, navigate]);
 
-  // 🔥 LOGIN / SIGNUP
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setLoading(true);
-
     try {
       if (isLogin) {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
         toast.success("Welcome back!");
         navigate("/scanner");
@@ -37,18 +30,11 @@ export default function Auth() {
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
-          options: {
-            data: { display_name: displayName },
-            emailRedirectTo: `${window.location.origin}/auth`,
-          },
+          options: { data: { display_name: displayName }, emailRedirectTo: `${window.location.origin}/auth` },
         });
         if (error) throw error;
-
         if (data.user) {
-          await supabase.from("profiles").upsert({
-            user_id: data.user.id,
-            display_name: displayName,
-          });
+          await supabase.from("profiles").upsert({ user_id: data.user.id, display_name: displayName });
         }
         toast.success("Account created! You can now log in.");
         setIsLogin(true);
@@ -60,20 +46,12 @@ export default function Auth() {
     }
   };
 
-  // 🔥 PASSWORD RESET
   const handleForgotPassword = async () => {
-    if (!email) {
-      toast.error("Enter your email first");
-      return;
-    }
+    if (!email) return toast.error("Enter your email first");
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/reset-password`,
     });
-    if (error) {
-      toast.error(error.message);
-    } else {
-      toast.success("Password reset email sent!");
-    }
+    error ? toast.error(error.message) : toast.success("Password reset email sent!");
   };
 
   return (
@@ -84,11 +62,8 @@ export default function Auth() {
             <span className="font-display text-2xl font-bold text-primary-foreground">LP</span>
           </div>
           <h1 className="text-3xl font-display font-bold text-foreground">Line Pulse</h1>
-          <p className="text-muted-foreground mt-1">
-            {isLogin ? "Sign in to your account" : "Create your account"}
-          </p>
+          <p className="text-muted-foreground mt-1">{isLogin ? "Sign in" : "Create account"}</p>
         </div>
-
         <form onSubmit={handleSubmit} className="space-y-4 bg-card border border-border rounded-xl p-6">
           {!isLogin && (
             <div>
@@ -98,12 +73,10 @@ export default function Auth() {
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
                 className="w-full px-4 py-3 rounded-lg bg-secondary border border-border"
-                placeholder="Your name"
                 required
               />
             </div>
           )}
-
           <div>
             <label className="block text-sm mb-1">Email</label>
             <input
@@ -111,11 +84,9 @@ export default function Auth() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full px-4 py-3 rounded-lg bg-secondary border border-border"
-              placeholder="you@example.com"
               required
             />
           </div>
-
           <div>
             <label className="block text-sm mb-1">Password</label>
             <input
@@ -123,24 +94,17 @@ export default function Auth() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full px-4 py-3 rounded-lg bg-secondary border border-border"
-              placeholder="••••••••"
               required
               minLength={6}
             />
           </div>
-
           {isLogin && (
             <div className="text-right">
-              <button
-                type="button"
-                onClick={handleForgotPassword}
-                className="text-xs text-primary hover:underline"
-              >
+              <button type="button" onClick={handleForgotPassword} className="text-xs text-primary hover:underline">
                 Forgot password?
               </button>
             </div>
           )}
-
           <button
             type="submit"
             disabled={loading}
@@ -149,13 +113,9 @@ export default function Auth() {
             {loading ? "Loading..." : isLogin ? "Sign In" : "Create Account"}
           </button>
         </form>
-
         <p className="text-center text-sm text-muted-foreground mt-4">
           {isLogin ? "Don't have an account?" : "Already have an account?"}{" "}
-          <button
-            onClick={() => setIsLogin(!isLogin)}
-            className="text-primary hover:underline font-medium"
-          >
+          <button onClick={() => setIsLogin(!isLogin)} className="text-primary hover:underline font-medium">
             {isLogin ? "Sign Up" : "Sign In"}
           </button>
         </p>
