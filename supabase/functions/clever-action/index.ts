@@ -9,33 +9,45 @@ const corsHeaders = {
 function getSB() {
   const url = Deno.env.get('SUPABASE_URL')
   const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
-  if (!url || !key) throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY')
+  if (!url || !key) throw new Error('Missing env vars')
   return createClient(url, key)
 }
 
 // ------------------------------------------------------------------
-// Helper: fetch from ESPN with retry
+// Improved ESPN fetch with retries, delays, and realistic headers
 // ------------------------------------------------------------------
-async function fetchESPN(url: string, retries = 2) {
+async function fetchESPN(url: string, retries = 3) {
+  const userAgents = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  ]
   for (let i = 0; i < retries; i++) {
     try {
-      await new Promise(r => setTimeout(r, 500 * i))
+      // Random delay 0.5–2 seconds
+      await new Promise(r => setTimeout(r, 500 + Math.random() * 1500))
       const res = await fetch(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          Accept: 'application/json',
+          'User-Agent': userAgents[i % userAgents.length],
+          'Accept': 'application/json',
+          'Referer': 'https://www.espn.com/',
+          'Origin': 'https://www.espn.com',
         },
       })
+      if (res.status === 429) {
+        // Rate limit – wait longer
+        await new Promise(r => setTimeout(r, 5000))
+        continue
+      }
       if (res.ok) return await res.json()
     } catch { /* ignore */ }
   }
-  throw new Error(`ESPN fetch failed: ${url}`)
+  throw new Error(`ESPN fetch failed after ${retries} attempts`)
 }
 
 // ------------------------------------------------------------------
-// Fetch games for next N days (used by sync_upcoming)
+// Sync teams and players (only for sports with upcoming games)
 // ------------------------------------------------------------------
-async function fetchGamesForRange(sport: string, daysAhead = 2) {
+async function syncUpcoming(sb: any, sport: string) {
   const sportPath: Record<string, string> = {
     nba: 'basketball/nba',
     nfl: 'football/nfl',
@@ -43,15 +55,15 @@ async function fetchGamesForRange(sport: string, daysAhead = 2) {
     nhl: 'hockey/nhl',
     soccer: 'soccer/eng.1',
   }
+  // Get games for next 3 days
   const today = new Date()
   const dates = []
-  for (let i = 0; i <= daysAhead; i++) {
+  for (let i = 0; i <= 2; i++) {
     const d = new Date(today)
     d.setDate(today.getDate() + i)
     dates.push(d.toISOString().split('T')[0])
   }
-
-  const allGames: any[] = []
+  const games = []
   for (const date of dates) {
     const fmt = date.replace(/-/g, '')
     const url = `https://site.api.espn.com/apis/site/v2/sports/${sportPath[sport]}/scoreboard?dates=${fmt}`
@@ -59,46 +71,26 @@ async function fetchGamesForRange(sport: string, daysAhead = 2) {
       const data = await fetchESPN(url)
       for (const ev of data.events || []) {
         const comp = ev.competitions?.[0]
-        const home = comp?.competitors?.find((c: any) => c.homeAway === 'home')
-        const away = comp?.competitors?.find((c: any) => c.homeAway === 'away')
-        allGames.push({
-          external_id: ev.id,
-          sport,
-          game_date: date,
-          home_team_ext_id: home?.team?.id,
-          away_team_ext_id: away?.team?.id,
+        games.push({
+          id: ev.id,
+          home_team_id: comp?.competitors?.find((c: any) => c.homeAway === 'home')?.team?.id,
+          away_team_id: comp?.competitors?.find((c: any) => c.homeAway === 'away')?.team?.id,
         })
       }
     } catch { /* ignore */ }
   }
-  return allGames
-}
-
-// ------------------------------------------------------------------
-// Sync teams and players for upcoming games (lightweight)
-// ------------------------------------------------------------------
-async function syncUpcoming(sb: any, sport: string) {
-  const games = await fetchGamesForRange(sport, 2) // next 3 days
   if (games.length === 0) return { teams: 0, players: 0 }
 
-  // Collect team external IDs
+  // Extract team external IDs
   const teamExtIds = new Set<string>()
   for (const g of games) {
-    if (g.home_team_ext_id) teamExtIds.add(g.home_team_ext_id)
-    if (g.away_team_ext_id) teamExtIds.add(g.away_team_ext_id)
+    if (g.home_team_id) teamExtIds.add(g.home_team_id)
+    if (g.away_team_id) teamExtIds.add(g.away_team_id)
   }
-  if (teamExtIds.size === 0) return { teams: 0, players: 0 }
 
   // Upsert teams
   for (const extId of teamExtIds) {
     try {
-      const sportPath: Record<string, string> = {
-        nba: 'basketball/nba',
-        nfl: 'football/nfl',
-        mlb: 'baseball/mlb',
-        nhl: 'hockey/nhl',
-        soccer: 'soccer/eng.1',
-      }
       const url = `https://site.api.espn.com/apis/site/v2/sports/${sportPath[sport]}/teams/${extId}`
       const teamData = await fetchESPN(url)
       const team = teamData.team || teamData
@@ -107,7 +99,6 @@ async function syncUpcoming(sb: any, sport: string) {
         sport,
         name: team.displayName,
         abbreviation: team.abbreviation,
-        logo_url: team.logos?.[0]?.href || null,
       }, { onConflict: 'sport,external_id' })
     } catch { /* ignore */ }
   }
@@ -125,13 +116,6 @@ async function syncUpcoming(sb: any, sport: string) {
     const teamId = teamIdMap.get(extId)
     if (!teamId) continue
     try {
-      const sportPath: Record<string, string> = {
-        nba: 'basketball/nba',
-        nfl: 'football/nfl',
-        mlb: 'baseball/mlb',
-        nhl: 'hockey/nhl',
-        soccer: 'soccer/eng.1',
-      }
       const url = `https://site.api.espn.com/apis/site/v2/sports/${sportPath[sport]}/teams/${extId}/roster`
       const data = await fetchESPN(url)
       const athletes = data.athletes || []
@@ -143,7 +127,6 @@ async function syncUpcoming(sb: any, sport: string) {
           sport,
           full_name: a.fullName || a.displayName,
           position: a.position?.abbreviation || null,
-          headshot_url: a.headshot?.href || null,
           team_id: teamId,
           roster_order: idx,
           is_starter: idx < (sport === 'soccer' ? 11 : sport === 'nfl' ? 22 : 5),
@@ -152,101 +135,66 @@ async function syncUpcoming(sb: any, sport: string) {
       }
     } catch { /* ignore */ }
   }
-
   return { teams: teamExtIds.size, players: playersCount }
 }
 
 // ------------------------------------------------------------------
-// MAIN HANDLER
+// Get players from database (for Scanner)
+// ------------------------------------------------------------------
+async function getPlayers(sb: any, sport: string) {
+  const { data: players } = await sb
+    .from('players')
+    .select(`
+      id, full_name, position, status, injury_description, is_starter,
+      teams:team_id(name, abbreviation)
+    `)
+    .eq('sport', sport)
+    .limit(500)
+  return players?.map(p => ({
+    id: p.id,
+    name: p.full_name,
+    position: p.position || 'N/A',
+    team: p.teams?.name,
+    team_abbr: p.teams?.abbreviation,
+    status: p.status || 'active',
+    injury_description: p.injury_description,
+    is_starter: p.is_starter || false,
+    line: 22.5, // placeholder until odds API integrated
+    confidence: 50,
+  })) || []
+}
+
+// ------------------------------------------------------------------
+// Main handler
 // ------------------------------------------------------------------
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders })
   }
-
   try {
     const sb = getSB()
     const body = await req.json().catch(() => ({}))
-    let { operation, sport, mode } = body
-
-    // Default to get_players if sport provided without operation
+    let { operation, sport } = body
     if (!operation && sport) operation = 'get_players'
-    if (!operation) {
-      return new Response(JSON.stringify({ error: 'Missing operation' }), { status: 400, headers: corsHeaders })
-    }
-    if (!sport && operation !== 'status') {
-      return new Response(JSON.stringify({ error: 'Missing sport' }), { status: 400, headers: corsHeaders })
-    }
-
-    console.log(`[clever-action] op=${operation} sport=${sport} mode=${mode}`)
+    if (!operation) throw new Error('Missing operation')
 
     switch (operation) {
       case 'get_players': {
-        // Return players from database
-        const { data: players } = await sb
-          .from('players')
-          .select(`
-            id, full_name, position, status, injury_description, is_starter,
-            teams:team_id(name, abbreviation),
-            player_averages(last10_avg_points, hit_rate_10, points_consistency)
-          `)
-          .eq('sport', sport)
-          .limit(500)
-
-        const formatted = players?.map(p => ({
-          id: p.id,
-          name: p.full_name,
-          position: p.position || 'N/A',
-          team: p.teams?.name,
-          team_abbr: p.teams?.abbreviation,
-          status: p.status || 'active',
-          injury_description: p.injury_description,
-          is_starter: p.is_starter || false,
-          line: 22.5, // placeholder until real odds are fetched
-          confidence: 50,
-          hit_rate: Math.round((p.player_averages?.hit_rate_10 || 0) * 100),
-        })) || []
-
-        return new Response(JSON.stringify({ success: true, players: formatted, count: formatted.length }), {
+        const players = await getPlayers(sb, sport)
+        return new Response(JSON.stringify({ success: true, players, count: players.length }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
       }
-
       case 'sync_upcoming': {
         const result = await syncUpcoming(sb, sport)
         return new Response(JSON.stringify({ success: true, ...result }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
       }
-
-      case 'get_odds': {
-        const { data: odds } = await sb
-          .from('odds_cache')
-          .select('*')
-          .eq('sport', sport)
-          .order('last_updated', { ascending: false })
-        return new Response(JSON.stringify({ success: true, odds, count: odds?.length || 0 }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        })
-      }
-
-      case 'get_top_picks': {
-        const { data: picks } = await sb
-          .from('top_picks')
-          .select('*')
-          .eq('sport', sport)
-          .order('confidence', { ascending: false })
-          .limit(20)
-        return new Response(JSON.stringify({ success: true, picks, count: picks?.length || 0 }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        })
-      }
-
       default:
         return new Response(JSON.stringify({ error: `Unknown operation: ${operation}` }), { status: 400, headers: corsHeaders })
     }
   } catch (err: any) {
-    console.error(err)
     return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders })
   }
 })
