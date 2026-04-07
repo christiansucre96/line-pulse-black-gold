@@ -6,17 +6,108 @@ import { PlayerTable, SortField, SortDir } from "@/components/PlayerTable";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { Sport, sportCategories } from "@/data/mockPlayers";
 
-const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
+// ------------------------------------------------------------------
+// Helper: fetch from ESPN via your Vercel proxy
+// ------------------------------------------------------------------
+const PROXY_URL = "/api/espn-proxy?url=";
 
-const sportDbMap: Record<Sport, string> = {
-  NBA: "nba",
-  NFL: "nfl",
-  MLB: "mlb",
-  NHL: "nhl",
-  Soccer: "soccer",
+const sportPath: Record<Sport, string> = {
+  NBA: "basketball/nba",
+  NFL: "football/nfl",
+  MLB: "baseball/mlb",
+  NHL: "hockey/nhl",
+  Soccer: "soccer/eng.1",
 };
 
-// Cache persists across component remounts
+async function fetchESPNViaProxy(targetUrl: string) {
+  const res = await fetch(PROXY_URL + encodeURIComponent(targetUrl));
+  if (!res.ok) throw new Error(`ESPN proxy error: ${res.status}`);
+  return res.json();
+}
+
+// ------------------------------------------------------------------
+// Get all players for a sport (teams that have games in next 3 days)
+// ------------------------------------------------------------------
+async function fetchPlayersFromESPN(sport: Sport) {
+  const today = new Date();
+  const dates = [];
+  for (let i = 0; i <= 2; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    dates.push(d.toISOString().split('T')[0].replace(/-/g, ''));
+  }
+
+  const teamSet = new Set<string>();
+  const gamesByTeam = new Map<string, any>(); // store opponent info
+
+  // Step 1: Get all games in the next 3 days
+  for (const date of dates) {
+    const scoreboardUrl = `https://site.api.espn.com/apis/site/v2/sports/${sportPath[sport]}/scoreboard?dates=${date}`;
+    try {
+      const data = await fetchESPNViaProxy(scoreboardUrl);
+      for (const event of data.events || []) {
+        const comp = event.competitions?.[0];
+        const home = comp?.competitors?.find((c: any) => c.homeAway === 'home');
+        const away = comp?.competitors?.find((c: any) => c.homeAway === 'away');
+        if (home?.team?.id) {
+          teamSet.add(home.team.id);
+          gamesByTeam.set(home.team.id, { opponent: away?.team?.displayName || 'TBD', gameDate: date });
+        }
+        if (away?.team?.id) {
+          teamSet.add(away.team.id);
+          gamesByTeam.set(away.team.id, { opponent: home?.team?.displayName || 'TBD', gameDate: date });
+        }
+      }
+    } catch (err) {
+      console.warn(`Failed to fetch games for ${date}`, err);
+    }
+  }
+
+  if (teamSet.size === 0) return [];
+
+  // Step 2: Fetch roster for each team
+  const allPlayers: any[] = [];
+  for (const teamId of teamSet) {
+    try {
+      const rosterUrl = `https://site.api.espn.com/apis/site/v2/sports/${sportPath[sport]}/teams/${teamId}/roster`;
+      const rosterData = await fetchESPNViaProxy(rosterUrl);
+      const athletes = rosterData.athletes || [];
+      const flat = Array.isArray(athletes) ? athletes.flatMap((g: any) => g.items || [g]) : [];
+      const opponentInfo = gamesByTeam.get(teamId) || { opponent: 'TBD', gameDate: 'TBD' };
+
+      for (let idx = 0; idx < flat.length; idx++) {
+        const a = flat[idx];
+        // Determine starter status (first 5 are starters for most sports)
+        const isStarter = idx < (sport === 'Soccer' ? 11 : sport === 'NFL' ? 22 : 5);
+        allPlayers.push({
+          id: a.id,
+          name: a.fullName || a.displayName,
+          position: a.position?.abbreviation || 'N/A',
+          team: a.team?.displayName || `Team ${teamId}`,
+          teamAbbr: a.team?.abbreviation || 'N/A',
+          opponent: opponentInfo.opponent,
+          initials: (a.fullName || a.displayName)?.split(' ').map((n: string) => n[0]).join('') || '??',
+          line: 22.5,        // placeholder until real odds integration
+          edge_type: 'NONE',
+          confidence: 50,
+          hit_rate: 0,
+          trend: 'stable',
+          status: 'active',
+          is_starter: isStarter,
+          injury_description: null,
+        });
+      }
+    } catch (err) {
+      console.warn(`Failed to fetch roster for team ${teamId}`, err);
+    }
+  }
+
+  return allPlayers;
+}
+
+// ------------------------------------------------------------------
+// Scanner Component
+// ------------------------------------------------------------------
 const playerCache = new Map<string, any[]>();
 
 export default function Scanner() {
@@ -45,46 +136,11 @@ export default function Scanner() {
     else setLoading(true);
 
     try {
-      const dbSport = sportDbMap[sport];
-      console.log(`📊 Fetching ${sport} (${dbSport}) data...`);
-
-      const response = await fetch(EDGE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ operation: "get_players", sport: dbSport })
-      });
-
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-      const data = await response.json();
-      console.log("Edge response:", data);
-
-      if (data.success && data.players && data.players.length > 0) {
-        const formatted = data.players.map((p: any) => ({
-          id: p.id,
-          name: p.name,
-          position: p.position || "N/A",
-          team: p.team || "Unknown",
-          teamAbbr: p.team_abbr || "N/A",
-          opponent: p.opponent || "TBD",
-          initials: p.name?.split(' ').map((n: string) => n[0]).join('') || "??",
-          line: p.line,
-          edge_type: p.edge_type,
-          confidence: p.confidence,
-          hit_rate: p.hit_rate,
-          trend: p.trend || "stable",
-          categories: ["points", "assists", "rebounds"],
-          status: p.status || "active",
-          is_starter: p.is_starter ?? false,
-          injury_description: p.injury_description,
-        }));
-        playerCache.set(cacheKey, formatted);
-        setPlayers(formatted);
-        setDbStats({ players: data.count });
-      } else {
-        console.warn("No players in response");
-        setPlayers([]);
-      }
+      console.log(`📊 Fetching ${sport} players from ESPN...`);
+      const playersData = await fetchPlayersFromESPN(sport);
+      playerCache.set(cacheKey, playersData);
+      setPlayers(playersData);
+      setDbStats({ players: playersData.length });
     } catch (error) {
       console.error("Error fetching players:", error);
     } finally {
@@ -93,7 +149,6 @@ export default function Scanner() {
     }
   };
 
-  // Load on mount and when sport changes – uses cache, no interval
   useEffect(() => {
     fetchData(false);
   }, [sport]);
@@ -212,7 +267,7 @@ export default function Scanner() {
               <p className="text-xs text-green-400">
                 ✅ LIVE: {dbStats.players} {sport} players with upcoming games (next 3 days)
                 <br />
-                <span className="text-muted-foreground">Data cached per sport – click Refresh to update</span>
+                <span className="text-muted-foreground">Data fetched directly from ESPN (cached per sport)</span>
               </p>
             </div>
             <div className="bg-card border border-border rounded-xl overflow-hidden">
