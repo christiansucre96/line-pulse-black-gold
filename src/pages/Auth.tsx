@@ -10,6 +10,7 @@ export default function Auth() {
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [loading, setLoading] = useState(false);
+
   const navigate = useNavigate();
   const { user } = useAuth();
 
@@ -21,33 +22,62 @@ export default function Auth() {
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setLoading(true);
+
     try {
       if (isLogin) {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        // 🔐 LOGIN
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
         if (error) throw error;
+
         toast.success("Welcome back!");
         navigate("/scanner");
+
       } else {
+        // 🆕 SIGNUP
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: {
-            data: { display_name: displayName },
-            emailRedirectTo: `${window.location.origin}/auth`,
+            data: {
+              display_name: displayName,
+            },
+            emailRedirectTo: `${window.location.origin}/reset-password`, // ✅ FIXED
           },
         });
+
         if (error) throw error;
-        if (data.user) {
-          await supabase.from("profiles").upsert({
-            user_id: data.user.id,
-            display_name: displayName,
-          });
+
+        // 📧 EMAIL CONFIRMATION CHECK
+        if (data.user && !data.session) {
+          toast.success("Check your email to confirm your account!");
+        } else {
+          toast.success("Account created!");
         }
-        toast.success("Account created! You can now log in.");
+
+        // 👤 CREATE PROFILE SAFELY
+        if (data.user) {
+          const { error: profileError } = await supabase
+            .from("profiles")
+            .upsert({
+              user_id: data.user.id,
+              display_name: displayName,
+            });
+
+          if (profileError) {
+            console.error("Profile error:", profileError.message);
+          }
+        }
+
+        // Reset form
         setIsLogin(true);
+        setPassword("");
       }
     } catch (err: any) {
-      toast.error(err.message);
+      toast.error(err.message || "Something went wrong");
     } finally {
       setLoading(false);
     }
@@ -55,26 +85,36 @@ export default function Auth() {
 
   const handleForgotPassword = async () => {
     if (!email) return toast.error("Enter your email first");
+
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/reset-password`,
     });
-    error ? toast.error(error.message) : toast.success("Password reset email sent!");
+
+    if (error) {
+      toast.error(error.message);
+    } else {
+      toast.success("Password reset email sent!");
+    }
   };
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-md">
+
+        {/* LOGO */}
         <div className="text-center mb-8">
           <div className="w-16 h-16 rounded-full bg-gradient-gold flex items-center justify-center mx-auto mb-4">
-            <span className="font-display text-2xl font-bold text-primary-foreground">LP</span>
+            <span className="text-2xl font-bold">LP</span>
           </div>
-          <h1 className="text-3xl font-display font-bold text-foreground">Line Pulse</h1>
+          <h1 className="text-3xl font-bold">Line Pulse</h1>
           <p className="text-muted-foreground mt-1">
             {isLogin ? "Sign in to your account" : "Create your account"}
           </p>
         </div>
 
+        {/* FORM */}
         <form onSubmit={handleSubmit} className="space-y-4 bg-card border border-border rounded-xl p-6">
+
           {!isLogin && (
             <div>
               <label className="block text-sm mb-1">Display Name</label>
@@ -135,6 +175,7 @@ export default function Auth() {
           </button>
         </form>
 
+        {/* SWITCH */}
         <p className="text-center text-sm text-muted-foreground mt-4">
           {isLogin ? "Don't have an account?" : "Already have an account?"}{" "}
           <button
@@ -144,6 +185,7 @@ export default function Auth() {
             {isLogin ? "Sign Up" : "Sign In"}
           </button>
         </p>
+
       </div>
     </div>
   );
