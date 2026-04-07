@@ -6,8 +6,8 @@ import { PlayerTable, SortField, SortDir } from "@/components/PlayerTable";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { Sport, sportCategories } from "@/data/mockPlayers";
 
-// Use a public CORS proxy (free, no setup)
-const CORS_PROXY = "https://corsproxy.io/?";
+// Your own Vercel proxy (now correctly configured)
+const PROXY_URL = "/api/espn-proxy?url=";
 const ESPN_BASE = "https://site.api.espn.com/apis/site/v2/sports";
 
 const sportPath: Record<Sport, string> = {
@@ -19,9 +19,9 @@ const sportPath: Record<Sport, string> = {
 };
 
 async function fetchESPN(targetUrl: string) {
-  const proxyUrl = CORS_PROXY + encodeURIComponent(targetUrl);
+  const proxyUrl = PROXY_URL + encodeURIComponent(targetUrl);
   const res = await fetch(proxyUrl);
-  if (!res.ok) throw new Error(`ESPN proxy error: ${res.status}`);
+  if (!res.ok) throw new Error(`Proxy error: ${res.status}`);
   return res.json();
 }
 
@@ -37,7 +37,6 @@ async function fetchPlayersFromESPN(sport: Sport) {
   const teamSet = new Set<string>();
   const gamesByTeam = new Map<string, { opponent: string; gameDate: string }>();
 
-  // Step 1: Get games for next 3 days
   for (const date of dates) {
     const scoreboardUrl = `${ESPN_BASE}/${sportPath[sport]}/scoreboard?dates=${date}`;
     try {
@@ -62,7 +61,6 @@ async function fetchPlayersFromESPN(sport: Sport) {
 
   if (teamSet.size === 0) return [];
 
-  // Step 2: Fetch roster for each team
   const allPlayers: any[] = [];
   for (const teamId of teamSet) {
     try {
@@ -100,7 +98,6 @@ async function fetchPlayersFromESPN(sport: Sport) {
   return allPlayers;
 }
 
-// Cache
 const playerCache = new Map<string, any[]>();
 
 export default function Scanner() {
@@ -258,7 +255,7 @@ export default function Scanner() {
               <p className="text-xs text-green-400">
                 ✅ LIVE: {dbStats.players} {sport} players with upcoming games (next 3 days)
                 <br />
-                <span className="text-muted-foreground">Data fetched directly from ESPN via public proxy</span>
+                <span className="text-muted-foreground">Data fetched directly from ESPN via your own proxy</span>
               </p>
             </div>
             <div className="bg-card border border-border rounded-xl overflow-hidden">
