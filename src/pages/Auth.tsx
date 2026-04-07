@@ -20,7 +20,7 @@ export default function Auth() {
   }, [user, navigate]);
 
   // 🔥 LOGIN / SIGNUP
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setLoading(true);
 
@@ -30,42 +30,34 @@ export default function Auth() {
           email,
           password,
         });
-
         if (error) throw error;
-
         toast.success("Welcome back!");
         navigate("/scanner");
-
       } else {
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: {
-            data: {
-              display_name: displayName,
-            },
+            data: { display_name: displayName },
             emailRedirectTo: `${window.location.origin}/auth`,
           },
         });
-
         if (error) throw error;
 
-        // 🔥 OPTIONAL: create profile immediately if user exists
         if (data.user) {
           await supabase.from("profiles").upsert({
             user_id: data.user.id,
             display_name: displayName,
           });
         }
-
         toast.success("Account created! You can now log in.");
         setIsLogin(true);
       }
     } catch (err: any) {
       toast.error(err.message);
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   // 🔥 PASSWORD RESET
@@ -74,11 +66,9 @@ export default function Auth() {
       toast.error("Enter your email first");
       return;
     }
-
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/reset-password`,
     });
-
     if (error) {
       toast.error(error.message);
     } else {
@@ -89,8 +79,6 @@ export default function Auth() {
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-
-        {/* HEADER */}
         <div className="text-center mb-8">
           <div className="w-16 h-16 rounded-full bg-gradient-gold flex items-center justify-center mx-auto mb-4">
             <span className="font-display text-2xl font-bold text-primary-foreground">LP</span>
@@ -101,9 +89,7 @@ export default function Auth() {
           </p>
         </div>
 
-        {/* FORM */}
         <form onSubmit={handleSubmit} className="space-y-4 bg-card border border-border rounded-xl p-6">
-
           {!isLogin && (
             <div>
               <label className="block text-sm mb-1">Display Name</label>
@@ -143,7 +129,6 @@ export default function Auth() {
             />
           </div>
 
-          {/* 🔥 FORGOT PASSWORD */}
           {isLogin && (
             <div className="text-right">
               <button
@@ -165,7 +150,6 @@ export default function Auth() {
           </button>
         </form>
 
-        {/* SWITCH */}
         <p className="text-center text-sm text-muted-foreground mt-4">
           {isLogin ? "Don't have an account?" : "Already have an account?"}{" "}
           <button
