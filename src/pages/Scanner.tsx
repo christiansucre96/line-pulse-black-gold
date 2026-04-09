@@ -15,14 +15,11 @@ const SPORTS_LIST = [
 ];
 
 const SPORTSBOOKS = ["Stake", "BetOnline"];
-
 const BET_TYPES = [
   { label: "All", value: "all" },
   { label: "Over", value: "over" },
   { label: "Under", value: "under" },
 ];
-
-const cache = new Map<string, any[]>();
 
 export default function Scanner() {
   const [sport, setSport] = useState("nba");
@@ -37,6 +34,7 @@ export default function Scanner() {
   const [selectedMarket, setSelectedMarket] = useState("");
   const [availableMarkets, setAvailableMarkets] = useState<string[]>([]);
   const [selectedBetType, setSelectedBetType] = useState("all");
+  const [error, setError] = useState<string | null>(null);
 
   const fetchMarkets = async () => {
     try {
@@ -52,21 +50,17 @@ export default function Scanner() {
         if (markets.length && !selectedMarket) setSelectedMarket(markets[0]);
       }
     } catch (err) {
-      console.error(err);
+      console.error("Markets fetch error:", err);
     }
   };
 
   const fetchData = async (force = false) => {
-    const cacheKey = `${sport}-${selectedBookmaker}-${selectedMarket}-${selectedBetType}`;
-    if (!force && cache.has(cacheKey)) {
-      setPlayers(cache.get(cacheKey)!);
-      setLoading(false);
-      return;
-    }
     if (force) setRefreshing(true);
     else setLoading(true);
+    setError(null);
 
     try {
+      // 1. Get players
       const playersRes = await fetch(EDGE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -74,18 +68,29 @@ export default function Scanner() {
       });
       const playersData = await playersRes.json();
       if (!playersData.success) throw new Error("Failed to fetch players");
+      if (playersData.players.length === 0) {
+        setError("No players found. Please add players using the 'add_player' operation.");
+        setPlayers([]);
+        return;
+      }
 
-      const propsRes = await fetch(EDGE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ operation: "get_props", sport, bookmaker: selectedBookmaker, market: selectedMarket }),
-      });
-      const propsData = await propsRes.json();
-      const props = propsData.props || [];
+      // 2. Get props for selected market (if any)
+      let lineMap = new Map();
+      if (selectedMarket) {
+        const propsRes = await fetch(EDGE_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ operation: "get_props", sport, bookmaker: selectedBookmaker, market: selectedMarket }),
+        });
+        const propsData = await propsRes.json();
+        if (propsData.success && propsData.props) {
+          for (const prop of propsData.props) {
+            lineMap.set(prop.player_name, prop.line);
+          }
+        }
+      }
 
-      const lineMap = new Map();
-      for (const prop of props) lineMap.set(prop.player_name, prop.line);
-
+      // 3. Merge players with lines
       const merged = playersData.players.map((p: any) => {
         const line = lineMap.get(p.name);
         if (!line) {
@@ -99,7 +104,7 @@ export default function Scanner() {
             initials: p.name.split(' ').map((n: string) => n[0]).join('') || "??",
           };
         }
-        // Simple simulation for over/under (replace with real projection later)
+        // Simulate over/under based on a random projection (replace with real projection later)
         const projection = line + (Math.random() - 0.5) * 4;
         const isOver = projection > line;
         let edge_type = "NONE";
@@ -119,10 +124,10 @@ export default function Scanner() {
         };
       });
 
-      cache.set(cacheKey, merged);
       setPlayers(merged);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      setError(err.message);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -134,7 +139,7 @@ export default function Scanner() {
   }, [sport, selectedBookmaker]);
 
   useEffect(() => {
-    if (selectedMarket) fetchData(false);
+    fetchData(false);
   }, [sport, selectedBookmaker, selectedMarket, selectedBetType]);
 
   const handleSportChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -213,6 +218,8 @@ export default function Scanner() {
 
         {loading ? (
           <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
+        ) : error ? (
+          <div className="text-center py-16 text-red-400">{error}</div>
         ) : (
           <>
             <div className="mb-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
