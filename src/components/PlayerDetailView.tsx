@@ -12,9 +12,12 @@ interface PlayerDetailViewProps {
 export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
   const [player, setPlayer] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchDetails = async () => {
+      setLoading(true);
+      setError(null);
       try {
         const res = await fetch(EDGE_URL, {
           method: "POST",
@@ -22,9 +25,15 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
           body: JSON.stringify({ operation: "get_player_details", player_id: playerId }),
         });
         const data = await res.json();
-        if (data.success) setPlayer(data.player);
-      } catch (err) {
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        if (data.success) {
+          setPlayer(data.player);
+        } else {
+          setError(data.error || "Failed to load player details");
+        }
+      } catch (err: any) {
         console.error(err);
+        setError(err.message);
       } finally {
         setLoading(false);
       }
@@ -32,15 +41,14 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
     fetchDetails();
   }, [playerId]);
 
-  if (loading) return <DashboardLayout><div className="flex justify-center py-16">Loading...</div></DashboardLayout>;
+  if (loading) return <DashboardLayout><div className="flex justify-center py-16">Loading player details...</div></DashboardLayout>;
+  if (error) return <DashboardLayout><div className="text-center py-16 text-red-400">Error: {error}</div></DashboardLayout>;
   if (!player) return <DashboardLayout><div className="text-center py-16">Player not found</div></DashboardLayout>;
 
-  const averages = player.player_averages || {};
   const props = player.props || [];
-
-  // Group props by bookmaker
-  const stakeProps = props.filter(p => p.bookmaker === "Stake");
-  const betonlineProps = props.filter(p => p.bookmaker === "BetOnline");
+  const stakeProps = props.filter((p: any) => p.bookmaker === "Stake");
+  const betonlineProps = props.filter((p: any) => p.bookmaker === "BetOnline");
+  const uniqueMarkets = Array.from(new Set(props.map((p: any) => p.market_type)));
 
   return (
     <DashboardLayout>
@@ -49,29 +57,12 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
           <ArrowLeft className="w-4 h-4" /> Back to Scanner
         </button>
 
-        {/* Player Header */}
         <div className="bg-card border border-border rounded-xl p-6 mb-6">
           <h1 className="text-3xl font-bold text-foreground">{player.full_name}</h1>
-          <p className="text-muted-foreground">{player.position} • {player.teams?.name}</p>
+          <p className="text-muted-foreground">{player.position || "N/A"} • {player.teams?.name || "Unknown Team"}</p>
+          {player.injury_description && <p className="text-red-400 text-sm mt-2">Injury: {player.injury_description}</p>}
         </div>
 
-        {/* Stats Summary */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <div className="bg-card border border-border rounded-xl p-4">
-            <div className="text-sm text-muted-foreground">Points (Last 10)</div>
-            <div className="text-2xl font-bold">{averages.last10_avg_points?.toFixed(1) || "N/A"}</div>
-          </div>
-          <div className="bg-card border border-border rounded-xl p-4">
-            <div className="text-sm text-muted-foreground">Rebounds (Last 10)</div>
-            <div className="text-2xl font-bold">{averages.last10_avg_rebounds?.toFixed(1) || "N/A"}</div>
-          </div>
-          <div className="bg-card border border-border rounded-xl p-4">
-            <div className="text-sm text-muted-foreground">Assists (Last 10)</div>
-            <div className="text-2xl font-bold">{averages.last10_avg_assists?.toFixed(1) || "N/A"}</div>
-          </div>
-        </div>
-
-        {/* Props Table */}
         <div className="bg-card border border-border rounded-xl overflow-hidden">
           <div className="px-4 py-3 bg-secondary/30 border-b border-border">
             <h2 className="font-bold text-foreground">All Available Props</h2>
@@ -88,20 +79,21 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
                 </tr>
               </thead>
               <tbody>
-                {Array.from(new Set(props.map(p => p.market_type))).map(market => {
+                {uniqueMarkets.map(market => {
                   const stake = stakeProps.find(p => p.market_type === market);
                   const betonline = betonlineProps.find(p => p.market_type === market);
+                  const displayName = market.replace(/player_/g, "").replace(/_/g, " + ").toUpperCase();
                   return (
                     <tr key={market} className="border-b border-border/50 hover:bg-secondary/20">
-                      <td className="py-3 px-4 font-medium">{market.replace(/player_/g, "").replace(/_/g, " + ").toUpperCase()}</td>
-                      <td className="py-3 px-4">{stake?.line || "—"}</td>
-                      <td className="py-3 px-4">{stake?.odds || "—"}</td>
-                      <td className="py-3 px-4">{betonline?.line || "—"}</td>
-                      <td className="py-3 px-4">{betonline?.odds || "—"}</td>
-                    </table>
+                      <td className="py-3 px-4 font-medium">{displayName}</td>
+                      <td className="py-3 px-4">{stake?.line ?? "—"}</td>
+                      <td className="py-3 px-4">{stake?.odds ?? "—"}</td>
+                      <td className="py-3 px-4">{betonline?.line ?? "—"}</td>
+                      <td className="py-3 px-4">{betonline?.odds ?? "—"}</td>
+                    </tr>
                   );
                 })}
-                {props.length === 0 && (
+                {uniqueMarkets.length === 0 && (
                   <tr><td colSpan={5} className="py-8 text-center text-muted-foreground">No props available for this player</td></tr>
                 )}
               </tbody>
