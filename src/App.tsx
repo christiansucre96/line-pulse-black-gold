@@ -11,6 +11,7 @@ const Auth = lazy(() => import("./pages/Auth"));
 const Scanner = lazy(() => import("./pages/Scanner"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const NotFound = lazy(() => import("./pages/NotFound"));
+const Admin = lazy(() => import("./pages/Admin"));   // ✅ ADDED
 
 const queryClient = new QueryClient();
 
@@ -18,7 +19,6 @@ function App() {
   // Handle password reset redirect
   useEffect(() => {
     const hash = window.location.hash;
-
     if (hash.includes("access_token") && hash.includes("type=recovery")) {
       window.location.href = "/reset-password" + hash;
     }
@@ -35,6 +35,7 @@ function App() {
               <Route path="/auth" element={<Auth />} />
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/scanner" element={<Scanner />} />
+              <Route path="/admin" element={<Admin />} />   {/* ✅ ADDED */}
 
               <Route path="*" element={<NotFound />} />
             </Routes>
