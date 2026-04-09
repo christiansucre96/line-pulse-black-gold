@@ -7,7 +7,6 @@ import { Sport, sportCategories } from "@/data/mockPlayers";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
-// Available sports
 const SPORTS_LIST = [
   { label: "NBA", value: "nba" },
   { label: "NFL", value: "nfl" },
@@ -16,70 +15,55 @@ const SPORTS_LIST = [
   { label: "Soccer", value: "soccer" },
 ];
 
-// Sportsbooks
 const SPORTSBOOKS = ["Stake", "BetOnline"];
 
-// Combo props for each sport (will be populated from API)
-const DEFAULT_PROP_TYPES = [
-  { label: "Points + Rebounds + Assists", value: "player_points_rebounds_assists" },
-  { label: "Points + Rebounds", value: "player_points_rebounds" },
-  { label: "Points + Assists", value: "player_points_assists" },
-  { label: "Rebounds + Assists", value: "player_rebounds_assists" },
-];
-
-const playerCache = new Map<string, any[]>();
+// Cache per sport + bookmaker + market
+const cache = new Map<string, any[]>();
 
 export default function Scanner() {
   const [sport, setSport] = useState("nba");
   const [search, setSearch] = useState("");
-  const [activeStats, setActiveStats] = useState(["points"]);
-  const [sortField, setSortField] = useState("confidence");
+  const [sortField, setSortField] = useState<SortField>("confidence");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
-  const [selectedPlayer, setSelectedPlayer] = useState(null);
-  const [players, setPlayers] = useState([]);
+  const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
+  const [players, setPlayers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [dbStats, setDbStats] = useState({ players: 0 });
   const [refreshing, setRefreshing] = useState(false);
   const [selectedBookmaker, setSelectedBookmaker] = useState("Stake");
-  const [selectedPropType, setSelectedPropType] = useState("player_points_rebounds_assists");
-  const [propTypes, setPropTypes] = useState(DEFAULT_PROP_TYPES);
+  const [selectedMarket, setSelectedMarket] = useState("");
+  const [availableMarkets, setAvailableMarkets] = useState<string[]>([]);
 
-  // Fetch available prop types from edge function
-  const fetchPropTypes = async (sportVal: string, bookmakerVal: string) => {
+  // Fetch available prop types for current sport/bookmaker
+  const fetchMarkets = async () => {
     try {
       const res = await fetch(EDGE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ operation: "get_combo_props", sport: sportVal, bookmaker: bookmakerVal }),
+        body: JSON.stringify({ operation: "get_props", sport, bookmaker: selectedBookmaker }),
       });
       const data = await res.json();
       if (data.success && data.props) {
-        const uniqueMarkets = [...new Set(data.props.map(p => p.market_type))];
-        const types = uniqueMarkets.map(m => ({
-          label: m.replace(/player_/g, "").replace(/_/g, " + ").toUpperCase(),
-          value: m,
-        }));
-        if (types.length) setPropTypes(types);
+        const markets = [...new Set(data.props.map(p => p.market_type))];
+        setAvailableMarkets(markets);
+        if (markets.length && !selectedMarket) setSelectedMarket(markets[0]);
       }
     } catch (err) {
-      console.error("Error fetching prop types:", err);
+      console.error("Error fetching markets:", err);
     }
   };
 
   const fetchData = async (force = false) => {
-    const cacheKey = `${sport}-${selectedBookmaker}-${selectedPropType}`;
-    if (!force && playerCache.has(cacheKey)) {
-      setPlayers(playerCache.get(cacheKey)!);
-      setDbStats({ players: playerCache.get(cacheKey)!.length });
+    const cacheKey = `${sport}-${selectedBookmaker}-${selectedMarket}`;
+    if (!force && cache.has(cacheKey)) {
+      setPlayers(cache.get(cacheKey)!);
       setLoading(false);
       return;
     }
-
     if (force) setRefreshing(true);
     else setLoading(true);
 
     try {
-      // Get players
+      // 1. Get players
       const playersRes = await fetch(EDGE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -88,16 +72,11 @@ export default function Scanner() {
       const playersData = await playersRes.json();
       if (!playersData.success) throw new Error("Failed to fetch players");
 
-      // Get combo props for selected sport, bookmaker, and prop type
+      // 2. Get props for selected market
       const propsRes = await fetch(EDGE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          operation: "get_combo_props", 
-          sport, 
-          bookmaker: selectedBookmaker,
-          market: selectedPropType,
-        }),
+        body: JSON.stringify({ operation: "get_props", sport, bookmaker: selectedBookmaker, market: selectedMarket }),
       });
       const propsData = await propsRes.json();
       const props = propsData.props || [];
@@ -105,41 +84,21 @@ export default function Scanner() {
       // Build line map
       const lineMap = new Map();
       for (const prop of props) {
-        if (prop.player_name && prop.line) {
-          lineMap.set(prop.player_name, prop.line);
-        }
+        lineMap.set(prop.player_name, prop.line);
       }
 
-      // Merge players with lines
-      const merged = playersData.players.map((p: any) => {
-        const line = lineMap.get(p.name);
-        if (!line) {
-          return {
-            ...p,
-            line: "N/A",
-            edge_type: "N/A",
-            confidence: 0,
-            hit_rate: 0,
-            trend: "no line",
-            initials: p.name.split(' ').map((n: string) => n[0]).join('') || "??",
-          };
-        }
-        return {
-          ...p,
-          line,
-          edge_type: "NONE",
-          confidence: 50,
-          hit_rate: 0,
-          trend: "stable",
-          initials: p.name.split(' ').map((n: string) => n[0]).join('') || "??",
-        };
-      });
+      // Merge
+      const merged = playersData.players.map(p => ({
+        ...p,
+        line: lineMap.get(p.name) || "N/A",
+        confidence: lineMap.get(p.name) ? 50 : 0,
+        initials: p.name.split(' ').map(n => n[0]).join('') || "??",
+      }));
 
-      playerCache.set(cacheKey, merged);
+      cache.set(cacheKey, merged);
       setPlayers(merged);
-      setDbStats({ players: merged.length });
-    } catch (error) {
-      console.error("Error fetching data:", error);
+    } catch (err) {
+      console.error(err);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -147,23 +106,21 @@ export default function Scanner() {
   };
 
   useEffect(() => {
-    fetchData(false);
-    fetchPropTypes(sport, selectedBookmaker);
-  }, [sport, selectedBookmaker, selectedPropType]);
+    fetchMarkets();
+  }, [sport, selectedBookmaker]);
+
+  useEffect(() => {
+    if (selectedMarket) fetchData(false);
+  }, [sport, selectedBookmaker, selectedMarket]);
 
   const handleSportChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setSport(e.target.value);
-    setSearch("");
-    setSelectedPropType(propTypes[0]?.value || DEFAULT_PROP_TYPES[0].value);
+    setSelectedMarket("");
   };
 
   const handleSort = (field: SortField) => {
-    if (sortField === field) {
-      setSortDir(d => (d === "desc" ? "asc" : "desc"));
-    } else {
-      setSortField(field);
-      setSortDir("desc");
-    }
+    if (sortField === field) setSortDir(prev => prev === "desc" ? "asc" : "desc");
+    else { setSortField(field); setSortDir("desc"); }
   };
 
   const filteredPlayers = players
@@ -183,11 +140,7 @@ export default function Scanner() {
   };
 
   if (selectedPlayer) {
-    return (
-      <DashboardLayout>
-        <PlayerDetailView playerId={selectedPlayer} onBack={() => setSelectedPlayer(null)} />
-      </DashboardLayout>
-    );
+    return <PlayerDetailView playerId={selectedPlayer} onBack={() => setSelectedPlayer(null)} />;
   }
 
   const getSportDisplay = () => SPORTS_LIST.find(s => s.value === sport)?.label || sport.toUpperCase();
@@ -197,107 +150,51 @@ export default function Scanner() {
       <header className="border-b border-border bg-card/50 backdrop-blur-xl sticky top-0 z-40">
         <div className="px-6 py-3 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
           <div>
-            <p className="text-xs text-muted-foreground">Welcome to</p>
-            <h1 className="text-2xl font-display font-bold text-gradient-gold tracking-wider">LINE PULSE</h1>
+            <h1 className="text-2xl font-display font-bold text-gradient-gold">LINE PULSE</h1>
             <p className="text-xs text-green-400">● LIVE 24/7</p>
           </div>
           <div className="flex flex-wrap gap-3">
-            {/* Sport Dropdown */}
-            <select
-              value={sport}
-              onChange={handleSportChange}
-              className="bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground"
-            >
-              {SPORTS_LIST.map(s => (
-                <option key={s.value} value={s.value}>{s.label}</option>
-              ))}
+            <select value={sport} onChange={handleSportChange} className="bg-secondary border border-border rounded-lg px-3 py-2 text-sm">
+              {SPORTS_LIST.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
             </select>
-
-            {/* Sportsbook Dropdown */}
-            <select
-              value={selectedBookmaker}
-              onChange={(e) => setSelectedBookmaker(e.target.value)}
-              className="bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground"
-            >
-              {SPORTSBOOKS.map(book => (
-                <option key={book} value={book}>{book}</option>
-              ))}
+            <select value={selectedBookmaker} onChange={e => setSelectedBookmaker(e.target.value)} className="bg-secondary border border-border rounded-lg px-3 py-2 text-sm">
+              {SPORTSBOOKS.map(b => <option key={b} value={b}>{b}</option>)}
             </select>
-
-            {/* Prop Type Dropdown (Combo Props Only) */}
-            <select
-              value={selectedPropType}
-              onChange={(e) => setSelectedPropType(e.target.value)}
-              className="bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground"
-            >
-              {propTypes.map(prop => (
-                <option key={prop.value} value={prop.value}>{prop.label}</option>
-              ))}
+            <select value={selectedMarket} onChange={e => setSelectedMarket(e.target.value)} className="bg-secondary border border-border rounded-lg px-3 py-2 text-sm">
+              {availableMarkets.map(m => <option key={m} value={m}>{m.replace(/player_/g, "").replace(/_/g, " + ").toUpperCase()}</option>)}
             </select>
           </div>
         </div>
       </header>
 
-      <div className="px-6 py-4 space-y-3">
-        <div className="flex flex-col sm:flex-row gap-3">
+      <div className="px-6 py-4">
+        <div className="flex flex-col sm:flex-row gap-3 mb-4">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Search player by name..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-input border border-border text-foreground placeholder:text-muted-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-            />
+            <input type="text" placeholder="Search player..." value={search} onChange={e => setSearch(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-input border border-border text-foreground" />
           </div>
-          <button
-            onClick={() => fetchData(true)}
-            disabled={refreshing}
-            className="px-4 py-2.5 rounded-lg bg-secondary border border-border text-sm font-medium text-secondary-foreground hover:bg-muted transition-colors flex items-center gap-2"
-          >
+          <button onClick={() => fetchData(true)} disabled={refreshing} className="px-4 py-2.5 rounded-lg bg-secondary border border-border flex items-center gap-2">
             {refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-            {refreshing ? "Refreshing..." : "Refresh Now"}
+            Refresh
           </button>
-          <button
-            onClick={() => setSortDir(d => (d === "desc" ? "asc" : "desc"))}
-            className="px-4 py-2.5 rounded-lg bg-secondary border border-border text-sm font-medium text-secondary-foreground hover:bg-muted transition-colors flex items-center gap-2"
-          >
-            <BarChart3 className="w-4 h-4" />
-            {sortDir === "desc" ? "↓ Highest First" : "↑ Lowest First"}
+          <button onClick={() => setSortDir(d => d === "desc" ? "asc" : "desc")} className="px-4 py-2.5 rounded-lg bg-secondary border border-border flex items-center gap-2">
+            <BarChart3 className="w-4 h-4" /> {sortDir === "desc" ? "↓ Highest First" : "↑ Lowest First"}
           </button>
         </div>
-      </div>
 
-      <div className="px-6 pb-8">
         {loading ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="w-8 h-8 animate-spin text-primary" />
-          </div>
+          <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
         ) : (
           <>
             <div className="mb-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
-              <p className="text-xs text-green-400">
-                ✅ {getSportDisplay()} – {propTypes.find(p => p.value === selectedPropType)?.label || selectedPropType} lines from {selectedBookmaker}
-                <br />
-                <span className="text-muted-foreground">
-                  {players.filter(p => p.line !== "N/A").length} of {players.length} players have lines available
-                </span>
-              </p>
+              <p className="text-xs text-green-400">✅ {getSportDisplay()} – {selectedMarket.replace(/player_/g, "").replace(/_/g, " + ").toUpperCase()} lines from {selectedBookmaker}</p>
             </div>
             <div className="bg-card border border-border rounded-xl overflow-hidden">
-              <PlayerTable
-                players={filteredPlayers}
-                sortField={sortField}
-                sortDir={sortDir}
-                onSort={handleSort}
-                onPlayerClick={handlePlayerClick}
-              />
+              <PlayerTable players={filteredPlayers} sortField={sortField} sortDir={sortDir} onSort={handleSort} onPlayerClick={handlePlayerClick} />
             </div>
           </>
         )}
-        <div className="text-center text-sm text-muted-foreground mt-4">
-          Showing {filteredPlayers.length} players • Powered by Odds‑API.io
-        </div>
       </div>
     </DashboardLayout>
   );
