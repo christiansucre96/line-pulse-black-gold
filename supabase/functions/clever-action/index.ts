@@ -1,286 +1,512 @@
-import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
+// supabase/functions/odds-props/index.ts
+// Fetches real prop lines from odds-api.io (free tier)
+// All sports: NBA, NFL, MLB, NHL, Soccer
+// All prop types: single + combo
+
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const corsHeaders = {
+const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-function getSupabase() {
+function getSB() {
   const url = Deno.env.get("SUPABASE_URL");
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  if (!url || !key) throw new Error("Missing env vars");
+  if (!url || !key) throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
   return createClient(url, key);
 }
 
-// ---------- Odds-API.io configuration ----------
-const SPORT_MAP: Record<string, string> = {
-  nba: "basketball_nba",
-  nfl: "americanfootball_nfl",
-  mlb: "baseball_mlb",
-  nhl: "icehockey_nhl",
-  soccer: "soccer_epl",
+function respond(data: any, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { ...cors, "Content-Type": "application/json" },
+  });
+}
+
+// ── ODDS-API.IO SPORT KEYS ────────────────────────────────────
+const SPORT_KEYS: Record<string, string> = {
+  nba:    "basketball_nba",
+  nfl:    "americanfootball_nfl",
+  mlb:    "baseball_mlb",
+  nhl:    "icehockey_nhl",
+  soccer: "soccer_epl",         // EPL — change to soccer_usa_mls for MLS
 };
 
-const SINGLE_MARKETS = ["player_points", "player_rebounds", "player_assists"];
-const COMBO_MARKETS = [
-  { key: "player_points_rebounds", label: "Points + Rebounds", components: ["player_points", "player_rebounds"] },
-  { key: "player_points_assists", label: "Points + Assists", components: ["player_points", "player_assists"] },
-  { key: "player_rebounds_assists", label: "Rebounds + Assists", components: ["player_rebounds", "player_assists"] },
-  { key: "player_points_rebounds_assists", label: "Points + Rebounds + Assists", components: ["player_points", "player_rebounds", "player_assists"] },
-];
+// ── ALL PROP MARKETS PER SPORT ────────────────────────────────
+// These are the exact market keys odds-api.io uses
+const SPORT_MARKETS: Record<string, { single: string[]; combo: { key: string; label: string; components: string[] }[] }> = {
+  nba: {
+    single: [
+      "player_points",
+      "player_rebounds",
+      "player_assists",
+      "player_steals",
+      "player_blocks",
+      "player_turnovers",
+      "player_threes",
+      "player_points_alternate",
+      "player_rebounds_alternate",
+      "player_assists_alternate",
+    ],
+    combo: [
+      { key: "player_points_rebounds",           label: "Pts+Reb",     components: ["player_points", "player_rebounds"] },
+      { key: "player_points_assists",             label: "Pts+Ast",     components: ["player_points", "player_assists"] },
+      { key: "player_rebounds_assists",           label: "Reb+Ast",     components: ["player_rebounds", "player_assists"] },
+      { key: "player_points_rebounds_assists",    label: "PRA",         components: ["player_points", "player_rebounds", "player_assists"] },
+      { key: "player_double_double",              label: "Dbl-Dbl",     components: [] },  // native market
+      { key: "player_triple_double",              label: "Trpl-Dbl",    components: [] },  // native market
+    ],
+  },
+  nfl: {
+    single: [
+      "player_pass_yds",
+      "player_rush_yds",
+      "player_reception_yds",
+      "player_pass_tds",
+      "player_rush_tds",
+      "player_reception_tds",
+      "player_receptions",
+      "player_pass_attempts",
+      "player_pass_completions",
+      "player_pass_interceptions",
+      "player_anytime_td",
+      "player_pass_yds_alternate",
+      "player_rush_yds_alternate",
+      "player_reception_yds_alternate",
+    ],
+    combo: [
+      { key: "player_pass_rush_yds",   label: "Pass+Rush Yds",  components: ["player_pass_yds", "player_rush_yds"] },
+      { key: "player_rush_rec_yds",    label: "Rush+Rec Yds",   components: ["player_rush_yds", "player_reception_yds"] },
+    ],
+  },
+  mlb: {
+    single: [
+      "batter_hits",
+      "batter_runs_scored",
+      "batter_rbis",
+      "batter_total_bases",
+      "batter_home_runs",
+      "batter_stolen_bases",
+      "batter_walks",
+      "batter_strikeouts",
+      "pitcher_strikeouts",
+      "pitcher_hits_allowed",
+      "pitcher_walks",
+      "pitcher_earned_runs",
+      "pitcher_outs",
+      "batter_hits_alternate",
+      "batter_total_bases_alternate",
+      "pitcher_strikeouts_alternate",
+    ],
+    combo: [
+      { key: "batter_hits_runs_rbis", label: "H+R+RBI", components: ["batter_hits", "batter_runs_scored", "batter_rbis"] },
+    ],
+  },
+  nhl: {
+    single: [
+      "player_points",
+      "player_goals",
+      "player_assists",
+      "player_shots_on_goal",
+      "player_blocked_shots",
+      "player_goals_alternate",
+      "player_shots_on_goal_alternate",
+    ],
+    combo: [
+      { key: "player_goals_assists",        label: "G+A",         components: ["player_goals", "player_assists"] },
+      { key: "player_points_alternate",     label: "Pts Ladder",  components: [] },
+    ],
+  },
+  soccer: {
+    single: [
+      "player_shots_on_target",
+      "player_shots",
+      "player_goal_scorer_anytime",
+      "player_goal_scorer_first",
+      "player_assists",
+      "player_passes",
+      "player_tackles",
+    ],
+    combo: [
+      { key: "player_goal_and_assist", label: "G+A", components: ["player_goal_scorer_anytime", "player_assists"] },
+    ],
+  },
+};
 
-// Fetch single market props from Odds-API.io
-async function fetchSingleMarketProps(sport: string, bookmaker: string, market: string) {
-  const API_KEY = Deno.env.get("ODDS_API_KEY");  // Your odds-api.io key
-  if (!API_KEY) return [];
-  const oddsSport = SPORT_MAP[sport];
-  if (!oddsSport) return [];
+// ── HUMAN-READABLE MARKET LABELS ─────────────────────────────
+const MARKET_LABELS: Record<string, string> = {
+  // NBA
+  player_points:                    "Points",
+  player_rebounds:                  "Rebounds",
+  player_assists:                   "Assists",
+  player_steals:                    "Steals",
+  player_blocks:                    "Blocks",
+  player_turnovers:                 "Turnovers",
+  player_threes:                    "3PT Made",
+  player_points_rebounds:           "Pts+Reb",
+  player_points_assists:            "Pts+Ast",
+  player_rebounds_assists:          "Reb+Ast",
+  player_points_rebounds_assists:   "PRA",
+  player_double_double:             "Double Double",
+  player_triple_double:             "Triple Double",
+  player_points_alternate:          "Alt Points",
+  player_rebounds_alternate:        "Alt Rebounds",
+  player_assists_alternate:         "Alt Assists",
+  // NFL
+  player_pass_yds:                  "Pass Yards",
+  player_rush_yds:                  "Rush Yards",
+  player_reception_yds:             "Rec Yards",
+  player_pass_tds:                  "Pass TDs",
+  player_rush_tds:                  "Rush TDs",
+  player_reception_tds:             "Rec TDs",
+  player_receptions:                "Receptions",
+  player_pass_attempts:             "Pass Attempts",
+  player_pass_completions:          "Completions",
+  player_pass_interceptions:        "INTs",
+  player_anytime_td:                "Anytime TD",
+  player_pass_rush_yds:             "Pass+Rush Yds",
+  player_rush_rec_yds:              "Rush+Rec Yds",
+  player_pass_yds_alternate:        "Alt Pass Yds",
+  player_rush_yds_alternate:        "Alt Rush Yds",
+  player_reception_yds_alternate:   "Alt Rec Yds",
+  // MLB
+  batter_hits:                      "Hits",
+  batter_runs_scored:               "Runs",
+  batter_rbis:                      "RBIs",
+  batter_total_bases:               "Total Bases",
+  batter_home_runs:                 "Home Runs",
+  batter_stolen_bases:              "Stolen Bases",
+  batter_walks:                     "Walks",
+  batter_strikeouts:                "Strikeouts (B)",
+  pitcher_strikeouts:               "Strikeouts (P)",
+  pitcher_hits_allowed:             "Hits Allowed",
+  pitcher_walks:                    "Walks (P)",
+  pitcher_earned_runs:              "Earned Runs",
+  pitcher_outs:                     "Outs",
+  batter_hits_runs_rbis:            "H+R+RBI",
+  batter_hits_alternate:            "Alt Hits",
+  batter_total_bases_alternate:     "Alt Total Bases",
+  pitcher_strikeouts_alternate:     "Alt K",
+  // NHL
+  player_goals:                     "Goals",
+  player_shots_on_goal:             "Shots on Goal",
+  player_blocked_shots:             "Blocked Shots",
+  player_goals_assists:             "G+A",
+  player_goals_alternate:           "Alt Goals",
+  player_shots_on_goal_alternate:   "Alt SOG",
+  // Soccer
+  player_shots_on_target:           "Shots on Target",
+  player_shots:                     "Shots",
+  player_goal_scorer_anytime:       "Anytime Scorer",
+  player_goal_scorer_first:         "First Scorer",
+  player_passes:                    "Passes",
+  player_tackles:                   "Tackles",
+  player_goal_and_assist:           "G+A",
+};
 
-  // Odds-API.io v4 endpoint – note: bookmaker name must be lowercase (e.g., "stake", "betonline")
-  const url = `https://api.odds-api.io/v4/sports/${oddsSport}/odds/?apiKey=${API_KEY}&regions=us&markets=${market}&bookmakers=${bookmaker.toLowerCase()}`;
-  const res = await fetch(url);
-  if (!res.ok) {
-    console.error(`Odds-API.io error for ${sport}/${bookmaker}/${market}: ${res.status}`);
+// ── FETCH ONE MARKET from odds-api.io ─────────────────────────
+async function fetchMarket(
+  apiKey: string,
+  sport: string,
+  market: string,
+  regions = "us,uk",
+  bookmakers = "draftkings,fanduel,betmgm,caesars,pointsbetus"
+) {
+  const sportKey = SPORT_KEYS[sport];
+  if (!sportKey) return [];
+
+  // odds-api.io v3 endpoint
+  const url = new URL(`https://api.odds-api.io/v3/sports/${sportKey}/events`);
+  url.searchParams.set("apiKey", apiKey);
+  url.searchParams.set("regions", regions);
+  url.searchParams.set("markets", market);
+  url.searchParams.set("bookmakers", bookmakers);
+  url.searchParams.set("oddsFormat", "american");
+
+  try {
+    const res = await fetch(url.toString());
+    if (!res.ok) {
+      console.error(`odds-api.io ${res.status}: ${sport}/${market} — ${await res.text()}`);
+      return [];
+    }
+    const events = await res.json();
+    const rows: any[] = [];
+
+    for (const event of (Array.isArray(events) ? events : [])) {
+      const homeTeam = event.home_team;
+      const awayTeam = event.away_team;
+      const gameLabel = `${awayTeam} @ ${homeTeam}`;
+      const gameTime  = event.commence_time;
+
+      for (const bk of (event.bookmakers || [])) {
+        for (const mkt of (bk.markets || [])) {
+          if (mkt.key !== market) continue;
+
+          // Group outcomes by player name
+          const playerMap = new Map<string, { over?: any; under?: any }>();
+          for (const outcome of (mkt.outcomes || [])) {
+            // odds-api.io puts player name in `description` for player props
+            const playerName = outcome.description || outcome.name;
+            if (!playerName) continue;
+            if (!playerMap.has(playerName)) playerMap.set(playerName, {});
+            const entry = playerMap.get(playerName)!;
+            const side = outcome.name?.toLowerCase();
+            if (side === "over")  entry.over  = outcome;
+            if (side === "under") entry.under = outcome;
+          }
+
+          for (const [playerName, sides] of playerMap) {
+            const line = sides.over?.point ?? sides.under?.point ?? null;
+            if (line === null) continue;
+            rows.push({
+              sport,
+              player_name:   playerName,
+              bookmaker:     bk.title,
+              market_key:    market,
+              market_label:  MARKET_LABELS[market] || market,
+              game:          gameLabel,
+              game_time:     gameTime,
+              line:          line,
+              over_odds:     sides.over?.price  ?? null,
+              under_odds:    sides.under?.price ?? null,
+              is_combo:      false,
+              last_updated:  new Date().toISOString(),
+            });
+          }
+        }
+      }
+    }
+    return rows;
+  } catch (e) {
+    console.error(`fetchMarket error [${sport}/${market}]:`, e);
     return [];
   }
-  const data = await res.json();
-  const props = [];
-  for (const event of data) {
-    for (const bk of event.bookmakers || []) {
-      for (const mkt of bk.markets || []) {
-        if (mkt.key === market) {
-          for (const outcome of mkt.outcomes || []) {
-            props.push({
-              player_name: outcome.description,
-              line: outcome.point,
-              odds: outcome.price,
-            });
-          }
-        }
+}
+
+// ── SYNC ALL PROPS for one sport ──────────────────────────────
+async function syncSport(sb: any, apiKey: string, sport: string) {
+  const config  = SPORT_MARKETS[sport];
+  if (!config) throw new Error(`No market config for sport: ${sport}`);
+
+  const allRows: any[] = [];
+  const marketDataCache = new Map<string, any[]>();
+
+  // 1. Fetch all single markets
+  console.log(`[${sport}] Fetching ${config.single.length} single markets...`);
+  for (const market of config.single) {
+    const rows = await fetchMarket(apiKey, sport, market);
+    marketDataCache.set(market, rows);
+    // Mark all as single
+    for (const row of rows) { row.is_combo = false; }
+    allRows.push(...rows);
+    // Respect free tier rate limits
+    await new Promise(r => setTimeout(r, 800));
+  }
+
+  // 2. Build computed combos (summing component lines)
+  for (const combo of config.combo) {
+    if (combo.components.length === 0) continue; // native markets already fetched above
+
+    // Get player sets from first component
+    const firstData = marketDataCache.get(combo.components[0]) || [];
+
+    for (const firstRow of firstData) {
+      const playerName = firstRow.player_name;
+      const bookmaker  = firstRow.bookmaker;
+      const game       = firstRow.game;
+
+      // Check all component markets have this player from the same bookmaker
+      let totalLine   = 0;
+      let overOdds    = 1.0;
+      let underOdds   = 1.0;
+      let hasAll      = true;
+
+      for (const compMarket of combo.components) {
+        const compData = marketDataCache.get(compMarket) || [];
+        const match = compData.find(
+          r => r.player_name === playerName && r.bookmaker === bookmaker
+        );
+        if (!match) { hasAll = false; break; }
+        totalLine  += match.line;
+        overOdds   *= decimalOdds(match.over_odds);
+        underOdds  *= decimalOdds(match.under_odds);
       }
+
+      if (!hasAll) continue;
+
+      allRows.push({
+        sport,
+        player_name:   playerName,
+        bookmaker,
+        market_key:    combo.key,
+        market_label:  combo.label,
+        game,
+        game_time:     firstRow.game_time,
+        line:          Math.round(totalLine * 2) / 2,   // round to 0.5
+        over_odds:     americanOdds(overOdds),
+        under_odds:    americanOdds(underOdds),
+        is_combo:      true,
+        last_updated:  new Date().toISOString(),
+      });
     }
   }
-  return props;
-}
 
-// Sync all sports and bookmakers
-async function syncAllProps(supabase: any) {
-  const sports = ["nba", "mlb", "nhl", "soccer"]; // NFL off-season, skip for now
-  const bookmakers = ["Stake", "BetOnline"];
-  const results = {};
+  // 3. Wipe old data and insert fresh
+  const { error: delError } = await sb
+    .from("player_props_cache")
+    .delete()
+    .eq("sport", sport);
+  if (delError) console.error("Delete error:", delError);
 
-  for (const sport of sports) {
-    results[sport] = {};
-    for (const bookmaker of bookmakers) {
-      try {
-        // Fetch single markets
-        const singlePropsMap: Record<string, Map<string, { line: number; odds: number }>> = {};
-        for (const market of SINGLE_MARKETS) {
-          const props = await fetchSingleMarketProps(sport, bookmaker, market);
-          const map = new Map();
-          for (const p of props) map.set(p.player_name, { line: p.line, odds: p.odds });
-          singlePropsMap[market] = map;
-        }
-
-        const allProps = [];
-        // Add single props
-        for (const market of SINGLE_MARKETS) {
-          for (const [player, data] of singlePropsMap[market]) {
-            allProps.push({
-              sport,
-              player_name: player,
-              bookmaker,
-              market_type: market,
-              line: data.line,
-              odds: data.odds,
-              is_combo: false,
-              last_updated: new Date().toISOString(),
-            });
-          }
-        }
-        // Add combo props (sum of components)
-        for (const combo of COMBO_MARKETS) {
-          const firstMap = singlePropsMap[combo.components[0]];
-          const players = new Set<string>();
-          for (const [player] of firstMap) {
-            let hasAll = true;
-            for (const comp of combo.components) {
-              if (!singlePropsMap[comp].has(player)) { hasAll = false; break; }
-            }
-            if (hasAll) players.add(player);
-          }
-          for (const player of players) {
-            let totalLine = 0;
-            let totalOdds = 1;
-            for (const comp of combo.components) {
-              const d = singlePropsMap[comp].get(player);
-              totalLine += d.line;
-              totalOdds *= d.odds;
-            }
-            allProps.push({
-              sport,
-              player_name: player,
-              bookmaker,
-              market_type: combo.key,
-              line: totalLine,
-              odds: totalOdds,
-              is_combo: true,
-              last_updated: new Date().toISOString(),
-            });
-          }
-        }
-
-        if (allProps.length) {
-          await supabase.from("player_props_cache").delete().eq("sport", sport).eq("bookmaker", bookmaker);
-          const chunkSize = 500;
-          for (let i = 0; i < allProps.length; i += chunkSize) {
-            const chunk = allProps.slice(i, i + chunkSize);
-            const { error } = await supabase.from("player_props_cache").insert(chunk);
-            if (error) throw error;
-          }
-          results[sport][bookmaker] = { success: true, count: allProps.length };
-        } else {
-          results[sport][bookmaker] = { success: false, count: 0 };
-        }
-      } catch (err) {
-        results[sport][bookmaker] = { success: false, error: err.message };
-      }
-    }
+  let inserted = 0;
+  for (let i = 0; i < allRows.length; i += 500) {
+    const { error } = await sb
+      .from("player_props_cache")
+      .insert(allRows.slice(i, i + 500));
+    if (error) console.error("Insert error:", error);
+    else inserted += Math.min(500, allRows.length - i);
   }
-  return results;
+
+  return { sport, total_props: allRows.length, inserted, markets_fetched: config.single.length };
 }
 
-// ---------- Other operations (players, stats, etc.) ----------
-async function getPlayers(supabase: any, sport: string) {
-  const { data: players, error } = await supabase
-    .from("players")
-    .select("id, full_name, position, status, injury_description, is_starter, teams:team_id(name, abbreviation)")
-    .eq("sport", sport)
-    .limit(500);
-  if (error) throw error;
-  return players.map(p => ({
-    id: p.id,
-    name: p.full_name,
-    position: p.position || "N/A",
-    team: p.teams?.name || "Unknown",
-    teamAbbr: p.teams?.abbreviation || "N/A",
-    opponent: "TBD",
-    status: p.status || "active",
-    injury_description: p.injury_description,
-    is_starter: p.is_starter || false,
-  }));
+function decimalOdds(american: number | null): number {
+  if (!american) return 1.91;
+  return american > 0 ? 1 + american / 100 : 1 + 100 / Math.abs(american);
 }
 
-async function getProps(supabase: any, sport: string, bookmaker: string, marketType?: string) {
-  let query = supabase.from("player_props_cache").select("*").eq("sport", sport).eq("bookmaker", bookmaker);
-  if (marketType) query = query.eq("market_type", marketType);
-  const { data, error } = await query.order("last_updated", { ascending: false });
+function americanOdds(decimal: number): number {
+  return decimal >= 2
+    ? Math.round((decimal - 1) * 100)
+    : Math.round(-100 / (decimal - 1));
+}
+
+// ── GET PROPS from cache (with optional filters) ──────────────
+async function getProps(sb: any, sport: string, opts: {
+  bookmaker?: string;
+  marketKey?: string;
+  playerName?: string;
+  comboOnly?: boolean;
+  singleOnly?: boolean;
+}) {
+  let q = sb.from("player_props_cache").select("*").eq("sport", sport);
+  if (opts.bookmaker)   q = q.ilike("bookmaker", `%${opts.bookmaker}%`);
+  if (opts.marketKey)   q = q.eq("market_key", opts.marketKey);
+  if (opts.playerName)  q = q.ilike("player_name", `%${opts.playerName}%`);
+  if (opts.comboOnly)   q = q.eq("is_combo", true);
+  if (opts.singleOnly)  q = q.eq("is_combo", false);
+  const { data, error } = await q.order("player_name").limit(2000);
   if (error) throw error;
   return data || [];
 }
 
-async function getPlayerDetails(supabase: any, playerId: string) {
-  const { data: player, error } = await supabase
-    .from("players")
-    .select("id, full_name, position, status, injury_description, is_starter, teams:team_id(name, abbreviation)")
-    .eq("id", playerId)
-    .single();
-  if (error) throw error;
-  const { data: props } = await supabase
-    .from("player_props_cache")
-    .select("*")
-    .eq("player_name", player.full_name);
-  const { data: stats } = await supabase
-    .from("player_stats")
-    .select("*")
-    .eq("player_id", player.id)
-    .order("game_date", { ascending: false })
-    .limit(20);
-  return { ...player, props: props || [], stats: stats || [] };
+// ── CHECK REMAINING API QUOTA ─────────────────────────────────
+async function checkQuota(apiKey: string) {
+  const res = await fetch(`https://api.odds-api.io/v3/remaining?apiKey=${apiKey}`);
+  if (!res.ok) return null;
+  return res.json();
 }
 
-async function addPlayer(supabase: any, sport: string, name: string, position: string, teamName: string) {
-  let { data: team } = await supabase.from("teams").select("id").eq("name", teamName).eq("sport", sport).single();
-  if (!team) {
-    const { data: newTeam, error } = await supabase
-      .from("teams")
-      .insert({ external_id: name.replace(/\s/g, "_"), sport, name: teamName, abbreviation: teamName.slice(0,3) })
-      .select()
-      .single();
-    if (error) throw error;
-    team = newTeam;
-  }
-  const { error } = await supabase.from("players").upsert({
-    external_id: name.replace(/\s/g, "_"),
-    sport,
-    full_name: name,
-    position,
-    team_id: team.id,
-    is_starter: true,
-  }, { onConflict: "sport,external_id" });
-  if (error) throw error;
-  return { success: true };
-}
+// ── MAIN HANDLER ──────────────────────────────────────────────
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
-async function addPlayerStat(supabase: any, playerId: string, gameDate: string, points: number, rebounds: number, assists: number, minutes: number) {
-  const { error } = await supabase.from("player_stats").upsert({
-    player_id: playerId,
-    game_date: gameDate,
-    points,
-    rebounds,
-    assists,
-    minutes,
-  }, { onConflict: "player_id,game_date" });
-  if (error) throw error;
-  return { success: true };
-}
-
-async function syncUpcoming() { return { teams: 0, players: 0 }; }
-
-// ---------- Main handler ----------
-serve(async (req: Request) => {
-  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
   try {
-    const supabase = getSupabase();
-    const body = await req.json().catch(() => ({}));
-    let { operation, sport, bookmaker, market, player_id, player_name, position, team, stats } = body;
+    const sb     = getSB();
+    const apiKey = Deno.env.get("ODDS_API_KEY");
+    const body   = await req.json().catch(() => ({}));
+    const { operation, sport, bookmaker, market_key, player_name, combo_only, single_only } = body;
 
-    if (!operation && sport) operation = "get_players";
+    console.log(`[odds-props] op=${operation} sport=${sport}`);
 
     switch (operation) {
-      case "get_players":
-        const players = await getPlayers(supabase, sport);
-        return new Response(JSON.stringify({ success: true, players, count: players.length }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      case "get_props":
-        if (!bookmaker) bookmaker = "Stake";
-        const props = await getProps(supabase, sport, bookmaker, market);
-        return new Response(JSON.stringify({ success: true, props, count: props.length }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      case "get_player_details":
-        if (!player_id) throw new Error("Missing player_id");
-        const details = await getPlayerDetails(supabase, player_id);
-        return new Response(JSON.stringify({ success: true, player: details }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      case "sync_props":
-        const results = await syncAllProps(supabase);
-        return new Response(JSON.stringify({ success: true, results }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      case "sync_upcoming":
-        const dummy = await syncUpcoming();
-        return new Response(JSON.stringify({ success: true, ...dummy }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      case "add_player":
-        if (!sport || !player_name || !position || !team) throw new Error("Missing fields");
-        const addResult = await addPlayer(supabase, sport, player_name, position, team);
-        return new Response(JSON.stringify({ success: true, ...addResult }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      case "add_player_stat":
-        if (!player_id || !stats) throw new Error("Missing fields");
-        const { game_date, points, rebounds, assists, minutes } = stats;
-        const statResult = await addPlayerStat(supabase, player_id, game_date, points, rebounds, assists, minutes);
-        return new Response(JSON.stringify({ success: true, ...statResult }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
+      // ── Sync ONE sport ────────────────────────────────────────
+      case "sync": {
+        if (!apiKey) return respond({ success: false, error: "ODDS_API_KEY not set" }, 400);
+        if (!sport)  return respond({ success: false, error: "sport required" }, 400);
+        const result = await syncSport(sb, apiKey, sport);
+        return respond({ success: true, ...result });
+      }
+
+      // ── Sync ALL sports ───────────────────────────────────────
+      case "sync_all": {
+        if (!apiKey) return respond({ success: false, error: "ODDS_API_KEY not set" }, 400);
+        const sports  = ["nba", "mlb", "nhl", "soccer"]; // NFL only during season
+        const results: any[] = [];
+        for (const s of sports) {
+          try {
+            const r = await syncSport(sb, apiKey, s);
+            results.push(r);
+          } catch (e: any) {
+            results.push({ sport: s, error: e.message });
+          }
+          await new Promise(r => setTimeout(r, 2000)); // pause between sports
+        }
+        return respond({ success: true, results });
+      }
+
+      // ── Get cached props (for frontend) ───────────────────────
+      case "get_props": {
+        if (!sport) return respond({ success: false, error: "sport required" }, 400);
+        const props = await getProps(sb, sport, {
+          bookmaker:  bookmaker,
+          marketKey:  market_key,
+          playerName: player_name,
+          comboOnly:  combo_only === true,
+          singleOnly: single_only === true,
+        });
+        return respond({ success: true, props, count: props.length, sport });
+      }
+
+      // ── List available markets for a sport ────────────────────
+      case "get_markets": {
+        if (!sport) return respond({ success: false, error: "sport required" }, 400);
+        const config = SPORT_MARKETS[sport];
+        if (!config) return respond({ success: false, error: `Unknown sport: ${sport}` }, 400);
+        return respond({
+          success: true,
+          sport,
+          single_markets: config.single.map(k => ({ key: k, label: MARKET_LABELS[k] || k })),
+          combo_markets:  config.combo.map(c => ({ key: c.key, label: c.label })),
+        });
+      }
+
+      // ── Check API quota remaining ─────────────────────────────
+      case "quota": {
+        if (!apiKey) return respond({ success: false, error: "ODDS_API_KEY not set" }, 400);
+        const quota = await checkQuota(apiKey);
+        return respond({ success: true, quota });
+      }
+
+      // ── Health: count props in cache ──────────────────────────
+      case "health": {
+        const counts: any = {};
+        for (const s of ["nba","nfl","mlb","nhl","soccer"]) {
+          const { count } = await sb
+            .from("player_props_cache")
+            .select("*", { count: "exact", head: true })
+            .eq("sport", s);
+          counts[s] = count || 0;
+        }
+        return respond({ success: true, props_cache: counts });
+      }
+
+      case "test":
+        return respond({ success: true, message: "odds-props function is alive!", has_api_key: !!apiKey });
+
       default:
-        return new Response(JSON.stringify({ error: `Unknown operation: ${operation}` }), { status: 400, headers: corsHeaders });
+        return respond({
+          success: false,
+          error: `Unknown operation: "${operation}"`,
+          valid_operations: ["sync","sync_all","get_props","get_markets","quota","health","test"],
+        }, 400);
     }
-  } catch (err: any) {
-    console.error(err);
-    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
+
+  } catch (e: any) {
+    console.error("[odds-props] fatal:", e);
+    return respond({ success: false, error: e.message }, 500);
   }
 });
