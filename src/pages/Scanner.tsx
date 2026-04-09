@@ -8,7 +8,7 @@ import { Sport, sportCategories } from "@/data/mockPlayers";
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
 // Available sports (add more as needed)
-const SPORTS_LIST: { label: Sport; value: string }[] = [
+const SPORTS_LIST: { label: string; value: string }[] = [
   { label: "NBA", value: "nba" },
   { label: "NFL", value: "nfl" },
   { label: "MLB", value: "mlb" },
@@ -16,22 +16,25 @@ const SPORTS_LIST: { label: Sport; value: string }[] = [
   { label: "Soccer", value: "soccer" },
 ];
 
-// Available sportsbooks (add more here – the UI will auto‑update)
-const SPORTSBOOKS = ["Stake", "BetOnline", "DraftKings", "FanDuel"];
+// Sportsbooks (add more here)
+const SPORTSBOOKS = ["Stake", "BetOnline"];
 
-// Over/Under options
-const BET_TYPES = [
-  { label: "Over", value: "over" },
-  { label: "Under", value: "under" },
+// Prop types (stats)
+const PROP_TYPES = [
+  { label: "Points", value: "player_points" },
+  { label: "Rebounds", value: "player_rebounds" },
+  { label: "Assists", value: "player_assists" },
+  { label: "Points + Rebounds", value: "player_points_rebounds" },
+  { label: "Points + Assists", value: "player_points_assists" },
+  { label: "Rebounds + Assists", value: "player_rebounds_assists" },
 ];
 
-// Cache per sport + bookmaker + bet type
 const playerCache = new Map<string, any[]>();
 
 export default function Scanner() {
   const [sport, setSport] = useState<string>("nba");
   const [search, setSearch] = useState("");
-  const [activeStats, setActiveStats] = useState<string[]>(sportCategories["NBA"].core.slice(0, 4));
+  const [activeStats, setActiveStats] = useState<string[]>(sportCategories["NBA"]?.core.slice(0, 4) || ["points"]);
   const [sortField, setSortField] = useState<SortField>("confidence");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
@@ -40,10 +43,10 @@ export default function Scanner() {
   const [dbStats, setDbStats] = useState({ players: 0 });
   const [refreshing, setRefreshing] = useState(false);
   const [selectedBookmaker, setSelectedBookmaker] = useState<string>("Stake");
-  const [selectedBetType, setSelectedBetType] = useState<string>("over");
+  const [selectedPropType, setSelectedPropType] = useState<string>("player_points");
 
   const fetchData = async (force = false) => {
-    const cacheKey = `${sport}-${selectedBookmaker}-${selectedBetType}`;
+    const cacheKey = `${sport}-${selectedBookmaker}-${selectedPropType}`;
     if (!force && playerCache.has(cacheKey)) {
       const cached = playerCache.get(cacheKey)!;
       setPlayers(cached);
@@ -56,7 +59,7 @@ export default function Scanner() {
     else setLoading(true);
 
     try {
-      console.log(`📊 Fetching ${sport} data for ${selectedBookmaker} (${selectedBetType})...`);
+      console.log(`📊 Fetching ${sport} data for ${selectedBookmaker} (${selectedPropType})...`);
 
       // 1. Get players from edge function
       const playersRes = await fetch(EDGE_URL, {
@@ -67,11 +70,11 @@ export default function Scanner() {
       const playersData = await playersRes.json();
       if (!playersData.success) throw new Error("Failed to fetch players");
 
-      // 2. Get odds for selected bookmaker (player props)
+      // 2. Get odds for selected bookmaker and prop type
       const oddsRes = await fetch(EDGE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ operation: "get_odds", sport, bookmaker: selectedBookmaker }),
+        body: JSON.stringify({ operation: "get_odds", sport, bookmaker: selectedBookmaker, market: selectedPropType }),
       });
       const oddsData = await oddsRes.json();
       const odds = oddsData.odds || [];
@@ -79,30 +82,34 @@ export default function Scanner() {
       // Build a map: player name -> line
       const lineMap = new Map<string, number>();
       for (const odd of odds) {
+        // Expected event_name format: "LeBron James Points" or "Giannis Antetokounmpo Rebounds"
         const eventName = odd.event_name || "";
-        const playerName = eventName.replace(" Points", "").trim();
+        // Extract player name by removing the last word (Points, Rebounds, etc.)
+        const lastSpace = eventName.lastIndexOf(" ");
+        const playerName = lastSpace > 0 ? eventName.substring(0, lastSpace) : eventName;
         if (playerName && odd.line) {
           lineMap.set(playerName, odd.line);
         }
       }
 
-      // Merge players with lines and apply over/under selection
+      // Merge players with lines
       const merged = playersData.players.map((p: any) => {
-        const rawLine = lineMap.get(p.name) || 22.5;
-        // For "under", we show the same line but the bet type will be indicated separately
-        const line = rawLine;
-        let edge_type = "NONE";
-        let confidence = 50;
-        // Simple logic: if projection > line => Over, else Under.
-        // For demo, we use a random projection (replace with real projection later)
-        const projection = rawLine + (Math.random() * 2 - 1); // placeholder
-        const isOver = projection > rawLine;
-        if (selectedBetType === "over" && isOver) edge_type = "OVER";
-        else if (selectedBetType === "under" && !isOver) edge_type = "UNDER";
-        else edge_type = "NONE";
-
-        confidence = edge_type !== "NONE" ? 65 : 40;
-
+        const line = lineMap.get(p.name);
+        if (!line) {
+          // No prop line available – mark as N/A
+          return {
+            ...p,
+            line: null,
+            edge_type: "N/A",
+            confidence: 0,
+            hit_rate: 0,
+            trend: "no line",
+            initials: p.name.split(' ').map((n: string) => n[0]).join('') || "??",
+          };
+        }
+        // For now, edge and confidence are placeholders (you can add real logic later)
+        const edge_type = "NONE";
+        const confidence = 50;
         return {
           ...p,
           line,
@@ -111,7 +118,6 @@ export default function Scanner() {
           hit_rate: 0,
           trend: "stable",
           initials: p.name.split(' ').map((n: string) => n[0]).join('') || "??",
-          projection: projection.toFixed(1),
         };
       });
 
@@ -128,11 +134,14 @@ export default function Scanner() {
 
   useEffect(() => {
     fetchData(false);
-  }, [sport, selectedBookmaker, selectedBetType]);
+  }, [sport, selectedBookmaker, selectedPropType]);
 
   const handleSportChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setSport(e.target.value);
-    setActiveStats(sportCategories[e.target.value.toUpperCase() as Sport]?.core.slice(0, 4) || ["points"]);
+    const newSport = e.target.value;
+    setSport(newSport);
+    // Update active stats based on sport (optional)
+    const sportKey = newSport.toUpperCase() as Sport;
+    setActiveStats(sportCategories[sportKey]?.core.slice(0, 4) || ["points"]);
     setSearch("");
   };
 
@@ -173,6 +182,11 @@ export default function Scanner() {
     );
   }
 
+  // Helper to get sport display name
+  const getSportDisplay = () => {
+    return SPORTS_LIST.find(s => s.value === sport)?.label || sport.toUpperCase();
+  };
+
   return (
     <DashboardLayout>
       <header className="border-b border-border bg-card/50 backdrop-blur-xl sticky top-0 z-40">
@@ -182,7 +196,7 @@ export default function Scanner() {
             <h1 className="text-2xl font-display font-bold text-gradient-gold tracking-wider">LINE PULSE</h1>
             <p className="text-xs text-green-400">● LIVE 24/7</p>
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             {/* Sport Dropdown */}
             <select
               value={sport}
@@ -205,22 +219,16 @@ export default function Scanner() {
               ))}
             </select>
 
-            {/* Over/Under Toggle */}
-            <div className="flex bg-secondary rounded-lg overflow-hidden border border-border">
-              {BET_TYPES.map(type => (
-                <button
-                  key={type.value}
-                  onClick={() => setSelectedBetType(type.value)}
-                  className={`px-4 py-1.5 text-sm font-semibold transition-colors ${
-                    selectedBetType === type.value
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-muted"
-                  }`}
-                >
-                  {type.label}
-                </button>
+            {/* Prop Type Dropdown */}
+            <select
+              value={selectedPropType}
+              onChange={(e) => setSelectedPropType(e.target.value)}
+              className="bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground"
+            >
+              {PROP_TYPES.map(prop => (
+                <option key={prop.value} value={prop.value}>{prop.label}</option>
               ))}
-            </div>
+            </select>
           </div>
         </div>
       </header>
@@ -279,9 +287,11 @@ export default function Scanner() {
           <>
             <div className="mb-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
               <p className="text-xs text-green-400">
-                ✅ LIVE: {dbStats.players} players – {selectedBetType.toUpperCase()} from {selectedBookmaker}
+                ✅ {getSportDisplay()} – {PROP_TYPES.find(p => p.value === selectedPropType)?.label || selectedPropType} lines from {selectedBookmaker}
                 <br />
-                <span className="text-muted-foreground">Data refreshed every 30 minutes (backend sync)</span>
+                <span className="text-muted-foreground">
+                  {players.filter(p => p.line).length} of {players.length} players have lines available
+                </span>
               </p>
             </div>
             <div className="bg-card border border-border rounded-xl overflow-hidden">
