@@ -5,55 +5,9 @@ import { SportTabs } from "@/components/SportTabs";
 import { PlayerTable, SortField, SortDir } from "@/components/PlayerTable";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { Sport, sportCategories } from "@/data/mockPlayers";
+import { supabase } from "@/integrations/supabase/client";
 
-// ---------- NBA API (free, no key) ----------
-const BALDONTLIE_API = "https://www.balldontlie.io/api/v1";
-
-async function fetchNBAPlayers() {
-  try {
-    const res = await fetch(`${BALDONTLIE_API}/players?per_page=100`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    return data.data.map((p: any) => ({
-      id: p.id,
-      name: `${p.first_name} ${p.last_name}`,
-      position: p.position || "N/A",
-      team: p.team?.full_name || "Unknown",
-      teamAbbr: p.team?.abbreviation || "N/A",
-      opponent: "TBD", // game info would need a second API call
-      initials: (p.first_name[0] + p.last_name[0]).toUpperCase(),
-      line: 22.5,          // placeholder – replace with real lines later
-      edge_type: "NONE",
-      confidence: 50,
-      hit_rate: 0,
-      trend: "stable",
-      status: "active",
-      is_starter: false,
-      injury_description: null,
-    }));
-  } catch (err) {
-    console.error("Balldontlie error:", err);
-    return [];
-  }
-}
-
-// ---------- Placeholders for other sports (you can add real APIs later) ----------
-async function fetchOtherSportPlayers(sport: Sport) {
-  // For NFL, MLB, NHL, Soccer – you can integrate odds-api.io or another free API
-  console.log(`${sport} API not yet implemented – add your key to fetch real data`);
-  return [];
-}
-
-// ---------- Main fetch dispatcher ----------
-async function fetchPlayersBySport(sport: Sport) {
-  if (sport === "NBA") {
-    return await fetchNBAPlayers();
-  }
-  // Add other sports here as you integrate them
-  return await fetchOtherSportPlayers(sport);
-}
-
-// Simple cache to avoid repeated network calls
+// Simple cache for players per sport
 const playerCache = new Map<string, any[]>();
 
 export default function Scanner() {
@@ -68,6 +22,16 @@ export default function Scanner() {
   const [dbStats, setDbStats] = useState({ players: 0 });
   const [refreshing, setRefreshing] = useState(false);
 
+  // Map Sport enum to database sport string
+  const sportDbMap: Record<Sport, string> = {
+    NBA: "nba",
+    NFL: "nfl",
+    MLB: "mlb",
+    NHL: "nhl",
+    Soccer: "soccer",
+  };
+
+  // Fetch players and odds from Supabase (live data)
   const fetchData = async (force = false) => {
     const cacheKey = sport;
     if (!force && playerCache.has(cacheKey)) {
@@ -82,20 +46,104 @@ export default function Scanner() {
     else setLoading(true);
 
     try {
-      console.log(`📊 Fetching ${sport} players...`);
-      const playersData = await fetchPlayersBySport(sport);
-      playerCache.set(cacheKey, playersData);
-      setPlayers(playersData);
-      setDbStats({ players: playersData.length });
+      const dbSport = sportDbMap[sport];
+      console.log(`📊 Fetching ${sport} live data from Supabase...`);
+
+      // 1. Get players from database
+      const { data: playersData, error: playersError } = await supabase
+        .from("players")
+        .select(`
+          id,
+          external_id,
+          full_name,
+          position,
+          team_id,
+          status,
+          injury_description,
+          is_starter,
+          teams:team_id ( name, abbreviation )
+        `)
+        .eq("sport", dbSport)
+        .limit(500);
+
+      if (playersError) throw playersError;
+      if (!playersData || playersData.length === 0) {
+        console.warn("No players found in database. Run sync_upcoming first.");
+        setPlayers([]);
+        setDbStats({ players: 0 });
+        return;
+      }
+
+      // 2. Get odds for the same sport (latest)
+      const { data: oddsData, error: oddsError } = await supabase
+        .from("odds_cache")
+        .select("*")
+        .eq("sport", dbSport)
+        .order("last_updated", { ascending: false });
+
+      if (oddsError) console.warn("Odds fetch error:", oddsError);
+
+      // 3. Build opponent map from odds_cache (optional)
+      const opponentMap = new Map<string, string>();
+      if (oddsData) {
+        for (const odd of oddsData) {
+          // Extract opponent from event_name like "Lakers vs Warriors"
+          const parts = odd.event_name?.split(" vs ") || [];
+          if (parts.length === 2) {
+            opponentMap.set(parts[0], parts[1]);
+            opponentMap.set(parts[1], parts[0]);
+          }
+        }
+      }
+
+      // 4. Format players with odds data (if available)
+      const formatted = playersData.map((p: any) => {
+        const teamName = p.teams?.name || "Unknown";
+        const opponent = opponentMap.get(teamName) || "TBD";
+        // Find a line for this player (simplified: use first available points line)
+        let line = 22.5;
+        let edge_type = "NONE";
+        let confidence = 50;
+        if (oddsData && oddsData.length > 0) {
+          const playerOdds = oddsData.find(o => o.market_type === "player_points");
+          if (playerOdds) {
+            line = playerOdds.line || line;
+            // Placeholder edge calculation (you can replace with real math later)
+            edge_type = line > 22 ? "OVER" : "UNDER";
+            confidence = line > 22 ? 65 : 55;
+          }
+        }
+        return {
+          id: p.id,
+          name: p.full_name,
+          position: p.position || "N/A",
+          team: teamName,
+          teamAbbr: p.teams?.abbreviation || "N/A",
+          opponent,
+          initials: p.full_name?.split(' ').map((n: string) => n[0]).join('') || "??",
+          line,
+          edge_type,
+          confidence,
+          hit_rate: 0, // will be updated later when historical stats are added
+          trend: "stable",
+          status: p.status || "active",
+          is_starter: p.is_starter || false,
+          injury_description: p.injury_description,
+        };
+      });
+
+      playerCache.set(cacheKey, formatted);
+      setPlayers(formatted);
+      setDbStats({ players: formatted.length });
     } catch (error) {
-      console.error("Error fetching players:", error);
+      console.error("Error fetching live data:", error);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
 
-  // Load once on mount and when sport changes
+  // Load on mount and when sport changes
   useEffect(() => {
     fetchData(false);
   }, [sport]);
@@ -107,7 +155,9 @@ export default function Scanner() {
   };
 
   const toggleStat = (stat: string) => {
-    setActiveStats(prev => prev.includes(stat) ? prev.filter(s => s !== stat) : [...prev, stat]);
+    setActiveStats(prev =>
+      prev.includes(stat) ? prev.filter(s => s !== stat) : [...prev, stat]
+    );
   };
 
   const handleSort = (field: SortField) => {
@@ -210,13 +260,9 @@ export default function Scanner() {
           <>
             <div className="mb-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
               <p className="text-xs text-green-400">
-                ✅ LIVE: {dbStats.players} {sport} players
+                ✅ LIVE: {dbStats.players} {sport} players from database
                 <br />
-                <span className="text-muted-foreground">
-                  {sport === "NBA"
-                    ? "Real player data from balldontlie.io (no API key needed)"
-                    : "Other sports coming soon – add your odds-api.io key for live props"}
-                </span>
+                <span className="text-muted-foreground">Data is refreshed automatically by backend sync every 30 minutes</span>
               </p>
             </div>
             <div className="bg-card border border-border rounded-xl overflow-hidden">
@@ -231,7 +277,7 @@ export default function Scanner() {
           </>
         )}
         <div className="text-center text-sm text-muted-foreground mt-4">
-          Showing {filteredPlayers.length} {sport} players • {sport === "NBA" ? "Powered by balldontlie.io" : "Integration in progress"}
+          Showing {filteredPlayers.length} {sport} players • Powered by live data from Supabase
         </div>
       </div>
     </DashboardLayout>
