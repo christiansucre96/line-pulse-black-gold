@@ -7,8 +7,8 @@ import { Sport, sportCategories } from "@/data/mockPlayers";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
-// Available sports (add more as needed)
-const SPORTS_LIST: { label: string; value: string }[] = [
+// Available sports
+const SPORTS_LIST = [
   { label: "NBA", value: "nba" },
   { label: "NFL", value: "nfl" },
   { label: "MLB", value: "mlb" },
@@ -16,14 +16,12 @@ const SPORTS_LIST: { label: string; value: string }[] = [
   { label: "Soccer", value: "soccer" },
 ];
 
-// Sportsbooks (add more here)
+// Sportsbooks
 const SPORTSBOOKS = ["Stake", "BetOnline"];
 
-// Prop types (stats)
-const PROP_TYPES = [
-  { label: "Points", value: "player_points" },
-  { label: "Rebounds", value: "player_rebounds" },
-  { label: "Assists", value: "player_assists" },
+// Combo props for each sport (will be populated from API)
+const DEFAULT_PROP_TYPES = [
+  { label: "Points + Rebounds + Assists", value: "player_points_rebounds_assists" },
   { label: "Points + Rebounds", value: "player_points_rebounds" },
   { label: "Points + Assists", value: "player_points_assists" },
   { label: "Rebounds + Assists", value: "player_rebounds_assists" },
@@ -32,25 +30,47 @@ const PROP_TYPES = [
 const playerCache = new Map<string, any[]>();
 
 export default function Scanner() {
-  const [sport, setSport] = useState<string>("nba");
+  const [sport, setSport] = useState("nba");
   const [search, setSearch] = useState("");
-  const [activeStats, setActiveStats] = useState<string[]>(sportCategories["NBA"]?.core.slice(0, 4) || ["points"]);
-  const [sortField, setSortField] = useState<SortField>("confidence");
+  const [activeStats, setActiveStats] = useState(["points"]);
+  const [sortField, setSortField] = useState("confidence");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
-  const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
-  const [players, setPlayers] = useState<any[]>([]);
+  const [selectedPlayer, setSelectedPlayer] = useState(null);
+  const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dbStats, setDbStats] = useState({ players: 0 });
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedBookmaker, setSelectedBookmaker] = useState<string>("Stake");
-  const [selectedPropType, setSelectedPropType] = useState<string>("player_points");
+  const [selectedBookmaker, setSelectedBookmaker] = useState("Stake");
+  const [selectedPropType, setSelectedPropType] = useState("player_points_rebounds_assists");
+  const [propTypes, setPropTypes] = useState(DEFAULT_PROP_TYPES);
+
+  // Fetch available prop types from edge function
+  const fetchPropTypes = async (sportVal: string, bookmakerVal: string) => {
+    try {
+      const res = await fetch(EDGE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operation: "get_combo_props", sport: sportVal, bookmaker: bookmakerVal }),
+      });
+      const data = await res.json();
+      if (data.success && data.props) {
+        const uniqueMarkets = [...new Set(data.props.map(p => p.market_type))];
+        const types = uniqueMarkets.map(m => ({
+          label: m.replace(/player_/g, "").replace(/_/g, " + ").toUpperCase(),
+          value: m,
+        }));
+        if (types.length) setPropTypes(types);
+      }
+    } catch (err) {
+      console.error("Error fetching prop types:", err);
+    }
+  };
 
   const fetchData = async (force = false) => {
     const cacheKey = `${sport}-${selectedBookmaker}-${selectedPropType}`;
     if (!force && playerCache.has(cacheKey)) {
-      const cached = playerCache.get(cacheKey)!;
-      setPlayers(cached);
-      setDbStats({ players: cached.length });
+      setPlayers(playerCache.get(cacheKey)!);
+      setDbStats({ players: playerCache.get(cacheKey)!.length });
       setLoading(false);
       return;
     }
@@ -59,9 +79,7 @@ export default function Scanner() {
     else setLoading(true);
 
     try {
-      console.log(`📊 Fetching ${sport} data for ${selectedBookmaker} (${selectedPropType})...`);
-
-      // 1. Get players from edge function
+      // Get players
       const playersRes = await fetch(EDGE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -70,25 +88,25 @@ export default function Scanner() {
       const playersData = await playersRes.json();
       if (!playersData.success) throw new Error("Failed to fetch players");
 
-      // 2. Get odds for selected bookmaker and prop type
-      const oddsRes = await fetch(EDGE_URL, {
+      // Get combo props for selected sport, bookmaker, and prop type
+      const propsRes = await fetch(EDGE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ operation: "get_odds", sport, bookmaker: selectedBookmaker, market: selectedPropType }),
+        body: JSON.stringify({ 
+          operation: "get_combo_props", 
+          sport, 
+          bookmaker: selectedBookmaker,
+          market: selectedPropType,
+        }),
       });
-      const oddsData = await oddsRes.json();
-      const odds = oddsData.odds || [];
+      const propsData = await propsRes.json();
+      const props = propsData.props || [];
 
-      // Build a map: player name -> line
-      const lineMap = new Map<string, number>();
-      for (const odd of odds) {
-        // Expected event_name format: "LeBron James Points" or "Giannis Antetokounmpo Rebounds"
-        const eventName = odd.event_name || "";
-        // Extract player name by removing the last word (Points, Rebounds, etc.)
-        const lastSpace = eventName.lastIndexOf(" ");
-        const playerName = lastSpace > 0 ? eventName.substring(0, lastSpace) : eventName;
-        if (playerName && odd.line) {
-          lineMap.set(playerName, odd.line);
+      // Build line map
+      const lineMap = new Map();
+      for (const prop of props) {
+        if (prop.player_name && prop.line) {
+          lineMap.set(prop.player_name, prop.line);
         }
       }
 
@@ -96,10 +114,9 @@ export default function Scanner() {
       const merged = playersData.players.map((p: any) => {
         const line = lineMap.get(p.name);
         if (!line) {
-          // No prop line available – mark as N/A
           return {
             ...p,
-            line: null,
+            line: "N/A",
             edge_type: "N/A",
             confidence: 0,
             hit_rate: 0,
@@ -107,14 +124,11 @@ export default function Scanner() {
             initials: p.name.split(' ').map((n: string) => n[0]).join('') || "??",
           };
         }
-        // For now, edge and confidence are placeholders (you can add real logic later)
-        const edge_type = "NONE";
-        const confidence = 50;
         return {
           ...p,
           line,
-          edge_type,
-          confidence,
+          edge_type: "NONE",
+          confidence: 50,
           hit_rate: 0,
           trend: "stable",
           initials: p.name.split(' ').map((n: string) => n[0]).join('') || "??",
@@ -134,19 +148,13 @@ export default function Scanner() {
 
   useEffect(() => {
     fetchData(false);
+    fetchPropTypes(sport, selectedBookmaker);
   }, [sport, selectedBookmaker, selectedPropType]);
 
   const handleSportChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newSport = e.target.value;
-    setSport(newSport);
-    // Update active stats based on sport (optional)
-    const sportKey = newSport.toUpperCase() as Sport;
-    setActiveStats(sportCategories[sportKey]?.core.slice(0, 4) || ["points"]);
+    setSport(e.target.value);
     setSearch("");
-  };
-
-  const toggleStat = (stat: string) => {
-    setActiveStats(prev => prev.includes(stat) ? prev.filter(s => s !== stat) : [...prev, stat]);
+    setSelectedPropType(propTypes[0]?.value || DEFAULT_PROP_TYPES[0].value);
   };
 
   const handleSort = (field: SortField) => {
@@ -182,10 +190,7 @@ export default function Scanner() {
     );
   }
 
-  // Helper to get sport display name
-  const getSportDisplay = () => {
-    return SPORTS_LIST.find(s => s.value === sport)?.label || sport.toUpperCase();
-  };
+  const getSportDisplay = () => SPORTS_LIST.find(s => s.value === sport)?.label || sport.toUpperCase();
 
   return (
     <DashboardLayout>
@@ -219,13 +224,13 @@ export default function Scanner() {
               ))}
             </select>
 
-            {/* Prop Type Dropdown */}
+            {/* Prop Type Dropdown (Combo Props Only) */}
             <select
               value={selectedPropType}
               onChange={(e) => setSelectedPropType(e.target.value)}
               className="bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground"
             >
-              {PROP_TYPES.map(prop => (
+              {propTypes.map(prop => (
                 <option key={prop.value} value={prop.value}>{prop.label}</option>
               ))}
             </select>
@@ -261,21 +266,6 @@ export default function Scanner() {
             {sortDir === "desc" ? "↓ Highest First" : "↑ Lowest First"}
           </button>
         </div>
-        <div className="flex flex-wrap gap-2 py-2">
-          {["points", "assists", "rebounds", "steals"].map(stat => (
-            <button
-              key={stat}
-              onClick={() => toggleStat(stat)}
-              className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-                activeStats.includes(stat)
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-secondary text-secondary-foreground hover:bg-muted"
-              }`}
-            >
-              {stat.charAt(0).toUpperCase() + stat.slice(1)}
-            </button>
-          ))}
-        </div>
       </div>
 
       <div className="px-6 pb-8">
@@ -287,10 +277,10 @@ export default function Scanner() {
           <>
             <div className="mb-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
               <p className="text-xs text-green-400">
-                ✅ {getSportDisplay()} – {PROP_TYPES.find(p => p.value === selectedPropType)?.label || selectedPropType} lines from {selectedBookmaker}
+                ✅ {getSportDisplay()} – {propTypes.find(p => p.value === selectedPropType)?.label || selectedPropType} lines from {selectedBookmaker}
                 <br />
                 <span className="text-muted-foreground">
-                  {players.filter(p => p.line).length} of {players.length} players have lines available
+                  {players.filter(p => p.line !== "N/A").length} of {players.length} players have lines available
                 </span>
               </p>
             </div>
