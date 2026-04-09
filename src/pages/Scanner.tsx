@@ -36,6 +36,7 @@ export default function Scanner() {
   const [selectedBetType, setSelectedBetType] = useState("all");
   const [error, setError] = useState<string | null>(null);
 
+  // Fetch distinct market types for the current sport/bookmaker
   const fetchMarkets = async () => {
     try {
       const res = await fetch(EDGE_URL, {
@@ -85,15 +86,15 @@ export default function Scanner() {
         const propsData = await propsRes.json();
         if (propsData.success && propsData.props) {
           for (const prop of propsData.props) {
-            lineMap.set(prop.player_name, prop.line);
+            lineMap.set(prop.player_name, { line: prop.line, odds: prop.odds });
           }
         }
       }
 
       // 3. Merge players with lines
       const merged = playersData.players.map((p: any) => {
-        const line = lineMap.get(p.name);
-        if (!line) {
+        const prop = lineMap.get(p.name);
+        if (!prop) {
           return {
             ...p,
             line: "N/A",
@@ -105,8 +106,8 @@ export default function Scanner() {
           };
         }
         // Simulate over/under based on a random projection (replace with real projection later)
-        const projection = line + (Math.random() - 0.5) * 4;
-        const isOver = projection > line;
+        const projection = prop.line + (Math.random() - 0.5) * 4;
+        const isOver = projection > prop.line;
         let edge_type = "NONE";
         if (selectedBetType === "all") edge_type = "NONE";
         else if (selectedBetType === "over" && isOver) edge_type = "OVER";
@@ -114,7 +115,8 @@ export default function Scanner() {
         const confidence = edge_type !== "NONE" ? 65 : 40;
         return {
           ...p,
-          line,
+          line: prop.line,
+          odds: prop.odds,
           edge_type,
           confidence,
           hit_rate: 0,
@@ -139,7 +141,7 @@ export default function Scanner() {
   }, [sport, selectedBookmaker]);
 
   useEffect(() => {
-    fetchData(false);
+    if (selectedMarket) fetchData(false);
   }, [sport, selectedBookmaker, selectedMarket, selectedBetType]);
 
   const handleSportChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -172,6 +174,13 @@ export default function Scanner() {
     return <PlayerDetailView playerId={selectedPlayer} onBack={() => setSelectedPlayer(null)} />;
   }
 
+  const getSportDisplay = () => SPORTS_LIST.find(s => s.value === sport)?.label || sport.toUpperCase();
+
+  // Format market label for display
+  const formatMarketLabel = (market: string) => {
+    return market.replace(/player_/g, "").replace(/_/g, " + ").toUpperCase();
+  };
+
   return (
     <DashboardLayout>
       <header className="border-b border-border bg-card/50 backdrop-blur-xl sticky top-0 z-40">
@@ -188,7 +197,7 @@ export default function Scanner() {
               {SPORTSBOOKS.map(b => <option key={b} value={b}>{b}</option>)}
             </select>
             <select value={selectedMarket} onChange={e => setSelectedMarket(e.target.value)} className="bg-secondary border border-border rounded-lg px-3 py-2 text-sm" disabled={availableMarkets.length === 0}>
-              {availableMarkets.map(m => <option key={m} value={m}>{m.replace(/player_/g, "").replace(/_/g, " + ").toUpperCase()}</option>)}
+              {availableMarkets.map(m => <option key={m} value={m}>{formatMarketLabel(m)}</option>)}
               {availableMarkets.length === 0 && <option>No props available</option>}
             </select>
             <div className="flex bg-secondary rounded-lg overflow-hidden border border-border">
@@ -224,11 +233,19 @@ export default function Scanner() {
           <>
             <div className="mb-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
               <p className="text-xs text-green-400">
-                ✅ {SPORTS_LIST.find(s => s.value === sport)?.label} – {selectedMarket ? selectedMarket.replace(/player_/g, "").replace(/_/g, " + ").toUpperCase() : "No market"} lines from {selectedBookmaker}
+                ✅ {getSportDisplay()} – {selectedMarket ? formatMarketLabel(selectedMarket) : "No market"} lines from {selectedBookmaker}
+                <br />
+                <span className="text-muted-foreground">Real props from The Odds API (single + combo)</span>
               </p>
             </div>
             <div className="bg-card border border-border rounded-xl overflow-hidden">
-              <PlayerTable players={filteredPlayers} sortField={sortField} sortDir={sortDir} onSort={handleSort} onPlayerClick={handlePlayerClick} />
+              <PlayerTable
+                players={filteredPlayers}
+                sortField={sortField}
+                sortDir={sortDir}
+                onSort={handleSort}
+                onPlayerClick={handlePlayerClick}
+              />
             </div>
           </>
         )}
