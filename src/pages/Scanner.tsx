@@ -1,27 +1,35 @@
 import { useState, useEffect } from "react";
 import { Search, BarChart3, Loader2, RefreshCw } from "lucide-react";
 import { DashboardLayout } from "@/components/DashboardLayout";
-import { SportTabs } from "@/components/SportTabs";
 import { PlayerTable, SortField, SortDir } from "@/components/PlayerTable";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { Sport, sportCategories } from "@/data/mockPlayers";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
-const BOOKMAKERS = ["Stake", "BetOnline"];
 
-const sportDbMap: Record<Sport, string> = {
-  NBA: "nba",
-  NFL: "nfl",
-  MLB: "mlb",
-  NHL: "nhl",
-  Soccer: "soccer",
-};
+// Available sports (add more as needed)
+const SPORTS_LIST: { label: Sport; value: string }[] = [
+  { label: "NBA", value: "nba" },
+  { label: "NFL", value: "nfl" },
+  { label: "MLB", value: "mlb" },
+  { label: "NHL", value: "nhl" },
+  { label: "Soccer", value: "soccer" },
+];
 
-// Cache per sport + bookmaker
+// Available sportsbooks (add more here – the UI will auto‑update)
+const SPORTSBOOKS = ["Stake", "BetOnline", "DraftKings", "FanDuel"];
+
+// Over/Under options
+const BET_TYPES = [
+  { label: "Over", value: "over" },
+  { label: "Under", value: "under" },
+];
+
+// Cache per sport + bookmaker + bet type
 const playerCache = new Map<string, any[]>();
 
 export default function Scanner() {
-  const [sport, setSport] = useState<Sport>("NBA");
+  const [sport, setSport] = useState<string>("nba");
   const [search, setSearch] = useState("");
   const [activeStats, setActiveStats] = useState<string[]>(sportCategories["NBA"].core.slice(0, 4));
   const [sortField, setSortField] = useState<SortField>("confidence");
@@ -32,9 +40,10 @@ export default function Scanner() {
   const [dbStats, setDbStats] = useState({ players: 0 });
   const [refreshing, setRefreshing] = useState(false);
   const [selectedBookmaker, setSelectedBookmaker] = useState<string>("Stake");
+  const [selectedBetType, setSelectedBetType] = useState<string>("over");
 
   const fetchData = async (force = false) => {
-    const cacheKey = `${sport}-${selectedBookmaker}`;
+    const cacheKey = `${sport}-${selectedBookmaker}-${selectedBetType}`;
     if (!force && playerCache.has(cacheKey)) {
       const cached = playerCache.get(cacheKey)!;
       setPlayers(cached);
@@ -47,23 +56,22 @@ export default function Scanner() {
     else setLoading(true);
 
     try {
-      const dbSport = sportDbMap[sport];
-      console.log(`📊 Fetching ${sport} data for ${selectedBookmaker}...`);
+      console.log(`📊 Fetching ${sport} data for ${selectedBookmaker} (${selectedBetType})...`);
 
-      // 1. Get players
+      // 1. Get players from edge function
       const playersRes = await fetch(EDGE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ operation: "get_players", sport: dbSport }),
+        body: JSON.stringify({ operation: "get_players", sport }),
       });
       const playersData = await playersRes.json();
       if (!playersData.success) throw new Error("Failed to fetch players");
 
-      // 2. Get odds for selected bookmaker
+      // 2. Get odds for selected bookmaker (player props)
       const oddsRes = await fetch(EDGE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ operation: "get_odds", sport: dbSport, bookmaker: selectedBookmaker }),
+        body: JSON.stringify({ operation: "get_odds", sport, bookmaker: selectedBookmaker }),
       });
       const oddsData = await oddsRes.json();
       const odds = oddsData.odds || [];
@@ -71,7 +79,6 @@ export default function Scanner() {
       // Build a map: player name -> line
       const lineMap = new Map<string, number>();
       for (const odd of odds) {
-        // Extract player name from event_name, e.g., "LeBron James Points"
         const eventName = odd.event_name || "";
         const playerName = eventName.replace(" Points", "").trim();
         if (playerName && odd.line) {
@@ -79,11 +86,23 @@ export default function Scanner() {
         }
       }
 
-      // Merge players with lines
+      // Merge players with lines and apply over/under selection
       const merged = playersData.players.map((p: any) => {
-        const line = lineMap.get(p.name) || 22.5;
-        const edge_type = line > 22 ? "OVER" : line < 22 ? "UNDER" : "NONE";
-        const confidence = line > 22 ? 65 : line < 22 ? 55 : 50;
+        const rawLine = lineMap.get(p.name) || 22.5;
+        // For "under", we show the same line but the bet type will be indicated separately
+        const line = rawLine;
+        let edge_type = "NONE";
+        let confidence = 50;
+        // Simple logic: if projection > line => Over, else Under.
+        // For demo, we use a random projection (replace with real projection later)
+        const projection = rawLine + (Math.random() * 2 - 1); // placeholder
+        const isOver = projection > rawLine;
+        if (selectedBetType === "over" && isOver) edge_type = "OVER";
+        else if (selectedBetType === "under" && !isOver) edge_type = "UNDER";
+        else edge_type = "NONE";
+
+        confidence = edge_type !== "NONE" ? 65 : 40;
+
         return {
           ...p,
           line,
@@ -92,6 +111,7 @@ export default function Scanner() {
           hit_rate: 0,
           trend: "stable",
           initials: p.name.split(' ').map((n: string) => n[0]).join('') || "??",
+          projection: projection.toFixed(1),
         };
       });
 
@@ -108,11 +128,11 @@ export default function Scanner() {
 
   useEffect(() => {
     fetchData(false);
-  }, [sport, selectedBookmaker]);
+  }, [sport, selectedBookmaker, selectedBetType]);
 
-  const handleSportChange = (s: Sport) => {
-    setSport(s);
-    setActiveStats(sportCategories[s].core.slice(0, 4));
+  const handleSportChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSport(e.target.value);
+    setActiveStats(sportCategories[e.target.value.toUpperCase() as Sport]?.core.slice(0, 4) || ["points"]);
     setSearch("");
   };
 
@@ -162,29 +182,50 @@ export default function Scanner() {
             <h1 className="text-2xl font-display font-bold text-gradient-gold tracking-wider">LINE PULSE</h1>
             <p className="text-xs text-green-400">● LIVE 24/7</p>
           </div>
-          <SportTabs activeSport={sport} onSportChange={handleSportChange} />
+          <div className="flex gap-3">
+            {/* Sport Dropdown */}
+            <select
+              value={sport}
+              onChange={handleSportChange}
+              className="bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground"
+            >
+              {SPORTS_LIST.map(s => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
+
+            {/* Sportsbook Dropdown */}
+            <select
+              value={selectedBookmaker}
+              onChange={(e) => setSelectedBookmaker(e.target.value)}
+              className="bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground"
+            >
+              {SPORTSBOOKS.map(book => (
+                <option key={book} value={book}>{book}</option>
+              ))}
+            </select>
+
+            {/* Over/Under Toggle */}
+            <div className="flex bg-secondary rounded-lg overflow-hidden border border-border">
+              {BET_TYPES.map(type => (
+                <button
+                  key={type.value}
+                  onClick={() => setSelectedBetType(type.value)}
+                  className={`px-4 py-1.5 text-sm font-semibold transition-colors ${
+                    selectedBetType === type.value
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  {type.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </header>
 
       <div className="px-6 py-4 space-y-3">
-        {/* Sportsbook Toggle */}
-        <div className="flex items-center gap-4 bg-secondary/30 p-2 rounded-lg w-fit">
-          <span className="text-sm font-medium text-muted-foreground">Sportsbook:</span>
-          {BOOKMAKERS.map(book => (
-            <button
-              key={book}
-              onClick={() => setSelectedBookmaker(book)}
-              className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${
-                selectedBookmaker === book
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground hover:bg-muted/80"
-              }`}
-            >
-              {book}
-            </button>
-          ))}
-        </div>
-
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -238,9 +279,9 @@ export default function Scanner() {
           <>
             <div className="mb-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
               <p className="text-xs text-green-400">
-                ✅ LIVE: {dbStats.players} {sport} players – Lines from {selectedBookmaker}
+                ✅ LIVE: {dbStats.players} players – {selectedBetType.toUpperCase()} from {selectedBookmaker}
                 <br />
-                <span className="text-muted-foreground">Data is refreshed automatically every 30 minutes (backend sync)</span>
+                <span className="text-muted-foreground">Data refreshed every 30 minutes (backend sync)</span>
               </p>
             </div>
             <div className="bg-card border border-border rounded-xl overflow-hidden">
@@ -255,7 +296,7 @@ export default function Scanner() {
           </>
         )}
         <div className="text-center text-sm text-muted-foreground mt-4">
-          Showing {filteredPlayers.length} {sport} players • Powered by Odds‑API.io
+          Showing {filteredPlayers.length} players • Powered by Odds‑API.io
         </div>
       </div>
     </DashboardLayout>
