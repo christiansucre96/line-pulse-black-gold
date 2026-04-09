@@ -14,7 +14,122 @@ function getSupabase() {
   return createClient(url, key);
 }
 
-// Sport key mapping for Odds-API.io
+// ---------- ESPN Helpers (for sync_upcoming) ----------
+const ESPN_PATH: Record<string, string> = {
+  nba: "basketball/nba",
+  nfl: "football/nfl",
+  mlb: "baseball/mlb",
+  nhl: "hockey/nhl",
+  soccer: "soccer/eng.1",
+};
+
+async function fetchESPN(url: string, retries = 2) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      await new Promise(r => setTimeout(r, 500 * i));
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          Accept: "application/json",
+        },
+      });
+      if (res.ok) return await res.json();
+    } catch { /* ignore */ }
+  }
+  throw new Error(`ESPN fetch failed: ${url}`);
+}
+
+async function fetchGamesForRange(sport: string, daysAhead = 2) {
+  const today = new Date();
+  const dates = [];
+  for (let i = 0; i <= daysAhead; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    dates.push(d.toISOString().split("T")[0]);
+  }
+  const games = [];
+  for (const date of dates) {
+    const fmt = date.replace(/-/g, "");
+    const url = `https://site.api.espn.com/apis/site/v2/sports/${ESPN_PATH[sport]}/scoreboard?dates=${fmt}`;
+    try {
+      const data = await fetchESPN(url);
+      for (const ev of data.events || []) {
+        const comp = ev.competitions?.[0];
+        const home = comp?.competitors?.find((c: any) => c.homeAway === "home");
+        const away = comp?.competitors?.find((c: any) => c.homeAway === "away");
+        games.push({
+          id: ev.id,
+          home_team_id: home?.team?.id,
+          away_team_id: away?.team?.id,
+          home_team_name: home?.team?.displayName,
+          away_team_name: away?.team?.displayName,
+        });
+      }
+    } catch { /* ignore */ }
+  }
+  return games;
+}
+
+async function syncUpcoming(supabase: any, sport: string) {
+  const games = await fetchGamesForRange(sport, 2);
+  if (games.length === 0) return { teams: 0, players: 0 };
+
+  const teamExtIds = new Set<string>();
+  for (const g of games) {
+    if (g.home_team_id) teamExtIds.add(g.home_team_id);
+    if (g.away_team_id) teamExtIds.add(g.away_team_id);
+  }
+
+  // Upsert teams
+  for (const extId of teamExtIds) {
+    try {
+      const url = `https://site.api.espn.com/apis/site/v2/sports/${ESPN_PATH[sport]}/teams/${extId}`;
+      const teamData = await fetchESPN(url);
+      const team = teamData.team || teamData;
+      await supabase.from("teams").upsert({
+        external_id: String(team.id),
+        sport,
+        name: team.displayName,
+        abbreviation: team.abbreviation,
+      }, { onConflict: "sport,external_id" });
+    } catch { /* ignore */ }
+  }
+
+  // Get internal team ids
+  const { data: teams } = await supabase
+    .from("teams")
+    .select("id, external_id")
+    .eq("sport", sport)
+    .in("external_id", Array.from(teamExtIds));
+  const teamIdMap = new Map(teams?.map(t => [t.external_id, t.id]));
+
+  let playersCount = 0;
+  for (const extId of teamExtIds) {
+    const teamId = teamIdMap.get(extId);
+    if (!teamId) continue;
+    try {
+      const url = `https://site.api.espn.com/apis/site/v2/sports/${ESPN_PATH[sport]}/teams/${extId}/roster`;
+      const data = await fetchESPN(url);
+      const athletes = data.athletes || [];
+      const flat = Array.isArray(athletes) ? athletes.flatMap((g: any) => g.items || [g]) : [];
+      for (let idx = 0; idx < flat.length; idx++) {
+        const a = flat[idx];
+        await supabase.from("players").upsert({
+          external_id: String(a.id),
+          sport,
+          full_name: a.fullName || a.displayName,
+          position: a.position?.abbreviation || null,
+          team_id: teamId,
+          is_starter: idx < (sport === "soccer" ? 11 : sport === "nfl" ? 22 : 5),
+        }, { onConflict: "sport,external_id" });
+        playersCount++;
+      }
+    } catch { /* ignore */ }
+  }
+  return { teams: teamExtIds.size, players: playersCount };
+}
+
+// ---------- Odds-API.io Helpers (for sync_props) ----------
 const SPORT_MAP: Record<string, string> = {
   nba: "basketball_nba",
   nfl: "americanfootball_nfl",
@@ -23,112 +138,70 @@ const SPORT_MAP: Record<string, string> = {
   soccer: "soccer_epl",
 };
 
-// Available combo markets for each sport
-const COMBO_MARKETS: Record<string, string[]> = {
-  nba: ["player_points_rebounds_assists", "player_points_rebounds", "player_points_assists", "player_rebounds_assists"],
-  nfl: ["player_passing_yards", "player_rushing_yards", "player_receiving_yards", "player_passing_tds"],
-  mlb: ["player_strikeouts", "player_hits", "player_home_runs", "player_runs_batted_in"],
-  nhl: ["player_points", "player_shots_on_goal", "player_assists", "player_goals"],
-  soccer: ["player_goals", "player_assists", "player_shots", "player_shots_on_target"],
-};
+const MARKETS = [
+  "player_points", "player_rebounds", "player_assists",
+  "player_points_rebounds", "player_points_assists", "player_rebounds_assists", "player_points_rebounds_assists",
+  "player_passing_yards", "player_rushing_yards", "player_receiving_yards",
+  "player_passing_tds", "player_rushing_tds", "player_receiving_tds",
+  "player_strikeouts", "player_hits", "player_home_runs", "player_runs_batted_in",
+  "player_goals", "player_assists", "player_points", "player_shots_on_goal",
+  "player_goals", "player_assists", "player_shots", "player_shots_on_target"
+];
 
-// Individual markets (used for combo estimation fallback)
-const INDIVIDUAL_MARKETS = ["player_points", "player_rebounds", "player_assists"];
-
-async function fetchComboProps(sport: string, bookmaker: string) {
+async function fetchAllProps(sport: string, bookmaker: string) {
   const API_KEY = Deno.env.get("ODDS_API_KEY");
   if (!API_KEY) throw new Error("Missing ODDS_API_KEY");
-
   const oddsSport = SPORT_MAP[sport];
   if (!oddsSport) return [];
-
-  const comboMarkets = COMBO_MARKETS[sport] || [];
   const allProps = [];
-
-  // Fetch combo markets if available
-  for (const market of comboMarkets) {
+  for (const market of MARKETS) {
     const url = `https://api.odds-api.io/v4/sports/${oddsSport}/odds/?apiKey=${API_KEY}&regions=us&markets=${market}&bookmakers=${bookmaker}`;
-    const res = await fetch(url);
-    if (!res.ok) continue;
-    const data = await res.json();
-    for (const event of data) {
-      for (const bk of event.bookmakers || []) {
-        if (bk.key !== bookmaker) continue;
-        for (const mkt of bk.markets || []) {
-          if (mkt.key === market) {
-            for (const outcome of mkt.outcomes || []) {
-              allProps.push({
-                sport,
-                event_id: event.id,
-                event_name: `${outcome.description} ${market.replace("player_", "").replace(/_/g, " + ")}`,
-                player_name: outcome.description,
-                bookmaker: bk.key,
-                market_type: market,
-                line: outcome.point,
-                odds: outcome.price,
-                is_combo: true,
-                last_updated: new Date().toISOString(),
-              });
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const data = await res.json();
+      for (const event of data) {
+        for (const bk of event.bookmakers || []) {
+          if (bk.key !== bookmaker) continue;
+          for (const mkt of bk.markets || []) {
+            if (mkt.key === market) {
+              for (const outcome of mkt.outcomes || []) {
+                allProps.push({
+                  sport,
+                  event_id: event.id,
+                  player_name: outcome.description,
+                  player_id: outcome.id || null,
+                  bookmaker: bk.key,
+                  market_type: market,
+                  line: outcome.point,
+                  odds: outcome.price,
+                  is_combo: market.includes("_") && !["player_points", "player_rebounds", "player_assists"].includes(market),
+                  last_updated: new Date().toISOString(),
+                });
+              }
             }
           }
         }
       }
+    } catch (err) {
+      console.warn(`Error fetching ${market} for ${sport}:`, err);
     }
   }
-
-  // Also fetch individual markets for combo estimation fallback
-  for (const market of INDIVIDUAL_MARKETS) {
-    const url = `https://api.odds-api.io/v4/sports/${oddsSport}/odds/?apiKey=${API_KEY}&regions=us&markets=${market}&bookmakers=${bookmaker}`;
-    const res = await fetch(url);
-    if (!res.ok) continue;
-    const data = await res.json();
-    for (const event of data) {
-      for (const bk of event.bookmakers || []) {
-        if (bk.key !== bookmaker) continue;
-        for (const mkt of bk.markets || []) {
-          if (mkt.key === market) {
-            for (const outcome of mkt.outcomes || []) {
-              allProps.push({
-                sport,
-                event_id: event.id,
-                event_name: `${outcome.description} ${market === "player_points" ? "Points" : market === "player_rebounds" ? "Rebounds" : "Assists"}`,
-                player_name: outcome.description,
-                bookmaker: bk.key,
-                market_type: market,
-                line: outcome.point,
-                odds: outcome.price,
-                is_combo: false,
-                last_updated: new Date().toISOString(),
-              });
-            }
-          }
-        }
-      }
-    }
-  }
-
   return allProps;
 }
 
-async function syncAllComboProps(supabase: any) {
+async function syncAllProps(supabase: any) {
   const sports = ["nba", "nfl", "mlb", "nhl", "soccer"];
   const bookmakers = ["Stake", "BetOnline"];
   const results = {};
-
   for (const sport of sports) {
     results[sport] = {};
     for (const bookmaker of bookmakers) {
       try {
-        const props = await fetchComboProps(sport, bookmaker);
+        const props = await fetchAllProps(sport, bookmaker);
         if (props.length) {
-          // Delete old props for this sport+bookmaker
-          await supabase
-            .from("combo_props_cache")
-            .delete()
-            .eq("sport", sport)
-            .eq("bookmaker", bookmaker);
-          // Insert fresh props
-          const { error } = await supabase.from("combo_props_cache").insert(props);
+          await supabase.from("player_props_cache").delete().eq("sport", sport).eq("bookmaker", bookmaker);
+          const { error } = await supabase.from("player_props_cache").insert(props);
           if (error) throw error;
           results[sport][bookmaker] = { success: true, count: props.length };
         } else {
@@ -142,35 +215,15 @@ async function syncAllComboProps(supabase: any) {
   return results;
 }
 
-// Get combo props from cache
-async function getComboProps(supabase: any, sport: string, bookmaker: string, marketType?: string) {
-  let query = supabase
-    .from("combo_props_cache")
-    .select("*")
-    .eq("sport", sport)
-    .eq("bookmaker", bookmaker);
-  
-  if (marketType) {
-    query = query.eq("market_type", marketType);
-  }
-  
-  const { data, error } = await query.order("last_updated", { ascending: false });
-  if (error) throw error;
-  return data || [];
-}
-
-// Get players from database (with team names)
+// ---------- Database read operations ----------
 async function getPlayers(supabase: any, sport: string) {
   const { data: players, error } = await supabase
     .from("players")
-    .select(`
-      id, full_name, position, status, injury_description, is_starter,
-      teams:team_id ( name, abbreviation )
-    `)
+    .select("id, full_name, position, status, injury_description, is_starter, teams:team_id(name, abbreviation)")
     .eq("sport", sport)
     .limit(500);
   if (error) throw error;
-  return players.map((p: any) => ({
+  return players.map(p => ({
     id: p.id,
     name: p.full_name,
     position: p.position || "N/A",
@@ -183,75 +236,69 @@ async function getPlayers(supabase: any, sport: string) {
   }));
 }
 
+async function getProps(supabase: any, sport: string, bookmaker: string, marketType?: string) {
+  let query = supabase.from("player_props_cache").select("*").eq("sport", sport).eq("bookmaker", bookmaker);
+  if (marketType) query = query.eq("market_type", marketType);
+  const { data, error } = await query.order("last_updated", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+async function getPlayerDetails(supabase: any, playerId: string) {
+  const { data: player, error } = await supabase
+    .from("players")
+    .select("id, full_name, position, status, injury_description, is_starter, teams:team_id(name, abbreviation, logo_url)")
+    .eq("id", playerId)
+    .single();
+  if (error) throw error;
+  const { data: props, error: propsError } = await supabase
+    .from("player_props_cache")
+    .select("*")
+    .eq("player_name", player.full_name)
+    .order("last_updated", { ascending: false });
+  if (propsError) console.warn("Props error:", propsError);
+  return { ...player, props: props || [] };
+}
+
 // ---------- Main handler ----------
 serve(async (req: Request) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: corsHeaders });
-  }
-
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
   try {
     const supabase = getSupabase();
     const body = await req.json().catch(() => ({}));
     let { operation, sport, bookmaker, market, player_id } = body;
 
+    // Provide default operation if missing (for backward compatibility)
     if (!operation && sport) operation = "get_players";
-    if (!operation) throw new Error("Missing operation");
 
     switch (operation) {
-      case "get_players": {
+      case "get_players":
         const players = await getPlayers(supabase, sport);
         return new Response(JSON.stringify({ success: true, players, count: players.length }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
-      }
-
-      case "get_combo_props": {
+      case "get_props":
         if (!bookmaker) bookmaker = "Stake";
-        const props = await getComboProps(supabase, sport, bookmaker, market);
+        const props = await getProps(supabase, sport, bookmaker, market);
         return new Response(JSON.stringify({ success: true, props, count: props.length }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
-      }
-
-      case "get_player_details": {
+      case "get_player_details":
         if (!player_id) throw new Error("Missing player_id");
-        const { data: player, error } = await supabase
-          .from("players")
-          .select(`
-            id, full_name, position, status, injury_description, is_starter,
-            teams:team_id ( name, abbreviation, logo_url ),
-            player_averages (
-              last10_avg_points, last5_avg_points, avg_points,
-              last10_avg_rebounds, last5_avg_rebounds, avg_rebounds,
-              last10_avg_assists, last5_avg_assists, avg_assists
-            )
-          `)
-          .eq("id", player_id)
-          .single();
-        if (error) throw error;
-        
-        // Get props for this player
-        const { data: props } = await supabase
-          .from("combo_props_cache")
-          .select("*")
-          .eq("player_name", player.full_name)
-          .order("last_updated", { ascending: false });
-        
-        return new Response(JSON.stringify({ 
-          success: true, 
-          player: { ...player, props: props || [] },
-        }), {
+        const details = await getPlayerDetails(supabase, player_id);
+        return new Response(JSON.stringify({ success: true, player: details }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
-      }
-
-      case "sync_combo_props": {
-        const results = await syncAllComboProps(supabase);
-        return new Response(JSON.stringify({ success: true, results }), {
+      case "sync_upcoming":
+        const result = await syncUpcoming(supabase, sport);
+        return new Response(JSON.stringify({ success: true, ...result }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
-      }
-
+      case "sync_props":
+        const syncResult = await syncAllProps(supabase);
+        return new Response(JSON.stringify({ success: true, results: syncResult }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       default:
         return new Response(JSON.stringify({ error: `Unknown operation: ${operation}` }), { status: 400, headers: corsHeaders });
     }
