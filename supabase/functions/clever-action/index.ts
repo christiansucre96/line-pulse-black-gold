@@ -14,7 +14,7 @@ function getSupabase() {
   return createClient(url, key);
 }
 
-// ---------- ESPN Helpers (for sync_upcoming) ----------
+// ---------- ESPN Helpers ----------
 const ESPN_PATH: Record<string, string> = {
   nba: "basketball/nba",
   nfl: "football/nfl",
@@ -61,8 +61,6 @@ async function fetchGamesForRange(sport: string, daysAhead = 2) {
           id: ev.id,
           home_team_id: home?.team?.id,
           away_team_id: away?.team?.id,
-          home_team_name: home?.team?.displayName,
-          away_team_name: away?.team?.displayName,
         });
       }
     } catch { /* ignore */ }
@@ -80,7 +78,6 @@ async function syncUpcoming(supabase: any, sport: string) {
     if (g.away_team_id) teamExtIds.add(g.away_team_id);
   }
 
-  // Upsert teams
   for (const extId of teamExtIds) {
     try {
       const url = `https://site.api.espn.com/apis/site/v2/sports/${ESPN_PATH[sport]}/teams/${extId}`;
@@ -95,7 +92,6 @@ async function syncUpcoming(supabase: any, sport: string) {
     } catch { /* ignore */ }
   }
 
-  // Get internal team ids
   const { data: teams } = await supabase
     .from("teams")
     .select("id, external_id")
@@ -129,7 +125,7 @@ async function syncUpcoming(supabase: any, sport: string) {
   return { teams: teamExtIds.size, players: playersCount };
 }
 
-// ---------- Odds-API.io Helpers (for sync_props) ----------
+// ---------- Odds-API.io Helpers ----------
 const SPORT_MAP: Record<string, string> = {
   nba: "basketball_nba",
   nfl: "americanfootball_nfl",
@@ -268,7 +264,6 @@ serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}));
     let { operation, sport, bookmaker, market, player_id } = body;
 
-    // Provide default operation if missing (for backward compatibility)
     if (!operation && sport) operation = "get_players";
 
     switch (operation) {
@@ -290,13 +285,14 @@ serve(async (req: Request) => {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       case "sync_upcoming":
-        const result = await syncUpcoming(supabase, sport);
-        return new Response(JSON.stringify({ success: true, ...result }), {
+        if (!sport) throw new Error("Missing sport");
+        const syncResult = await syncUpcoming(supabase, sport);
+        return new Response(JSON.stringify({ success: true, ...syncResult }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       case "sync_props":
-        const syncResult = await syncAllProps(supabase);
-        return new Response(JSON.stringify({ success: true, results: syncResult }), {
+        const allResults = await syncAllProps(supabase);
+        return new Response(JSON.stringify({ success: true, results: allResults }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       default:
