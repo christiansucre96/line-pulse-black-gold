@@ -50,6 +50,10 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
   const betonlineProps = props.filter((p: any) => p.bookmaker === "BetOnline");
   const uniqueMarkets = Array.from(new Set(props.map((p: any) => p.market_type)));
 
+  const formatMarket = (market: string) => {
+    return market.replace(/player_/g, "").replace(/_/g, " + ").toUpperCase();
+  };
+
   return (
     <DashboardLayout>
       <div className="p-4 md:p-6 max-w-5xl mx-auto">
@@ -65,7 +69,7 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
 
         <div className="bg-card border border-border rounded-xl overflow-hidden">
           <div className="px-4 py-3 bg-secondary/30 border-b border-border">
-            <h2 className="font-bold text-foreground">All Available Props</h2>
+            <h2 className="font-bold text-foreground">All Available Props (Single + Combo)</h2>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -82,10 +86,9 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
                 {uniqueMarkets.map(market => {
                   const stake = stakeProps.find(p => p.market_type === market);
                   const betonline = betonlineProps.find(p => p.market_type === market);
-                  const displayName = market.replace(/player_/g, "").replace(/_/g, " + ").toUpperCase();
                   return (
                     <tr key={market} className="border-b border-border/50 hover:bg-secondary/20">
-                      <td className="py-3 px-4 font-medium">{displayName}</td>
+                      <td className="py-3 px-4 font-medium">{formatMarket(market)}</td>
                       <td className="py-3 px-4">{stake?.line ?? "—"}</td>
                       <td className="py-3 px-4">{stake?.odds ?? "—"}</td>
                       <td className="py-3 px-4">{betonline?.line ?? "—"}</td>
