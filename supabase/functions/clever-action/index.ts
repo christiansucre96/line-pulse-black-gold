@@ -14,7 +14,7 @@ function getSupabase() {
   return createClient(url, key);
 }
 
-// ---------- The Odds API configuration ----------
+// ---------- Odds-API.io configuration ----------
 const SPORT_MAP: Record<string, string> = {
   nba: "basketball_nba",
   nfl: "americanfootball_nfl",
@@ -31,14 +31,20 @@ const COMBO_MARKETS = [
   { key: "player_points_rebounds_assists", label: "Points + Rebounds + Assists", components: ["player_points", "player_rebounds", "player_assists"] },
 ];
 
+// Fetch single market props from Odds-API.io
 async function fetchSingleMarketProps(sport: string, bookmaker: string, market: string) {
-  const API_KEY = Deno.env.get("THE_ODDS_API_KEY");
+  const API_KEY = Deno.env.get("ODDS_API_KEY");  // Your odds-api.io key
   if (!API_KEY) return [];
   const oddsSport = SPORT_MAP[sport];
   if (!oddsSport) return [];
-  const url = `https://api.the-odds-api.com/v4/sports/${oddsSport}/odds/?apiKey=${API_KEY}&regions=us&markets=${market}&bookmakers=${bookmaker.toLowerCase()}`;
+
+  // Odds-API.io v4 endpoint – note: bookmaker name must be lowercase (e.g., "stake", "betonline")
+  const url = `https://api.odds-api.io/v4/sports/${oddsSport}/odds/?apiKey=${API_KEY}&regions=us&markets=${market}&bookmakers=${bookmaker.toLowerCase()}`;
   const res = await fetch(url);
-  if (!res.ok) return [];
+  if (!res.ok) {
+    console.error(`Odds-API.io error for ${sport}/${bookmaker}/${market}: ${res.status}`);
+    return [];
+  }
   const data = await res.json();
   const props = [];
   for (const event of data) {
@@ -59,8 +65,9 @@ async function fetchSingleMarketProps(sport: string, bookmaker: string, market: 
   return props;
 }
 
+// Sync all sports and bookmakers
 async function syncAllProps(supabase: any) {
-  const sports = ["nba", "nfl", "mlb", "nhl", "soccer"];
+  const sports = ["nba", "mlb", "nhl", "soccer"]; // NFL off-season, skip for now
   const bookmakers = ["Stake", "BetOnline"];
   const results = {};
 
@@ -68,6 +75,7 @@ async function syncAllProps(supabase: any) {
     results[sport] = {};
     for (const bookmaker of bookmakers) {
       try {
+        // Fetch single markets
         const singlePropsMap: Record<string, Map<string, { line: number; odds: number }>> = {};
         for (const market of SINGLE_MARKETS) {
           const props = await fetchSingleMarketProps(sport, bookmaker, market);
@@ -77,7 +85,7 @@ async function syncAllProps(supabase: any) {
         }
 
         const allProps = [];
-        // Single
+        // Add single props
         for (const market of SINGLE_MARKETS) {
           for (const [player, data] of singlePropsMap[market]) {
             allProps.push({
@@ -92,7 +100,7 @@ async function syncAllProps(supabase: any) {
             });
           }
         }
-        // Combos
+        // Add combo props (sum of components)
         for (const combo of COMBO_MARKETS) {
           const firstMap = singlePropsMap[combo.components[0]];
           const players = new Set<string>();
@@ -144,32 +152,7 @@ async function syncAllProps(supabase: any) {
   return results;
 }
 
-// ---------- Player stats helpers ----------
-async function getPlayerStats(supabase: any, playerId: number) {
-  const { data, error } = await supabase
-    .from("player_stats")
-    .select("*")
-    .eq("player_id", playerId)
-    .order("game_date", { ascending: false })
-    .limit(20);
-  if (error) return [];
-  return data;
-}
-
-async function addPlayerStat(supabase: any, playerId: number, gameDate: string, points: number, rebounds: number, assists: number, minutes: number) {
-  const { error } = await supabase.from("player_stats").upsert({
-    player_id: playerId,
-    game_date: gameDate,
-    points,
-    rebounds,
-    assists,
-    minutes,
-  }, { onConflict: "player_id,game_date" });
-  if (error) throw error;
-  return { success: true };
-}
-
-// ---------- Player and team read ----------
+// ---------- Other operations (players, stats, etc.) ----------
 async function getPlayers(supabase: any, sport: string) {
   const { data: players, error } = await supabase
     .from("players")
@@ -218,7 +201,6 @@ async function getPlayerDetails(supabase: any, playerId: string) {
   return { ...player, props: props || [], stats: stats || [] };
 }
 
-// ---------- Manual player addition ----------
 async function addPlayer(supabase: any, sport: string, name: string, position: string, teamName: string) {
   let { data: team } = await supabase.from("teams").select("id").eq("name", teamName).eq("sport", sport).single();
   if (!team) {
@@ -242,8 +224,22 @@ async function addPlayer(supabase: any, sport: string, name: string, position: s
   return { success: true };
 }
 
+async function addPlayerStat(supabase: any, playerId: string, gameDate: string, points: number, rebounds: number, assists: number, minutes: number) {
+  const { error } = await supabase.from("player_stats").upsert({
+    player_id: playerId,
+    game_date: gameDate,
+    points,
+    rebounds,
+    assists,
+    minutes,
+  }, { onConflict: "player_id,game_date" });
+  if (error) throw error;
+  return { success: true };
+}
+
 async function syncUpcoming() { return { teams: 0, players: 0 }; }
 
+// ---------- Main handler ----------
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
   try {
@@ -276,9 +272,9 @@ serve(async (req: Request) => {
         const addResult = await addPlayer(supabase, sport, player_name, position, team);
         return new Response(JSON.stringify({ success: true, ...addResult }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       case "add_player_stat":
-        if (!player_id || !stats) throw new Error("Missing player_id or stats");
+        if (!player_id || !stats) throw new Error("Missing fields");
         const { game_date, points, rebounds, assists, minutes } = stats;
-        const statResult = await addPlayerStat(supabase, parseInt(player_id), game_date, points, rebounds, assists, minutes);
+        const statResult = await addPlayerStat(supabase, player_id, game_date, points, rebounds, assists, minutes);
         return new Response(JSON.stringify({ success: true, ...statResult }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       default:
         return new Response(JSON.stringify({ error: `Unknown operation: ${operation}` }), { status: 400, headers: corsHeaders });
