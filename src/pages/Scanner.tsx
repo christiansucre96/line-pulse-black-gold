@@ -36,7 +36,6 @@ export default function Scanner() {
   const [selectedBetType, setSelectedBetType] = useState("all");
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch distinct market types for the current sport/bookmaker
   const fetchMarkets = async () => {
     try {
       const res = await fetch(EDGE_URL, {
@@ -51,7 +50,7 @@ export default function Scanner() {
         if (markets.length && !selectedMarket) setSelectedMarket(markets[0]);
       }
     } catch (err) {
-      console.error("Markets fetch error:", err);
+      console.error(err);
     }
   };
 
@@ -59,9 +58,7 @@ export default function Scanner() {
     if (force) setRefreshing(true);
     else setLoading(true);
     setError(null);
-
     try {
-      // 1. Get players
       const playersRes = await fetch(EDGE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -70,12 +67,11 @@ export default function Scanner() {
       const playersData = await playersRes.json();
       if (!playersData.success) throw new Error("Failed to fetch players");
       if (playersData.players.length === 0) {
-        setError("No players found. Please add players using the 'add_player' operation.");
+        setError("No players found. Please add players via 'add_player'.");
         setPlayers([]);
         return;
       }
 
-      // 2. Get props for selected market (if any)
       let lineMap = new Map();
       if (selectedMarket) {
         const propsRes = await fetch(EDGE_URL, {
@@ -91,7 +87,6 @@ export default function Scanner() {
         }
       }
 
-      // 3. Merge players with lines
       const merged = playersData.players.map((p: any) => {
         const prop = lineMap.get(p.name);
         if (!prop) {
@@ -100,12 +95,9 @@ export default function Scanner() {
             line: "N/A",
             edge_type: "N/A",
             confidence: 0,
-            hit_rate: 0,
-            trend: "no line",
             initials: p.name.split(' ').map((n: string) => n[0]).join('') || "??",
           };
         }
-        // Simulate over/under based on a random projection (replace with real projection later)
         const projection = prop.line + (Math.random() - 0.5) * 4;
         const isOver = projection > prop.line;
         let edge_type = "NONE";
@@ -119,16 +111,11 @@ export default function Scanner() {
           odds: prop.odds,
           edge_type,
           confidence,
-          hit_rate: 0,
-          trend: "stable",
           initials: p.name.split(' ').map((n: string) => n[0]).join('') || "??",
-          projection: projection.toFixed(1),
         };
       });
-
       setPlayers(merged);
     } catch (err: any) {
-      console.error(err);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -154,8 +141,7 @@ export default function Scanner() {
     else { setSortField(field); setSortDir("desc"); }
   };
 
-  const filteredPlayers = players
-    .filter(p => !search || p.name.toLowerCase().includes(search.toLowerCase()))
+  const filteredPlayers = players.filter(p => !search || p.name.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => {
       const aVal = a[sortField];
       const bVal = b[sortField];
@@ -170,25 +156,15 @@ export default function Scanner() {
     setSelectedPlayer(realId);
   };
 
-  if (selectedPlayer) {
-    return <PlayerDetailView playerId={selectedPlayer} onBack={() => setSelectedPlayer(null)} />;
-  }
+  if (selectedPlayer) return <PlayerDetailView playerId={selectedPlayer} onBack={() => setSelectedPlayer(null)} />;
 
-  const getSportDisplay = () => SPORTS_LIST.find(s => s.value === sport)?.label || sport.toUpperCase();
-
-  // Format market label for display
-  const formatMarketLabel = (market: string) => {
-    return market.replace(/player_/g, "").replace(/_/g, " + ").toUpperCase();
-  };
+  const formatMarket = (m: string) => m.replace(/player_/g, "").replace(/_/g, " + ").toUpperCase();
 
   return (
     <DashboardLayout>
       <header className="border-b border-border bg-card/50 backdrop-blur-xl sticky top-0 z-40">
         <div className="px-6 py-3 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-display font-bold text-gradient-gold">LINE PULSE</h1>
-            <p className="text-xs text-green-400">● LIVE 24/7</p>
-          </div>
+          <div><h1 className="text-2xl font-display font-bold text-gradient-gold">LINE PULSE</h1><p className="text-xs text-green-400">● LIVE 24/7</p></div>
           <div className="flex flex-wrap gap-3">
             <select value={sport} onChange={handleSportChange} className="bg-secondary border border-border rounded-lg px-3 py-2 text-sm">
               {SPORTS_LIST.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
@@ -197,7 +173,7 @@ export default function Scanner() {
               {SPORTSBOOKS.map(b => <option key={b} value={b}>{b}</option>)}
             </select>
             <select value={selectedMarket} onChange={e => setSelectedMarket(e.target.value)} className="bg-secondary border border-border rounded-lg px-3 py-2 text-sm" disabled={availableMarkets.length === 0}>
-              {availableMarkets.map(m => <option key={m} value={m}>{formatMarketLabel(m)}</option>)}
+              {availableMarkets.map(m => <option key={m} value={m}>{formatMarket(m)}</option>)}
               {availableMarkets.length === 0 && <option>No props available</option>}
             </select>
             <div className="flex bg-secondary rounded-lg overflow-hidden border border-border">
@@ -210,7 +186,6 @@ export default function Scanner() {
           </div>
         </div>
       </header>
-
       <div className="px-6 py-4">
         <div className="flex flex-col sm:flex-row gap-3 mb-4">
           <div className="relative flex-1">
@@ -224,7 +199,6 @@ export default function Scanner() {
             <BarChart3 className="w-4 h-4" /> {sortDir === "desc" ? "↓ Highest First" : "↑ Lowest First"}
           </button>
         </div>
-
         {loading ? (
           <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
         ) : error ? (
@@ -232,20 +206,10 @@ export default function Scanner() {
         ) : (
           <>
             <div className="mb-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
-              <p className="text-xs text-green-400">
-                ✅ {getSportDisplay()} – {selectedMarket ? formatMarketLabel(selectedMarket) : "No market"} lines from {selectedBookmaker}
-                <br />
-                <span className="text-muted-foreground">Real props from The Odds API (single + combo)</span>
-              </p>
+              <p className="text-xs text-green-400">✅ {SPORTS_LIST.find(s => s.value === sport)?.label} – {selectedMarket ? formatMarket(selectedMarket) : "No market"} lines from {selectedBookmaker}</p>
             </div>
             <div className="bg-card border border-border rounded-xl overflow-hidden">
-              <PlayerTable
-                players={filteredPlayers}
-                sortField={sortField}
-                sortDir={sortDir}
-                onSort={handleSort}
-                onPlayerClick={handlePlayerClick}
-              />
+              <PlayerTable players={filteredPlayers} sortField={sortField} sortDir={sortDir} onSort={handleSort} onPlayerClick={handlePlayerClick} />
             </div>
           </>
         )}
