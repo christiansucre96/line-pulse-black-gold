@@ -24,8 +24,6 @@ const SPORT_MAP: Record<string, string> = {
 };
 
 const SINGLE_MARKETS = ["player_points", "player_rebounds", "player_assists"];
-
-// For combo props, we will combine the single markets
 const COMBO_MARKETS = [
   { key: "player_points_rebounds", label: "Points + Rebounds", components: ["player_points", "player_rebounds"] },
   { key: "player_points_assists", label: "Points + Assists", components: ["player_points", "player_assists"] },
@@ -33,13 +31,11 @@ const COMBO_MARKETS = [
   { key: "player_points_rebounds_assists", label: "Points + Rebounds + Assists", components: ["player_points", "player_rebounds", "player_assists"] },
 ];
 
-// Helper: fetch single market props from The Odds API
 async function fetchSingleMarketProps(sport: string, bookmaker: string, market: string) {
   const API_KEY = Deno.env.get("THE_ODDS_API_KEY");
   if (!API_KEY) return [];
   const oddsSport = SPORT_MAP[sport];
   if (!oddsSport) return [];
-
   const url = `https://api.the-odds-api.com/v4/sports/${oddsSport}/odds/?apiKey=${API_KEY}&regions=us&markets=${market}&bookmakers=${bookmaker.toLowerCase()}`;
   const res = await fetch(url);
   if (!res.ok) return [];
@@ -63,7 +59,6 @@ async function fetchSingleMarketProps(sport: string, bookmaker: string, market: 
   return props;
 }
 
-// Main sync: fetch single markets, then compute combos
 async function syncAllProps(supabase: any) {
   const sports = ["nba", "nfl", "mlb", "nhl", "soccer"];
   const bookmakers = ["Stake", "BetOnline"];
@@ -73,21 +68,16 @@ async function syncAllProps(supabase: any) {
     results[sport] = {};
     for (const bookmaker of bookmakers) {
       try {
-        // 1. Fetch single markets
         const singlePropsMap: Record<string, Map<string, { line: number; odds: number }>> = {};
         for (const market of SINGLE_MARKETS) {
           const props = await fetchSingleMarketProps(sport, bookmaker, market);
           const map = new Map();
-          for (const p of props) {
-            map.set(p.player_name, { line: p.line, odds: p.odds });
-          }
+          for (const p of props) map.set(p.player_name, { line: p.line, odds: p.odds });
           singlePropsMap[market] = map;
         }
 
-        // 2. Build all props (single + combo)
         const allProps = [];
-
-        // Add single props
+        // Single
         for (const market of SINGLE_MARKETS) {
           for (const [player, data] of singlePropsMap[market]) {
             allProps.push({
@@ -102,31 +92,24 @@ async function syncAllProps(supabase: any) {
             });
           }
         }
-
-        // 3. Add combo props by summing lines
+        // Combos
         for (const combo of COMBO_MARKETS) {
-          // Get the first component market's map (we need all players that have all components)
-          const firstMarket = combo.components[0];
-          const playersWithAll = new Set<string>();
-          for (const [player] of singlePropsMap[firstMarket]) {
+          const firstMap = singlePropsMap[combo.components[0]];
+          const players = new Set<string>();
+          for (const [player] of firstMap) {
             let hasAll = true;
             for (const comp of combo.components) {
-              if (!singlePropsMap[comp].has(player)) {
-                hasAll = false;
-                break;
-              }
+              if (!singlePropsMap[comp].has(player)) { hasAll = false; break; }
             }
-            if (hasAll) playersWithAll.add(player);
+            if (hasAll) players.add(player);
           }
-
-          for (const player of playersWithAll) {
+          for (const player of players) {
             let totalLine = 0;
             let totalOdds = 1;
             for (const comp of combo.components) {
-              const data = singlePropsMap[comp].get(player);
-              totalLine += data.line;
-              // Approximate combined odds (for display only; real combo odds would come from API)
-              totalOdds *= data.odds;
+              const d = singlePropsMap[comp].get(player);
+              totalLine += d.line;
+              totalOdds *= d.odds;
             }
             allProps.push({
               sport,
@@ -142,9 +125,7 @@ async function syncAllProps(supabase: any) {
         }
 
         if (allProps.length) {
-          // Delete old props for this sport+bookmaker
           await supabase.from("player_props_cache").delete().eq("sport", sport).eq("bookmaker", bookmaker);
-          // Insert new props (batch insert in chunks to avoid payload limits)
           const chunkSize = 500;
           for (let i = 0; i < allProps.length; i += chunkSize) {
             const chunk = allProps.slice(i, i + chunkSize);
@@ -163,7 +144,32 @@ async function syncAllProps(supabase: any) {
   return results;
 }
 
-// ---------- Database read operations ----------
+// ---------- Player stats helpers ----------
+async function getPlayerStats(supabase: any, playerId: number) {
+  const { data, error } = await supabase
+    .from("player_stats")
+    .select("*")
+    .eq("player_id", playerId)
+    .order("game_date", { ascending: false })
+    .limit(20);
+  if (error) return [];
+  return data;
+}
+
+async function addPlayerStat(supabase: any, playerId: number, gameDate: string, points: number, rebounds: number, assists: number, minutes: number) {
+  const { error } = await supabase.from("player_stats").upsert({
+    player_id: playerId,
+    game_date: gameDate,
+    points,
+    rebounds,
+    assists,
+    minutes,
+  }, { onConflict: "player_id,game_date" });
+  if (error) throw error;
+  return { success: true };
+}
+
+// ---------- Player and team read ----------
 async function getPlayers(supabase: any, sport: string) {
   const { data: players, error } = await supabase
     .from("players")
@@ -203,12 +209,17 @@ async function getPlayerDetails(supabase: any, playerId: string) {
     .from("player_props_cache")
     .select("*")
     .eq("player_name", player.full_name);
-  return { ...player, props: props || [] };
+  const { data: stats } = await supabase
+    .from("player_stats")
+    .select("*")
+    .eq("player_id", player.id)
+    .order("game_date", { ascending: false })
+    .limit(20);
+  return { ...player, props: props || [], stats: stats || [] };
 }
 
-// ---------- Manual player addition (to avoid ESPN) ----------
+// ---------- Manual player addition ----------
 async function addPlayer(supabase: any, sport: string, name: string, position: string, teamName: string) {
-  // Find or create team
   let { data: team } = await supabase.from("teams").select("id").eq("name", teamName).eq("sport", sport).single();
   if (!team) {
     const { data: newTeam, error } = await supabase
@@ -231,55 +242,44 @@ async function addPlayer(supabase: any, sport: string, name: string, position: s
   return { success: true };
 }
 
-// ---------- Dummy sync_upcoming to stop admin errors ----------
-async function syncUpcoming() {
-  return { teams: 0, players: 0 };
-}
+async function syncUpcoming() { return { teams: 0, players: 0 }; }
 
-// ---------- Main handler ----------
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
   try {
     const supabase = getSupabase();
     const body = await req.json().catch(() => ({}));
-    let { operation, sport, bookmaker, market, player_id, player_name, position, team } = body;
+    let { operation, sport, bookmaker, market, player_id, player_name, position, team, stats } = body;
 
     if (!operation && sport) operation = "get_players";
 
     switch (operation) {
       case "get_players":
         const players = await getPlayers(supabase, sport);
-        return new Response(JSON.stringify({ success: true, players, count: players.length }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return new Response(JSON.stringify({ success: true, players, count: players.length }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       case "get_props":
         if (!bookmaker) bookmaker = "Stake";
         const props = await getProps(supabase, sport, bookmaker, market);
-        return new Response(JSON.stringify({ success: true, props, count: props.length }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return new Response(JSON.stringify({ success: true, props, count: props.length }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       case "get_player_details":
         if (!player_id) throw new Error("Missing player_id");
         const details = await getPlayerDetails(supabase, player_id);
-        return new Response(JSON.stringify({ success: true, player: details }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return new Response(JSON.stringify({ success: true, player: details }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       case "sync_props":
         const results = await syncAllProps(supabase);
-        return new Response(JSON.stringify({ success: true, results }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return new Response(JSON.stringify({ success: true, results }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       case "sync_upcoming":
         const dummy = await syncUpcoming();
-        return new Response(JSON.stringify({ success: true, ...dummy }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return new Response(JSON.stringify({ success: true, ...dummy }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       case "add_player":
         if (!sport || !player_name || !position || !team) throw new Error("Missing fields");
         const addResult = await addPlayer(supabase, sport, player_name, position, team);
-        return new Response(JSON.stringify({ success: true, ...addResult }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return new Response(JSON.stringify({ success: true, ...addResult }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      case "add_player_stat":
+        if (!player_id || !stats) throw new Error("Missing player_id or stats");
+        const { game_date, points, rebounds, assists, minutes } = stats;
+        const statResult = await addPlayerStat(supabase, parseInt(player_id), game_date, points, rebounds, assists, minutes);
+        return new Response(JSON.stringify({ success: true, ...statResult }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       default:
         return new Response(JSON.stringify({ error: `Unknown operation: ${operation}` }), { status: 400, headers: corsHeaders });
     }
