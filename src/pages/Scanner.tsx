@@ -21,7 +21,6 @@ const BET_TYPES = [
   { label: "Under", value: "under" },
 ];
 
-// Safe formatting function
 const formatMarket = (market: string | undefined): string => {
   if (!market) return "Unknown";
   return market.replace(/player_/g, "").replace(/_/g, " + ").toUpperCase();
@@ -42,6 +41,15 @@ export default function Scanner() {
   const [selectedBetType, setSelectedBetType] = useState("all");
   const [error, setError] = useState<string | null>(null);
 
+  // All hooks are called unconditionally before any return
+  useEffect(() => {
+    fetchMarkets();
+  }, [sport, selectedBookmaker]);
+
+  useEffect(() => {
+    if (selectedMarket) fetchData(false);
+  }, [sport, selectedBookmaker, selectedMarket, selectedBetType]);
+
   const fetchMarkets = async () => {
     try {
       const res = await fetch(EDGE_URL, {
@@ -51,7 +59,6 @@ export default function Scanner() {
       });
       const data = await res.json();
       if (data.success && data.props) {
-        // Filter out any undefined market_key
         const markets = [...new Set(data.props.map((p: any) => p.market_key).filter(Boolean))];
         setAvailableMarkets(markets);
         if (markets.length && (!selectedMarket || !markets.includes(selectedMarket))) {
@@ -69,7 +76,6 @@ export default function Scanner() {
     setError(null);
 
     try {
-      // Get players
       const playersRes = await fetch(EDGE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -83,7 +89,6 @@ export default function Scanner() {
         return;
       }
 
-      // Get props for selected market
       let lineMap = new Map();
       if (selectedMarket) {
         const propsRes = await fetch(EDGE_URL, {
@@ -115,7 +120,6 @@ export default function Scanner() {
             initials: p.name.split(' ').map((n: string) => n[0]).join('') || "??",
           };
         }
-        // Simulate over/under (replace with real projection later)
         const projection = line + (Math.random() - 0.5) * 4;
         const isOver = projection > line;
         let edge_type = "NONE";
@@ -141,14 +145,6 @@ export default function Scanner() {
       setRefreshing(false);
     }
   };
-
-  useEffect(() => {
-    fetchMarkets();
-  }, [sport, selectedBookmaker]);
-
-  useEffect(() => {
-    if (selectedMarket) fetchData(false);
-  }, [sport, selectedBookmaker, selectedMarket, selectedBetType]);
 
   const handleSportChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setSport(e.target.value);
@@ -176,6 +172,7 @@ export default function Scanner() {
     setSelectedPlayer(realId);
   };
 
+  // Early return after all hooks – this is allowed
   if (selectedPlayer) {
     return <PlayerDetailView playerId={selectedPlayer} onBack={() => setSelectedPlayer(null)} />;
   }
