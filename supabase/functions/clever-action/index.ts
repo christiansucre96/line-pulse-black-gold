@@ -1,4 +1,4 @@
-// supabase/functions/odds-props/index.ts
+// supabase/functions/clever-action/index.ts
 // Fetches real prop lines from odds-api.io (free tier)
 // All sports: NBA, NFL, MLB, NHL, Soccer
 // All prop types: single + combo
@@ -419,7 +419,7 @@ Deno.serve(async (req) => {
     const body   = await req.json().catch(() => ({}));
     const { operation, sport, bookmaker, market_key, player_name, combo_only, single_only } = body;
 
-    console.log(`[odds-props] op=${operation} sport=${sport}`);
+    console.log(`[clever-action] op=${operation} sport=${sport}`);
 
     switch (operation) {
 
@@ -495,7 +495,7 @@ Deno.serve(async (req) => {
       }
 
       case "test":
-        return respond({ success: true, message: "odds-props function is alive!", has_api_key: !!apiKey });
+        return respond({ success: true, message: "clever-action function is alive!", has_api_key: !!apiKey });
 
       default:
         return respond({
@@ -506,7 +506,7 @@ Deno.serve(async (req) => {
     }
 
   } catch (e: any) {
-    console.error("[odds-props] fatal:", e);
+    console.error("[clever-action] fatal:", e);
     return respond({ success: false, error: e.message }, 500);
   }
 });
