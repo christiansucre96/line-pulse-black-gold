@@ -22,7 +22,6 @@ export default function Scanner() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
-  // -------- FETCH DATA --------
   useEffect(() => {
     fetchPlayers();
   }, [sport]);
@@ -37,19 +36,16 @@ export default function Scanner() {
       });
 
       const data = await res.json();
-      if (data.success) {
-        setPlayers(data.players);
-      }
+      if (data.success) setPlayers(data.players);
     } catch (err) {
       console.error(err);
     }
     setLoading(false);
   };
 
-  // -------- CALCULATIONS --------
-  const calcCombo = (game: any) => {
-    return selectedProps.reduce((sum, stat) => sum + (game[stat] || 0), 0);
-  };
+  // -------- LOGIC --------
+  const calcCombo = (g: any) =>
+    selectedProps.reduce((sum, stat) => sum + (g[stat] || 0), 0);
 
   const avg = (games: any[], n: number) => {
     const slice = games.slice(0, n);
@@ -64,21 +60,41 @@ export default function Scanner() {
     return Math.round((hits / slice.length) * 100);
   };
 
-  // -------- BUILD TABLE DATA --------
+  const getStreak = (games: any[], line: number) => {
+    let streak = 0;
+    for (let g of games) {
+      if (calcCombo(g) > line) streak++;
+      else break;
+    }
+    return streak;
+  };
+
+  const getColor = (val: number) => {
+    if (val >= 80) return "bg-green-600/80";
+    if (val >= 60) return "bg-green-500/50";
+    if (val >= 40) return "bg-yellow-500/40";
+    return "bg-red-600/70";
+  };
+
+  const getDiffColor = (val: number) =>
+    val > 0 ? "text-green-400" : "text-red-400";
+
+  // -------- PROCESS --------
   const processed = players.map(p => {
     const games = p.stats || [];
 
-    const line = avg(games, 10); // YOUR "SMART LINE"
+    const line = avg(games, 10);
 
     return {
       ...p,
-      line: line.toFixed(1),
-      avg10: line.toFixed(1),
-      diff: (avg(games, 5) - line).toFixed(1),
+      line,
+      avg10: line,
+      diff: avg(games, 5) - line,
       l5: hitRate(games, line, 5),
       l10: hitRate(games, line, 10),
       l15: hitRate(games, line, 15),
       l20: hitRate(games, line, 20),
+      streak: getStreak(games, line),
     };
   });
 
@@ -86,7 +102,6 @@ export default function Scanner() {
     p.name.toLowerCase().includes(search.toLowerCase())
   );
 
-  // -------- UI --------
   return (
     <DashboardLayout>
       <div className="p-4">
@@ -96,7 +111,7 @@ export default function Scanner() {
 
           <input
             placeholder="Search player..."
-            className="bg-secondary px-4 py-2 rounded-lg w-full"
+            className="bg-[#0f172a] border border-gray-700 px-4 py-2 rounded-lg w-full"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -104,7 +119,7 @@ export default function Scanner() {
           <select
             value={sport}
             onChange={(e) => setSport(e.target.value)}
-            className="bg-secondary px-4 py-2 rounded-lg"
+            className="bg-[#0f172a] border border-gray-700 px-4 py-2 rounded-lg"
           >
             {SPORTS.map(s => (
               <option key={s}>{s.toUpperCase()}</option>
@@ -112,8 +127,8 @@ export default function Scanner() {
           </select>
         </div>
 
-        {/* PROP SELECTOR (LIKE SCREENSHOT) */}
-        <div className="flex gap-2 flex-wrap mb-4">
+        {/* PROP CHIPS */}
+        <div className="flex flex-wrap gap-2 mb-4">
           {PROP_OPTIONS.map(opt => {
             const active =
               JSON.stringify(opt.value) === JSON.stringify(selectedProps);
@@ -122,10 +137,10 @@ export default function Scanner() {
               <button
                 key={opt.label}
                 onClick={() => setSelectedProps(opt.value)}
-                className={`px-3 py-1 rounded-full text-sm ${
+                className={`px-3 py-1 rounded-full text-sm transition ${
                   active
                     ? "bg-purple-600 text-white"
-                    : "bg-secondary text-gray-400"
+                    : "bg-gray-800 text-gray-400 hover:bg-gray-700"
                 }`}
               >
                 {opt.label}
@@ -135,52 +150,60 @@ export default function Scanner() {
         </div>
 
         {/* TABLE */}
-        <div className="bg-card rounded-xl overflow-hidden">
+        <div className="rounded-xl overflow-hidden border border-gray-800">
+
           <table className="w-full text-sm">
-            <thead className="bg-secondary">
+
+            <thead className="bg-[#020617] text-gray-400">
               <tr>
-                <th className="text-left p-3">Player</th>
+                <th className="p-3 text-left">Player</th>
                 <th>Line</th>
-                <th>Avg L10</th>
+                <th>Avg</th>
                 <th>Diff</th>
                 <th>L5</th>
                 <th>L10</th>
                 <th>L15</th>
                 <th>L20</th>
+                <th>Strk</th>
               </tr>
             </thead>
 
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="text-center p-6">
+                  <td colSpan={9} className="text-center p-6">
                     Loading...
                   </td>
                 </tr>
               ) : (
                 filtered.map((p, i) => (
-                  <tr key={i} className="border-t border-border">
+                  <tr key={i} className="border-t border-gray-800 hover:bg-gray-900/40">
 
                     <td className="p-3 font-semibold">
                       {p.name}
                     </td>
 
-                    <td>{p.line}</td>
-                    <td>{p.avg10}</td>
+                    <td>{p.line.toFixed(1)}</td>
+                    <td>{p.avg10.toFixed(1)}</td>
 
-                    <td className={Number(p.diff) > 0 ? "text-green-400" : "text-red-400"}>
-                      {p.diff}
+                    <td className={getDiffColor(p.diff)}>
+                      {p.diff.toFixed(1)}
                     </td>
 
-                    <td>{p.l5}%</td>
-                    <td>{p.l10}%</td>
-                    <td>{p.l15}%</td>
-                    <td>{p.l20}%</td>
+                    <td className={`${getColor(p.l5)} text-center`}>{p.l5}%</td>
+                    <td className={`${getColor(p.l10)} text-center`}>{p.l10}%</td>
+                    <td className={`${getColor(p.l15)} text-center`}>{p.l15}%</td>
+                    <td className={`${getColor(p.l20)} text-center`}>{p.l20}%</td>
+
+                    <td className="text-center font-bold">
+                      {p.streak}
+                    </td>
 
                   </tr>
                 ))
               )}
             </tbody>
+
           </table>
         </div>
       </div>
