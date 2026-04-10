@@ -1,161 +1,169 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
-export function PlayerDetailView({ playerId, onBack }) {
-  const [player, setPlayer] = useState(null);
-  const [stats, setStats] = useState([]);
-  const [line, setLine] = useState(0);
-  const [activeStat, setActiveStat] = useState("points");
+export function PlayerDetailView({ playerId, onBack }: any) {
+  const [player, setPlayer] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [selectedProps, setSelectedProps] = useState<string[]>(["points"]);
+  const [line, setLine] = useState(0);
 
   useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      const res = await fetch(EDGE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ operation: "get_player_details", player_id: playerId }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setPlayer(data.player);
-        setStats(data.player.stats || []);
-        setLine(data.player.default_line || 20);
-      }
-      setLoading(false);
-    };
-    fetchData();
+    fetchPlayer();
   }, [playerId]);
 
-  if (loading) return <DashboardLayout><div className="p-10">Loading...</div></DashboardLayout>;
-  if (!player) return null;
+  const fetchPlayer = async () => {
+    setLoading(true);
+    const res = await fetch(EDGE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operation: "get_player_details",
+        player_id: playerId,
+      }),
+    });
 
-  // 🔥 STAT SELECTOR LOGIC
-  const getStatValue = (g) => {
-    if (activeStat === "points") return g.points;
-    if (activeStat === "rebounds") return g.rebounds;
-    if (activeStat === "assists") return g.assists;
-    if (activeStat === "pr") return g.points + g.rebounds;
-    if (activeStat === "ra") return g.rebounds + g.assists;
-    if (activeStat === "pra") return g.points + g.rebounds + g.assists;
-    return 0;
+    const data = await res.json();
+    if (data.success) {
+      setPlayer(data.player);
+      const avg = calcAvg(data.player.stats, 10);
+      setLine(avg);
+    }
+    setLoading(false);
   };
 
-  const games = stats.slice(0, 15).reverse();
+  // -------- LOGIC --------
+  const calcCombo = (g: any) =>
+    selectedProps.reduce((sum, stat) => sum + (g[stat] || 0), 0);
 
-  const calcAvg = (n) => {
-    const slice = stats.slice(0, n);
-    const vals = slice.map(getStatValue);
-    return vals.reduce((a, b) => a + b, 0) / vals.length || 0;
+  const calcAvg = (games: any[], n: number) => {
+    const slice = games.slice(0, n);
+    if (!slice.length) return 0;
+    return slice.reduce((a, g) => a + calcCombo(g), 0) / slice.length;
   };
 
-  const calcHitRate = (n) => {
-    const slice = stats.slice(0, n);
-    const hits = slice.filter(g => getStatValue(g) > line).length;
-    return ((hits / slice.length) * 100) || 0;
+  const hitRate = (games: any[], n: number) => {
+    const slice = games.slice(0, n);
+    if (!slice.length) return 0;
+    const hits = slice.filter(g => calcCombo(g) > line).length;
+    return Math.round((hits / slice.length) * 100);
   };
 
-  const maxStats = {
-    points: Math.max(...stats.map(s => s.points || 0)),
-    rebounds: Math.max(...stats.map(s => s.rebounds || 0)),
-    assists: Math.max(...stats.map(s => s.assists || 0)),
-  };
+  const maxStat = (key: string) =>
+    Math.max(...player.stats.map((g: any) => g[key] || 0));
 
-  const barColor = (val) => val >= line ? "bg-green-500" : "bg-red-500";
+  if (loading) return <div className="p-10">Loading...</div>;
+  if (!player) return <div>No player found</div>;
+
+  const games = player.stats.slice(0, 10);
 
   return (
     <DashboardLayout>
-      <div className="p-4 max-w-7xl mx-auto">
+      <div className="p-4">
 
-        {/* HEADER */}
-        <button onClick={onBack} className="mb-4 flex items-center gap-2">
+        {/* BACK */}
+        <button onClick={onBack} className="flex items-center gap-2 mb-4">
           <ArrowLeft /> Back
         </button>
 
-        <h1 className="text-2xl font-bold">{player.full_name}</h1>
+        {/* HEADER */}
+        <div className="flex justify-between mb-6">
+          <div>
+            <h1 className="text-2xl font-bold">{player.full_name}</h1>
+            <p className="text-gray-400">
+              {player.position} • {player.team}
+            </p>
 
-        {/* STAT TABS */}
-        <div className="flex gap-2 mt-4 flex-wrap">
-          {["points","rebounds","assists","pr","ra","pra"].map(s => (
-            <button
-              key={s}
-              onClick={() => setActiveStat(s)}
-              className={`px-3 py-1 rounded ${activeStat === s ? "bg-primary" : "bg-secondary"}`}
-            >
-              {s.toUpperCase()}
-            </button>
-          ))}
+            {player.injury_status && (
+              <p className="text-red-400 text-sm mt-1">
+                🚑 {player.injury_status} – {player.injury_description}
+              </p>
+            )}
+          </div>
+
+          {/* PLAYER MAX PANEL */}
+          <div className="bg-[#0f172a] p-4 rounded-xl text-sm">
+            <p>Max Points: {maxStat("points")}</p>
+            <p>Max Rebounds: {maxStat("rebounds")}</p>
+            <p>Max Assists: {maxStat("assists")}</p>
+          </div>
         </div>
 
         {/* LINE CONTROL */}
-        <div className="flex items-center gap-2 mt-4">
-          <button onClick={() => setLine(l => l - 1)}>-</button>
-          <div className="px-4 py-2 bg-secondary rounded">{line}</div>
-          <button onClick={() => setLine(l => l + 1)}>+</button>
+        <div className="flex items-center gap-3 mb-4">
+          <button onClick={() => setLine(line - 1)} className="px-3 py-1 bg-gray-700 rounded">-</button>
+          <div className="text-lg font-bold">{line.toFixed(1)}</div>
+          <button onClick={() => setLine(line + 1)} className="px-3 py-1 bg-gray-700 rounded">+</button>
         </div>
 
-        {/* L5 L10 L15 L20 */}
-        <div className="grid grid-cols-4 gap-3 mt-4 text-center">
-          {[5,10,15,20].map(n => (
-            <div key={n} className="bg-secondary p-2 rounded">
-              <div>L{n}</div>
-              <div className="text-green-400">{calcHitRate(n).toFixed(0)}%</div>
-              <div className="text-xs">Avg {calcAvg(n).toFixed(1)}</div>
+        {/* HIT RATES */}
+        <div className="grid grid-cols-4 gap-3 mb-6">
+          {[5, 10, 15, 20].map(n => (
+            <div key={n} className="bg-[#020617] p-3 rounded text-center">
+              <p className="text-xs text-gray-400">L{n}</p>
+              <p className="text-green-400 font-bold">
+                {hitRate(player.stats, n)}%
+              </p>
+              <p className="text-xs text-gray-500">
+                Avg {calcAvg(player.stats, n).toFixed(1)}
+              </p>
             </div>
           ))}
         </div>
 
         {/* BAR GRAPH */}
-        <div className="mt-6">
-          <div className="flex items-end gap-2 h-48">
-            {games.map((g, i) => {
-              const val = getStatValue(g);
+        <div className="bg-[#020617] p-4 rounded-xl mb-6">
+          <div className="flex items-end gap-2 h-40">
+            {games.map((g: any, i: number) => {
+              const val = calcCombo(g);
+              const height = val * 3;
+              const color = val > line ? "bg-green-500" : "bg-red-500";
+
               return (
-                <div key={i} className="flex-1 flex flex-col justify-end items-center">
+                <div key={i} className="flex flex-col items-center w-6">
                   <div
-                    className={`${barColor(val)} w-full rounded`}
-                    style={{ height: `${val * 3}px` }}
+                    className={`${color} w-full rounded-t`}
+                    style={{ height }}
                   />
-                  <span className="text-xs mt-1">{val}</span>
+                  <p className="text-[10px] mt-1">
+                    {g.opponent}
+                  </p>
                 </div>
               );
             })}
           </div>
 
           {/* LINE */}
-          <div className="border-t border-dashed border-white mt-2 text-xs text-center">
-            Line: {line}
+          <div className="border-t border-dashed border-gray-500 mt-2 relative">
+            <div className="absolute -top-3 text-xs text-gray-400">
+              Line {line.toFixed(1)}
+            </div>
           </div>
         </div>
 
-        {/* MAX STATS */}
-        <div className="mt-6 bg-secondary p-4 rounded">
-          <h3 className="font-bold mb-2">Player Max Stats</h3>
-          <div>PTS: {maxStats.points}</div>
-          <div>REB: {maxStats.rebounds}</div>
-          <div>AST: {maxStats.assists}</div>
-        </div>
-
-        {/* GAME LOG */}
-        <div className="mt-6">
-          <h3 className="font-bold mb-2">Last 15 Games</h3>
+        {/* GAME LOGS */}
+        <div className="bg-[#020617] rounded-xl overflow-hidden">
           <table className="w-full text-sm">
-            <thead>
+            <thead className="bg-[#0f172a]">
               <tr>
-                <th>Date</th><th>PTS</th><th>REB</th><th>AST</th><th>PRA</th>
+                <th>Date</th>
+                <th>Opp</th>
+                <th>PTS</th>
+                <th>REB</th>
+                <th>AST</th>
               </tr>
             </thead>
+
             <tbody>
-              {stats.slice(0,15).map((g,i)=>(
-                <tr key={i}>
-                  <td>{new Date(g.game_date).toLocaleDateString()}</td>
+              {player.stats.slice(0, 15).map((g: any, i: number) => (
+                <tr key={i} className="border-t border-gray-800">
+                  <td>{g.game_date}</td>
+                  <td>{g.opponent}</td>
                   <td>{g.points}</td>
                   <td>{g.rebounds}</td>
                   <td>{g.assists}</td>
-                  <td>{g.points + g.rebounds + g.assists}</td>
                 </tr>
               ))}
             </tbody>
