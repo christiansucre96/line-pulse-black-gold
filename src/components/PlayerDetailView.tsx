@@ -4,217 +4,158 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
-interface PlayerDetailViewProps {
-  playerId: string;
-  onBack: () => void;
-}
-
-export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
-  const [player, setPlayer] = useState<any>(null);
+export function PlayerDetailView({ playerId, onBack }) {
+  const [player, setPlayer] = useState(null);
+  const [stats, setStats] = useState([]);
+  const [line, setLine] = useState(0);
+  const [activeStat, setActiveStat] = useState("points");
   const [loading, setLoading] = useState(true);
-  const [selectedStat, setSelectedStat] = useState("points");
-  const [lineValue, setLineValue] = useState(0);
 
   useEffect(() => {
-    const fetchDetails = async () => {
+    const fetchData = async () => {
       setLoading(true);
-      try {
-        const res = await fetch(EDGE_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ operation: "get_player_details", player_id: playerId }),
-        });
-        const data = await res.json();
-        if (data.success) setPlayer(data.player);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
+      const res = await fetch(EDGE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operation: "get_player_details", player_id: playerId }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPlayer(data.player);
+        setStats(data.player.stats || []);
+        setLine(data.player.default_line || 20);
       }
+      setLoading(false);
     };
-    fetchDetails();
+    fetchData();
   }, [playerId]);
 
-  if (loading) return <DashboardLayout><div className="py-20 text-center">Loading...</div></DashboardLayout>;
-  if (!player) return <DashboardLayout><div className="py-20 text-center">No player found</div></DashboardLayout>;
+  if (loading) return <DashboardLayout><div className="p-10">Loading...</div></DashboardLayout>;
+  if (!player) return null;
 
-  const stats = player.stats || [];
-  const props = player.props || [];
-
-  // 🔥 GET STAT ARRAY
-  const getStatArray = () => {
-    switch (selectedStat) {
-      case "points":
-        return stats.map(s => s.points || 0);
-      case "rebounds":
-        return stats.map(s => s.rebounds || 0);
-      case "assists":
-        return stats.map(s => s.assists || 0);
-      case "pra":
-        return stats.map(s => (s.points || 0) + (s.rebounds || 0) + (s.assists || 0));
-      default:
-        return [];
-    }
+  // 🔥 STAT SELECTOR LOGIC
+  const getStatValue = (g) => {
+    if (activeStat === "points") return g.points;
+    if (activeStat === "rebounds") return g.rebounds;
+    if (activeStat === "assists") return g.assists;
+    if (activeStat === "pr") return g.points + g.rebounds;
+    if (activeStat === "ra") return g.rebounds + g.assists;
+    if (activeStat === "pra") return g.points + g.rebounds + g.assists;
+    return 0;
   };
 
-  const statArr = getStatArray();
+  const games = stats.slice(0, 15).reverse();
 
-  // 🔥 AUTO SET LINE FROM PROPS
-  useEffect(() => {
-    const prop = props.find(p => p.market_key?.includes(selectedStat));
-    if (prop) setLineValue(prop.line);
-  }, [selectedStat, props]);
-
-  // 🔥 AVERAGES
-  const avg = (arr: number[], n: number) => {
-    const slice = arr.slice(0, n);
-    return slice.length ? slice.reduce((a, b) => a + b, 0) / slice.length : 0;
+  const calcAvg = (n) => {
+    const slice = stats.slice(0, n);
+    const vals = slice.map(getStatValue);
+    return vals.reduce((a, b) => a + b, 0) / vals.length || 0;
   };
 
-  const rolling = [
-    { label: "L5", value: avg(statArr, 5) },
-    { label: "L10", value: avg(statArr, 10) },
-    { label: "L15", value: avg(statArr, 15) },
-    { label: "L20", value: avg(statArr, 20) },
-  ];
+  const calcHitRate = (n) => {
+    const slice = stats.slice(0, n);
+    const hits = slice.filter(g => getStatValue(g) > line).length;
+    return ((hits / slice.length) * 100) || 0;
+  };
 
-  const maxStat = Math.max(...statArr, 1);
-  const minStat = Math.min(...statArr, 0);
+  const maxStats = {
+    points: Math.max(...stats.map(s => s.points || 0)),
+    rebounds: Math.max(...stats.map(s => s.rebounds || 0)),
+    assists: Math.max(...stats.map(s => s.assists || 0)),
+  };
 
-  const recentGames = stats.slice(0, 15);
+  const barColor = (val) => val >= line ? "bg-green-500" : "bg-red-500";
 
   return (
     <DashboardLayout>
-      <div className="p-4 md:p-6 max-w-6xl mx-auto">
+      <div className="p-4 max-w-7xl mx-auto">
 
-        {/* BACK */}
-        <button onClick={onBack} className="flex items-center gap-2 mb-6 text-muted-foreground">
-          <ArrowLeft className="w-4 h-4" /> Back
+        {/* HEADER */}
+        <button onClick={onBack} className="mb-4 flex items-center gap-2">
+          <ArrowLeft /> Back
         </button>
 
-        {/* PLAYER HEADER */}
-        <div className="bg-card p-6 rounded-xl mb-6">
-          <h1 className="text-2xl font-bold">{player.full_name}</h1>
-          <p className="text-muted-foreground">{player.position}</p>
-        </div>
+        <h1 className="text-2xl font-bold">{player.full_name}</h1>
 
-        {/* STAT SELECTOR */}
-        <div className="flex gap-2 mb-4">
-          {["points", "rebounds", "assists", "pra"].map(stat => (
+        {/* STAT TABS */}
+        <div className="flex gap-2 mt-4 flex-wrap">
+          {["points","rebounds","assists","pr","ra","pra"].map(s => (
             <button
-              key={stat}
-              onClick={() => setSelectedStat(stat)}
-              className={`px-3 py-1 rounded ${
-                selectedStat === stat ? "bg-primary text-white" : "bg-secondary"
-              }`}
+              key={s}
+              onClick={() => setActiveStat(s)}
+              className={`px-3 py-1 rounded ${activeStat === s ? "bg-primary" : "bg-secondary"}`}
             >
-              {stat.toUpperCase()}
+              {s.toUpperCase()}
             </button>
           ))}
         </div>
 
-        {/* LINE SLIDER */}
-        <div className="mb-6">
-          <label className="text-sm">Adjust Line: {lineValue.toFixed(1)}</label>
-          <input
-            type="range"
-            min="0"
-            max={maxStat + 10}
-            value={lineValue}
-            onChange={(e) => setLineValue(Number(e.target.value))}
-            className="w-full"
-          />
+        {/* LINE CONTROL */}
+        <div className="flex items-center gap-2 mt-4">
+          <button onClick={() => setLine(l => l - 1)}>-</button>
+          <div className="px-4 py-2 bg-secondary rounded">{line}</div>
+          <button onClick={() => setLine(l => l + 1)}>+</button>
+        </div>
+
+        {/* L5 L10 L15 L20 */}
+        <div className="grid grid-cols-4 gap-3 mt-4 text-center">
+          {[5,10,15,20].map(n => (
+            <div key={n} className="bg-secondary p-2 rounded">
+              <div>L{n}</div>
+              <div className="text-green-400">{calcHitRate(n).toFixed(0)}%</div>
+              <div className="text-xs">Avg {calcAvg(n).toFixed(1)}</div>
+            </div>
+          ))}
         </div>
 
         {/* BAR GRAPH */}
-        <div className="bg-card p-6 rounded-xl mb-6">
-          <h2 className="font-bold mb-4">Performance vs Line</h2>
-
-          {rolling.map((item, i) => {
-            const percent = (item.value / maxStat) * 100;
-
-            return (
-              <div key={i} className="mb-3">
-                <div className="flex justify-between text-sm mb-1">
-                  <span>{item.label}</span>
-                  <span>{item.value.toFixed(1)}</span>
-                </div>
-
-                <div className="w-full bg-muted h-6 rounded relative">
+        <div className="mt-6">
+          <div className="flex items-end gap-2 h-48">
+            {games.map((g, i) => {
+              const val = getStatValue(g);
+              return (
+                <div key={i} className="flex-1 flex flex-col justify-end items-center">
                   <div
-                    className={`h-6 rounded ${
-                      item.value > lineValue ? "bg-green-500" : "bg-red-500"
-                    }`}
-                    style={{ width: `${percent}%` }}
+                    className={`${barColor(val)} w-full rounded`}
+                    style={{ height: `${val * 3}px` }}
                   />
-
-                  {/* LINE MARKER */}
-                  <div
-                    className="absolute top-0 h-6 w-[2px] bg-yellow-400"
-                    style={{ left: `${(lineValue / maxStat) * 100}%` }}
-                  />
+                  <span className="text-xs mt-1">{val}</span>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* MAX / MIN */}
-        <div className="grid grid-cols-2 gap-4 mb-6">
-          <div className="bg-secondary p-4 rounded">
-            <div className="text-xs text-muted-foreground">Max</div>
-            <div className="text-xl font-bold">{maxStat}</div>
+              );
+            })}
           </div>
-          <div className="bg-secondary p-4 rounded">
-            <div className="text-xs text-muted-foreground">Min</div>
-            <div className="text-xl font-bold">{minStat}</div>
+
+          {/* LINE */}
+          <div className="border-t border-dashed border-white mt-2 text-xs text-center">
+            Line: {line}
           </div>
         </div>
 
-        {/* PROPS TABLE */}
-        <div className="bg-card rounded-xl overflow-hidden mb-6">
-          <div className="p-4 border-b">Props</div>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-secondary">
-                <th className="p-2 text-left">Market</th>
-                <th>Line</th>
-                <th>Over</th>
-                <th>Under</th>
-              </tr>
-            </thead>
-            <tbody>
-              {props.map((p: any, i: number) => (
-                <tr key={i} className="border-b">
-                  <td className="p-2">{p.market_label}</td>
-                  <td>{p.line}</td>
-                  <td>{p.over_odds}</td>
-                  <td>{p.under_odds}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {/* MAX STATS */}
+        <div className="mt-6 bg-secondary p-4 rounded">
+          <h3 className="font-bold mb-2">Player Max Stats</h3>
+          <div>PTS: {maxStats.points}</div>
+          <div>REB: {maxStats.rebounds}</div>
+          <div>AST: {maxStats.assists}</div>
         </div>
 
-        {/* GAME LOGS */}
-        <div className="bg-card rounded-xl overflow-hidden">
-          <div className="p-4 border-b">Last 15 Games</div>
+        {/* GAME LOG */}
+        <div className="mt-6">
+          <h3 className="font-bold mb-2">Last 15 Games</h3>
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-secondary">
-                <th>Date</th>
-                <th>PTS</th>
-                <th>REB</th>
-                <th>AST</th>
+              <tr>
+                <th>Date</th><th>PTS</th><th>REB</th><th>AST</th><th>PRA</th>
               </tr>
             </thead>
             <tbody>
-              {recentGames.map((g: any, i: number) => (
-                <tr key={i} className="border-b">
-                  <td className="p-2">{new Date(g.game_date).toLocaleDateString()}</td>
+              {stats.slice(0,15).map((g,i)=>(
+                <tr key={i}>
+                  <td>{new Date(g.game_date).toLocaleDateString()}</td>
                   <td>{g.points}</td>
                   <td>{g.rebounds}</td>
                   <td>{g.assists}</td>
+                  <td>{g.points + g.rebounds + g.assists}</td>
                 </tr>
               ))}
             </tbody>
