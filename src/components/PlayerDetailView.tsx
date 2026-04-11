@@ -7,10 +7,6 @@ import { Badge } from "@/components/ui/badge";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
-// ─────────────────────────────────────────────────────────────
-// 🌍 FULL PROP CONFIGURATION
-// ─────────────────────────────────────────────────────────────
-
 const PROP_GROUPS: Record<string, { id: string; label: string; stackKeys?: string[]; isBoolean?: boolean }[]> = {
   nba: [
     { id: "points", label: "PTS" }, { id: "rebounds", label: "REB" }, { id: "assists", label: "AST" },
