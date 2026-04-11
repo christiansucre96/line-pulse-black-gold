@@ -1,6 +1,4 @@
 // supabase/functions/clever-action/index.ts
-// Handles: get_player_details + get_players_with_stats
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.7.1";
 
@@ -16,39 +14,22 @@ serve(async (req) => {
   }
 
   try {
-    // Read body
     let rawBody = await req.text();
-    let requestBody;
-    
-    try {
-      requestBody = rawBody ? JSON.parse(rawBody) : {};
-    } catch (e) {
-      return new Response(
-        JSON.stringify({ success: false, error: "Invalid JSON", details: e.message }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
-      );
-    }
+    let requestBody = rawBody ? JSON.parse(rawBody) : {};
+    const { operation, sport = "nba" } = requestBody;
 
-    const { operation } = requestBody;
-    
-    // 👇 Route to different handlers based on operation
     if (operation === "get_player_details") {
-      return await handleGetPlayerDetails(requestBody);
+      return await handleGetPlayerDetails(requestBody, sport);
     } else if (operation === "get_players_with_stats") {
-      return await handleGetPlayersWithStats(requestBody);
+      return await handleGetPlayersWithStats(requestBody, sport);
     } else {
       return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: `Unknown operation: ${operation}`,
-          available: ["get_player_details", "get_players_with_stats"]
-        }),
+        JSON.stringify({ success: false, error: `Unknown operation: ${operation}` }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
       );
     }
 
   } catch (error: any) {
-    console.error("❌ Edge Function error:", error);
     return new Response(
       JSON.stringify({ success: false, error: error.message }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 }
@@ -56,11 +37,10 @@ serve(async (req) => {
   }
 });
 
-// 👇 HANDLER 1: Get single player details (for PlayerDetailView)
-async function handleGetPlayerDetails(requestBody: any) {
-  const { player_id } = requestBody;
+async function handleGetPlayerDetails(requestBody: any, sport: string) {
+  const { player_id, props = ["points"] } = requestBody;
   
-  if (!player_id || typeof player_id !== "string") {
+  if (!player_id) {
     return new Response(
       JSON.stringify({ success: false, error: "Missing player_id" }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
@@ -72,12 +52,11 @@ async function handleGetPlayerDetails(requestBody: any) {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
   );
 
-  // Check cache
   const {  cached } = await supabase
     .from("player_cache")
     .select("*")
     .eq("player_id", player_id)
-    .eq("sport", "nba")
+    .eq("sport", sport)
     .maybeSingle();
 
   const now = new Date();
@@ -93,8 +72,7 @@ async function handleGetPlayerDetails(requestBody: any) {
     }
   }
 
-  // Fetch fresh (MOCK DATA - replace with real API)
-  const freshPlayerData = await fetchFreshPlayerData(player_id);
+  const freshPlayerData = await fetchFreshPlayerData(player_id, sport, props);
   
   if (!freshPlayerData) {
     return new Response(
@@ -103,14 +81,12 @@ async function handleGetPlayerDetails(requestBody: any) {
     );
   }
 
-  // Cache it
   await supabase.from("player_cache").upsert({
     player_id,
-    sport: "nba",
+    sport,
     data: freshPlayerData,
     cached_at: now.toISOString(),
     expires_at: new Date(now.getTime() + CACHE_TTL_HOURS * 60 * 60 * 1000).toISOString(),
-    stats_hash: generateStatsHash(freshPlayerData.stats)
   }, { onConflict: "player_id,sport" });
 
   return new Response(
@@ -119,54 +95,84 @@ async function handleGetPlayerDetails(requestBody: any) {
   );
 }
 
-// 👇 HANDLER 2: Get all players with stats (for Scanner page)
-async function handleGetPlayersWithStats(requestBody: any) {
-  const { sport, search } = requestBody;
-  
-  if (!sport) {
-    return new Response(
-      JSON.stringify({ success: false, error: "Missing sport parameter" }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
-    );
-  }
+async function handleGetPlayersWithStats(requestBody: any, sport: string) {
+  const { search, props = ["points"], bookmakers = ["Stake", "BetOnline"] } = requestBody;
 
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL") ?? "",
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
-  );
-
-  // 👇 Check if you have a players table in Supabase
-  // For now, return mock data
+  // Generate mock players with stats
   const mockPlayers = [
-    { player_id: "jamesle01", full_name: "LeBron James", team: "LAL", position: "F", avg_points: 25.3, avg_rebounds: 7.2, avg_assists: 7.8 },
-    { player_id: "curryst01", full_name: "Stephen Curry", team: "GSW", position: "G", avg_points: 28.1, avg_rebounds: 4.5, avg_assists: 6.2 },
-    { player_id: "duranke01", full_name: "Kevin Durant", team: "PHX", position: "F", avg_points: 27.5, avg_rebounds: 6.8, avg_assists: 5.1 },
-    { player_id: "jokicni01", full_name: "Nikola Jokic", team: "DEN", position: "C", avg_points: 26.2, avg_rebounds: 12.1, avg_assists: 9.3 },
-    { player_id: "doncilu01", full_name: "Luka Doncic", team: "DAL", position: "G", avg_points: 32.1, avg_rebounds: 8.5, avg_assists: 8.9 },
+    { player_id: "jamesle01", full_name: "LeBron James", team: "LAL", position: "F", injury_status: null },
+    { player_id: "curryst01", full_name: "Stephen Curry", team: "GSW", position: "G", injury_status: null },
+    { player_id: "duranke01", full_name: "Kevin Durant", team: "PHX", position: "F", injury_status: null },
+    { player_id: "jokicni01", full_name: "Nikola Jokic", team: "DEN", position: "C", injury_status: null },
+    { player_id: "doncilu01", full_name: "Luka Doncic", team: "DAL", position: "G", injury_status: null },
+    { player_id: "goberru01", full_name: "Rudy Gobert", team: "MIN", position: "C", injury_status: null },
   ];
 
-  // Filter if search provided
   const filtered = search 
     ? mockPlayers.filter(p => p.full_name.toLowerCase().includes(search.toLowerCase()))
     : mockPlayers;
 
+  // Add stats for each player
+  const playersWithStats = await Promise.all(
+    filtered.map(async player => {
+      const data = await fetchFreshPlayerData(player.player_id, sport, props);
+      const stats = data?.stats || [];
+      const recentStats = stats.slice(0, 10);
+      
+      const avgL10 = recentStats.reduce((sum, g) => sum + calcCombo(g, props), 0) / recentStats.length;
+      const line = avgL10 - 2; // Mock line (2 points below avg)
+      const diff = avgL10 - line;
+      
+      const l5Hits = stats.slice(0, 5).filter(g => calcCombo(g, props) > line).length;
+      const l10Hits = stats.slice(0, 10).filter(g => calcCombo(g, props) > line).length;
+      const l15Hits = stats.slice(0, 15).filter(g => calcCombo(g, props) > line).length;
+      
+      // Calculate streak
+      let streak = 0;
+      for (const g of stats) {
+        if (calcCombo(g, props) > line) streak++;
+        else break;
+      }
+
+      return {
+        ...player,
+        bookmaker: bookmakers[0],
+        line: line.toFixed(1),
+        avgL10,
+        diff,
+        l5HitRate: Math.round((l5Hits / 5) * 100),
+        l10HitRate: Math.round((l10Hits / 10) * 100),
+        l15HitRate: Math.round((l15Hits / 15) * 100),
+        streak,
+      };
+    })
+  );
+
   return new Response(
-    JSON.stringify({ success: true, players: filtered, count: filtered.length }),
+    JSON.stringify({ success: true, players: playersWithStats, count: playersWithStats.length }),
     { headers: { ...corsHeaders, "Content-Type": "application/json" } }
   );
 }
 
-// 👇 MOCK DATA FUNCTIONS (replace with real API later)
-async function fetchFreshPlayerData(playerId: string): Promise<any | null> {
+function calcCombo(g: any, props: string[]) {
+  return props.reduce((sum, stat) => sum + (g[stat] || 0), 0);
+}
+
+async function fetchFreshPlayerData(playerId: string, sport: string, props: string[]) {
   const mockGames = Array.from({ length: 20 }, (_, i) => {
     const date = new Date();
     date.setDate(date.getDate() - i);
+    const opponents = ["GSW", "LAC", "PHX", "DEN", "DAL", "SAC", "MEM", "UTA", "POR", "MIN"];
+    
     return {
       game_date: date.toISOString().split("T")[0],
-      opponent: ["GSW", "LAC", "PHX", "DEN", "DAL", "SAC", "MEM"][i % 7],
+      opponent: opponents[i % opponents.length],
       points: Math.floor(Math.random() * 20) + 10,
       rebounds: Math.floor(Math.random() * 10) + 2,
       assists: Math.floor(Math.random() * 10) + 1,
+      steals: Math.floor(Math.random() * 3),
+      blocks: Math.floor(Math.random() * 3),
+      threes: Math.floor(Math.random() * 5),
     };
   });
 
@@ -179,11 +185,4 @@ async function fetchFreshPlayerData(playerId: string): Promise<any | null> {
     injury_description: null,
     stats: mockGames,
   };
-}
-
-function generateStatsHash(stats: any[]): string {
-  const recent = stats.slice(0, 5);
-  const sum = recent.reduce((acc, g) => 
-    acc + (g.points || 0) + (g.rebounds || 0) + (g.assists || 0), 0);
-  return `hash_${sum}_${recent.length}`;
 }
