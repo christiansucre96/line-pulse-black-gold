@@ -35,10 +35,11 @@ export function SubmitLineModal({ open, onOpenChange, player, sport = "nba" }: S
     setStatus(null);
 
     try {
-      const {  { user } } = await supabase.auth.getUser();
+      // ✅ FIX: Correct destructuring syntax
+      const { data: { user } } = await supabase.auth.getUser();
       
       const { error } = await supabase.from("user_submitted_lines").insert({
-        user_id: user?.id || "anonymous",
+        user_id: user?.id || null, // Allow null if anonymous
         sport,
         player_id: player?.id || null,
         player_name: player?.name || "",
@@ -46,15 +47,25 @@ export function SubmitLineModal({ open, onOpenChange, player, sport = "nba" }: S
         bookmaker,
         prop_type: propType,
         line_value: parseFloat(line),
-        odds_american: parseInt(odds.replace("+", "")),
+        odds_american: parseInt(odds.replace("+", "")) || -110,
         status: "pending",
         submitted_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(), // 48h expiry
       });
 
       if (error) throw error;
 
       setStatus({ type: "success", message: "✅ Line submitted! Earn reputation when verified." });
-      setTimeout(() => onOpenChange(false), 1500);
+      
+      // Reset form after success
+      setLine("");
+      setOdds("-110");
+      
+      setTimeout(() => {
+        onOpenChange(false);
+        setStatus(null);
+      }, 1500);
+      
     } catch (err: any) {
       setStatus({ type: "error", message: err.message || "Failed to submit" });
     } finally {
