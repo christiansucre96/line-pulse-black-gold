@@ -112,7 +112,9 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
   }
 
   const games = player.stats?.slice(0, 15) || [];
-  const maxVal = Math.max(...games.map((g: any) => calcCombo(g)));
+  const comboValues = games.map((g: any) => calcCombo(g));
+  const maxVal = Math.max(...comboValues, line * 1.2); // Scale to show line comfortably
+  const chartHeight = 320; // Height in pixels
 
   return (
     <DashboardLayout>
@@ -149,12 +151,12 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-2 mb-6 border-b border-gray-800">
+        <div className="flex gap-2 mb-6 border-b border-gray-800 overflow-x-auto">
           {["overview", "points", "rebounds", "assists", "combo"].map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-4 py-2 font-medium transition ${
+              className={`px-4 py-2 font-medium transition whitespace-nowrap ${
                 activeTab === tab 
                   ? "text-yellow-400 border-b-2 border-yellow-400" 
                   : "text-gray-400 hover:text-yellow-300"
@@ -167,34 +169,37 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
 
         {/* Line Control */}
         <div className="bg-[#0f172a] p-4 rounded-xl mb-6 border border-gray-800">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 flex-wrap">
             <span className="text-gray-400">Line:</span>
             <button 
-              onClick={() => setLine(prev => Math.max(0, prev - 0.5))}
-              className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-yellow-400"
+              onClick={() => setLine(prev => Math.max(0, parseFloat((prev - 0.5).toFixed(1))))}
+              className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-yellow-400 font-bold"
             >
               -
             </button>
-            <span className="text-2xl font-bold text-yellow-400 min-w-[80px] text-center">
+            <span className="text-2xl font-bold text-yellow-400 min-w-[80px] text-center bg-[#020617] px-4 py-2 rounded">
               {line.toFixed(1)}
             </span>
             <button 
-              onClick={() => setLine(prev => prev + 0.5)}
-              className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-yellow-400"
+              onClick={() => setLine(prev => parseFloat((prev + 0.5).toFixed(1)))}
+              className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-yellow-400 font-bold"
             >
               +
             </button>
             <button
-              onClick={() => setLine(calcAvg(player.stats, 10))}
+              onClick={() => setLine(parseFloat(calcAvg(player.stats, 10).toFixed(1)))}
               className="ml-4 text-sm text-gray-400 hover:text-yellow-400 underline"
             >
               Reset to avg
             </button>
+            <div className="ml-auto text-sm text-gray-400">
+              Max: <span className="text-yellow-400 font-bold">{maxVal.toFixed(1)}</span>
+            </div>
           </div>
         </div>
 
         {/* Hit Rates */}
-        <div className="grid grid-cols-4 gap-3 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
           {[5, 10, 15, 20].map(n => (
             <div key={n} className="bg-[#020617] p-4 rounded-xl border border-gray-800 text-center">
               <p className="text-xs text-gray-400 mb-1">L{n}</p>
@@ -208,43 +213,101 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
           ))}
         </div>
 
-        {/* Bar Chart */}
+        {/* Bar Chart - SCALABLE */}
         <div className="bg-[#020617] p-6 rounded-xl mb-6 border border-gray-800">
           <h3 className="text-yellow-400 font-semibold mb-4 flex items-center gap-2">
             <TrendingUp className="h-5 w-5" />
             Last 15 Games Performance
           </h3>
           
-          <div className="flex items-end gap-2 h-64 overflow-x-auto pb-4">
-            {games.map((g: any, i: number) => {
-              const val = calcCombo(g);
-              const height = (val / maxVal) * 100;
-              const isOver = val > line;
-              
-              return (
-                <div key={i} className="flex flex-col items-center flex-shrink-0 w-12">
-                  <div
-                    className={`w-full rounded-t transition-all hover:opacity-80 ${
-                      isOver ? "bg-gradient-to-t from-green-600 to-green-400" : "bg-gradient-to-t from-red-600 to-red-400"
-                    }`}
-                    style={{ height: `${height}%` }}
-                    title={`${g.opponent}: ${val}`}
-                  />
-                  <p className="text-[10px] mt-2 text-gray-400 truncate w-full text-center">
-                    {g.opponent}
-                  </p>
-                  <p className="text-[10px] text-gray-500">
-                    {val}
-                  </p>
-                </div>
-              );
-            })}
+          {/* Chart Container */}
+          <div className="relative" style={{ height: `${chartHeight + 60}px` }}>
+            {/* Y-Axis Labels */}
+            <div className="absolute left-0 top-0 h-full flex flex-col justify-between text-xs text-gray-500 pr-2">
+              <span>{Math.round(maxVal)}</span>
+              <span>{Math.round(maxVal * 0.75)}</span>
+              <span>{Math.round(maxVal * 0.5)}</span>
+              <span>{Math.round(maxVal * 0.25)}</span>
+              <span>0</span>
+            </div>
+
+            {/* Bars Container */}
+            <div className="ml-12 flex items-end gap-2 h-full pb-12 overflow-x-auto">
+              {games.map((g: any, i: number) => {
+                const val = calcCombo(g);
+                const isOver = val > line;
+                const barHeight = (val / maxVal) * chartHeight;
+                const linePosition = chartHeight - ((line / maxVal) * chartHeight);
+                
+                return (
+                  <div key={i} className="flex flex-col items-center flex-shrink-0 w-14 group">
+                    {/* Tooltip */}
+                    <div className="opacity-0 group-hover:opacity-100 absolute mb-1 bg-[#0f172a] border border-gray-700 rounded px-2 py-1 text-xs z-10 pointer-events-none whitespace-nowrap">
+                      <p className="text-yellow-400 font-bold">{g.opponent}</p>
+                      <p className="text-gray-300">{val} {selectedProps.join("+")}</p>
+                      <p className={isOver ? "text-green-400" : "text-red-400"}>
+                        {isOver ? "✓ OVER" : "✗ UNDER"}
+                      </p>
+                    </div>
+
+                    {/* Bar */}
+                    <div
+                      className={`w-full rounded-t transition-all duration-300 ${
+                        isOver 
+                          ? "bg-gradient-to-t from-green-700 to-green-400 hover:from-green-600 hover:to-green-300" 
+                          : "bg-gradient-to-t from-red-700 to-red-400 hover:from-red-600 hover:to-red-300"
+                      }`}
+                      style={{ height: `${barHeight}px` }}
+                    />
+                    
+                    {/* Opponent Label */}
+                    <p className="text-[10px] mt-2 text-gray-400 truncate w-full text-center font-medium">
+                      {g.opponent}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Scalable Line Marker */}
+            <div 
+              className="absolute left-12 right-0 border-t-2 border-dashed border-yellow-500 pointer-events-none"
+              style={{ 
+                top: `${((line / maxVal) * chartHeight)}px`,
+                height: '2px'
+              }}
+            >
+              {/* Line Label */}
+              <div className="absolute -left-16 -top-3 bg-yellow-500 text-black text-xs font-bold px-2 py-0.5 rounded">
+                Line: {line.toFixed(1)}
+              </div>
+            </div>
+
+            {/* Grid Lines */}
+            <div className="absolute left-12 right-0 top-0 h-full pointer-events-none">
+              {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => (
+                <div 
+                  key={i}
+                  className="absolute w-full border-t border-gray-800"
+                  style={{ top: `${ratio * chartHeight}px` }}
+                />
+              ))}
+            </div>
           </div>
 
-          {/* Line Marker */}
-          <div className="border-t-2 border-dashed border-yellow-500/50 mt-2 relative pt-2">
-            <div className="absolute -top-6 left-0 text-xs text-yellow-500 font-medium bg-[#020617] px-2 py-1 rounded">
-              Line: {line.toFixed(1)}
+          {/* Legend */}
+          <div className="flex gap-6 mt-4 text-sm">
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 bg-gradient-to-t from-green-700 to-green-400 rounded" />
+              <span className="text-gray-400">Over Line</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 bg-gradient-to-t from-red-700 to-red-400 rounded" />
+              <span className="text-gray-400">Under Line</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-0.5 border-t-2 border-dashed border-yellow-500" />
+              <span className="text-gray-400">Your Line</span>
             </div>
           </div>
         </div>
@@ -267,7 +330,7 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
                   <th className="p-3 text-right text-yellow-400">PTS</th>
                   <th className="p-3 text-right text-yellow-400">REB</th>
                   <th className="p-3 text-right text-yellow-400">AST</th>
-                  <th className="p-3 text-right text-yellow-400">Combo</th>
+                  <th className="p-3 text-right text-yellow-400">Total</th>
                   <th className="p-3 text-center text-yellow-400">Result</th>
                 </tr>
               </thead>
@@ -282,11 +345,11 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
                         isOver ? "bg-green-900/5" : "bg-red-900/5"
                       }`}
                     >
-                      <td className="p-3 text-gray-300">{g.opponent}</td>
+                      <td className="p-3 text-gray-300 font-medium">{g.opponent}</td>
                       <td className="p-3 text-gray-400">{g.game_date}</td>
-                      <td className={`p-3 text-right ${isOver ? "text-green-400 font-medium" : ""}`}>{g.points}</td>
-                      <td className="p-3 text-right text-gray-400">{g.rebounds}</td>
-                      <td className="p-3 text-right text-gray-400">{g.assists}</td>
+                      <td className="p-3 text-right text-gray-300">{g.points}</td>
+                      <td className="p-3 text-right text-gray-300">{g.rebounds}</td>
+                      <td className="p-3 text-right text-gray-300">{g.assists}</td>
                       <td className={`p-3 text-right font-bold ${isOver ? "text-green-400" : "text-red-400"}`}>
                         {combo}
                       </td>
