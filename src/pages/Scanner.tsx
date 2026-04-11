@@ -1,211 +1,171 @@
+// src/pages/Scanner.tsx
 import { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/DashboardLayout";
+import { PlayerDetailView } from "@/components/PlayerDetailView";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Search, User, ArrowLeft } from "lucide-react";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
-const SPORTS = ["nba", "nfl", "mlb", "nhl"];
-
-const PROP_OPTIONS = [
-  { label: "Points", value: ["points"] },
-  { label: "Rebounds", value: ["rebounds"] },
-  { label: "Assists", value: ["assists"] },
-  { label: "Pts+Reb", value: ["points", "rebounds"] },
-  { label: "Pts+Ast", value: ["points", "assists"] },
-  { label: "Reb+Ast", value: ["rebounds", "assists"] },
-  { label: "PRA", value: ["points", "rebounds", "assists"] },
-];
-
 export default function Scanner() {
-  const [sport, setSport] = useState("nba");
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  
   const [players, setPlayers] = useState<any[]>([]);
-  const [selectedProps, setSelectedProps] = useState<string[]>(["points"]);
-  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  
+  // 👇 If playerId is in URL, show PlayerDetailView instead of list
+  const playerId = searchParams.get("playerId") || searchParams.get("player");
 
   useEffect(() => {
+    if (playerId) return; // Don't fetch list if viewing single player
     fetchPlayers();
-  }, [sport]);
+  }, [playerId]);
 
   const fetchPlayers = async () => {
     setLoading(true);
+    setError(null);
+    
     try {
-      const res = await fetch(EDGE_URL, {
+      const response = await fetch(EDGE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ operation: "get_players_with_stats", sport }),
+        body: JSON.stringify({
+          operation: "get_players_with_stats",
+          sport: "nba",
+          search: searchQuery || undefined,
+        }),
       });
 
-      const data = await res.json();
-      if (data.success) setPlayers(data.players);
-    } catch (err) {
-      console.error(err);
+      const data = await response.json();
+      
+      if (!data.success) {
+        throw new Error(data.error || "Failed to fetch players");
+      }
+
+      setPlayers(data.players || []);
+    } catch (err: any) {
+      console.error("❌ Fetch error:", err);
+      setError(err.message || "Failed to load players");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
-  // -------- LOGIC --------
-  const calcCombo = (g: any) =>
-    selectedProps.reduce((sum, stat) => sum + (g[stat] || 0), 0);
-
-  const avg = (games: any[], n: number) => {
-    const slice = games.slice(0, n);
-    if (!slice.length) return 0;
-    return slice.reduce((a, g) => a + calcCombo(g), 0) / slice.length;
+  const handlePlayerClick = (playerId: string) => {
+    // Navigate to same page but with playerId param
+    navigate(`/scanner?playerId=${playerId}`);
   };
 
-  const hitRate = (games: any[], line: number, n: number) => {
-    const slice = games.slice(0, n);
-    if (!slice.length) return 0;
-    const hits = slice.filter(g => calcCombo(g) > line).length;
-    return Math.round((hits / slice.length) * 100);
+  const handleBack = () => {
+    // Remove playerId param to go back to list
+    navigate("/scanner");
   };
 
-  const getStreak = (games: any[], line: number) => {
-    let streak = 0;
-    for (let g of games) {
-      if (calcCombo(g) > line) streak++;
-      else break;
-    }
-    return streak;
-  };
+  // 👇 If viewing single player, show PlayerDetailView
+  if (playerId) {
+    return <PlayerDetailView playerId={playerId} onBack={handleBack} />;
+  }
 
-  const getColor = (val: number) => {
-    if (val >= 80) return "bg-green-600/80";
-    if (val >= 60) return "bg-green-500/50";
-    if (val >= 40) return "bg-yellow-500/40";
-    return "bg-red-600/70";
-  };
-
-  const getDiffColor = (val: number) =>
-    val > 0 ? "text-green-400" : "text-red-400";
-
-  // -------- PROCESS --------
-  const processed = players.map(p => {
-    const games = p.stats || [];
-
-    const line = avg(games, 10);
-
-    return {
-      ...p,
-      line,
-      avg10: line,
-      diff: avg(games, 5) - line,
-      l5: hitRate(games, line, 5),
-      l10: hitRate(games, line, 10),
-      l15: hitRate(games, line, 15),
-      l20: hitRate(games, line, 20),
-      streak: getStreak(games, line),
-    };
-  });
-
-  const filtered = processed.filter(p =>
-    p.name.toLowerCase().includes(search.toLowerCase())
-  );
-
+  // 👇 Otherwise show player list
   return (
     <DashboardLayout>
-      <div className="p-4">
-
-        {/* HEADER */}
-        <div className="flex flex-col md:flex-row gap-3 mb-4">
-
-          <input
-            placeholder="Search player..."
-            className="bg-[#0f172a] border border-gray-700 px-4 py-2 rounded-lg w-full"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-
-          <select
-            value={sport}
-            onChange={(e) => setSport(e.target.value)}
-            className="bg-[#0f172a] border border-gray-700 px-4 py-2 rounded-lg"
-          >
-            {SPORTS.map(s => (
-              <option key={s}>{s.toUpperCase()}</option>
-            ))}
-          </select>
+      <div className="p-4 max-w-4xl mx-auto">
+        
+        {/* Header */}
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold mb-2">🏀 NBA Player Scanner</h1>
+          <p className="text-gray-400 text-sm">
+            Find players with betting edges. Click a player to see detailed stats.
+          </p>
         </div>
 
-        {/* PROP CHIPS */}
-        <div className="flex flex-wrap gap-2 mb-4">
-          {PROP_OPTIONS.map(opt => {
-            const active =
-              JSON.stringify(opt.value) === JSON.stringify(selectedProps);
+        {/* Search */}
+        <div className="flex gap-2 mb-6">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Input
+              placeholder="Search players..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10"
+              onKeyDown={(e) => e.key === "Enter" && fetchPlayers()}
+            />
+          </div>
+          <Button onClick={fetchPlayers} disabled={loading}>
+            {loading ? "Loading..." : "Search"}
+          </Button>
+        </div>
 
-            return (
+        {/* Error State */}
+        {error && (
+          <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 mb-6">
+            <p className="text-red-400">❌ {error}</p>
+            <Button variant="outline" size="sm" className="mt-2" onClick={fetchPlayers}>
+              Try Again
+            </Button>
+          </div>
+        )}
+
+        {/* Loading State */}
+        {loading && (
+          <div className="text-center py-12">
+            <div className="animate-spin h-8 w-8 border-2 border-gray-400 border-t-transparent rounded-full mx-auto mb-4" />
+            <p className="text-gray-400">Loading players...</p>
+          </div>
+        )}
+
+        {/* Empty State */}
+        {!loading && !error && players.length === 0 && (
+          <div className="text-center py-12 bg-[#020617] rounded-xl border border-gray-800">
+            <User className="h-12 w-12 text-gray-500 mx-auto mb-4" />
+            <p className="text-gray-400">
+              {searchQuery ? `No players found for "${searchQuery}"` : "No players available"}
+            </p>
+            {searchQuery && (
+              <Button variant="link" onClick={() => { setSearchQuery(""); fetchPlayers(); }} className="mt-2">
+                Clear search
+              </Button>
+            )}
+          </div>
+        )}
+
+        {/* Players List */}
+        {!loading && !error && players.length > 0 && (
+          <div className="grid gap-3">
+            {players.map((player) => (
               <button
-                key={opt.label}
-                onClick={() => setSelectedProps(opt.value)}
-                className={`px-3 py-1 rounded-full text-sm transition ${
-                  active
-                    ? "bg-purple-600 text-white"
-                    : "bg-gray-800 text-gray-400 hover:bg-gray-700"
-                }`}
+                key={player.player_id}
+                onClick={() => handlePlayerClick(player.player_id)}
+                className="flex items-center justify-between p-4 bg-[#020617] hover:bg-[#0f172a] border border-gray-800 rounded-xl text-left transition group"
               >
-                {opt.label}
+                <div className="flex items-center gap-4">
+                  <div className="h-12 w-12 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold">
+                    {player.full_name.split(" ").map(n => n[0]).join("").slice(0, 2)}
+                  </div>
+                  <div>
+                    <h3 className="font-semibold group-hover:text-blue-400 transition">
+                      {player.full_name}
+                    </h3>
+                    <p className="text-sm text-gray-400">
+                      {player.team} • {player.position}
+                    </p>
+                  </div>
+                </div>
+                
+                <div className="text-right text-sm">
+                  <p className="text-green-400 font-medium">{player.avg_points?.toFixed(1)} PPG</p>
+                  <p className="text-gray-500">{player.avg_rebounds?.toFixed(1)} REB • {player.avg_assists?.toFixed(1)} AST</p>
+                </div>
               </button>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        )}
 
-        {/* TABLE */}
-        <div className="rounded-xl overflow-hidden border border-gray-800">
-
-          <table className="w-full text-sm">
-
-            <thead className="bg-[#020617] text-gray-400">
-              <tr>
-                <th className="p-3 text-left">Player</th>
-                <th>Line</th>
-                <th>Avg</th>
-                <th>Diff</th>
-                <th>L5</th>
-                <th>L10</th>
-                <th>L15</th>
-                <th>L20</th>
-                <th>Strk</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={9} className="text-center p-6">
-                    Loading...
-                  </td>
-                </tr>
-              ) : (
-                filtered.map((p, i) => (
-                  <tr key={i} className="border-t border-gray-800 hover:bg-gray-900/40">
-
-                    <td className="p-3 font-semibold">
-                      {p.name}
-                    </td>
-
-                    <td>{p.line.toFixed(1)}</td>
-                    <td>{p.avg10.toFixed(1)}</td>
-
-                    <td className={getDiffColor(p.diff)}>
-                      {p.diff.toFixed(1)}
-                    </td>
-
-                    <td className={`${getColor(p.l5)} text-center`}>{p.l5}%</td>
-                    <td className={`${getColor(p.l10)} text-center`}>{p.l10}%</td>
-                    <td className={`${getColor(p.l15)} text-center`}>{p.l15}%</td>
-                    <td className={`${getColor(p.l20)} text-center`}>{p.l20}%</td>
-
-                    <td className="text-center font-bold">
-                      {p.streak}
-                    </td>
-
-                  </tr>
-                ))
-              )}
-            </tbody>
-
-          </table>
-        </div>
       </div>
     </DashboardLayout>
   );
