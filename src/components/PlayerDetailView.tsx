@@ -7,6 +7,10 @@ import { Badge } from "@/components/ui/badge";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
+// ─────────────────────────────────────────────────────────────
+// 🌍 FULL PROP CONFIGURATION
+// ─────────────────────────────────────────────────────────────
+
 const PROP_GROUPS: Record<string, { id: string; label: string; stackKeys?: string[]; isBoolean?: boolean }[]> = {
   nba: [
     { id: "points", label: "PTS" }, { id: "rebounds", label: "REB" }, { id: "assists", label: "AST" },
@@ -140,8 +144,9 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
   const maxTeamVal = Math.max(1, ...teamValues, teamLine * 1.2);
   const teamLineTop = ((maxTeamVal - teamLine) / maxTeamVal) * 100;
 
+  // ✅ FIXED: Corrected function signature (added 'data:' parameter name)
   const renderChart = (
-     any[],
+    data: any[],
     line: number,
     lineTopPercent: number,
     max: number,
@@ -203,7 +208,7 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
     <DashboardLayout>
       <div className="p-4 max-w-7xl mx-auto space-y-6">
         
-        {/* ── HEADER ── */}
+        {/* ── HEADER ─ */}
         <div className="flex items-center justify-between">
           <button onClick={onBack} className="flex items-center gap-2 text-gray-400 hover:text-yellow-400 transition">
             <ArrowLeft size={20} /> Back
