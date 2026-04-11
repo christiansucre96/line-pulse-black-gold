@@ -62,6 +62,7 @@ export default function Scanner() {
     setLoading(true);
     setError(null);
     try {
+      // ✅ FIX: Send as array 'bookmakers' to match Edge Function expectation
       const response = await fetch(EDGE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -70,7 +71,7 @@ export default function Scanner() {
           sport,
           search: searchQuery || undefined,
           props: selectedProps,
-          bookmaker: selectedBookmaker,
+          bookmakers: [selectedBookmaker], 
         }),
       });
       const data = await response.json();
@@ -154,7 +155,7 @@ export default function Scanner() {
             <Input placeholder="Search players..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="pl-10 bg-[#0f172a] border-gray-700 text-yellow-400" />
           </div>
 
-          {/* ✅ Sportsbook Selector (Safe Select Component) */}
+          {/* ✅ Sportsbook Selector */}
           <Select value={selectedBookmaker} onValueChange={setSelectedBookmaker}>
             <SelectTrigger className="bg-[#0f172a] border-gray-700 text-yellow-400 justify-between">
               <SelectValue placeholder="Select Book" />
@@ -232,8 +233,9 @@ export default function Scanner() {
                         </div>
                       </td>
                       <td className="p-4">
+                        {/* ✅ FIX: Show API data, fallback to selected book if API is slow */}
                         <Badge variant="outline" className="border-gray-600 text-gray-300">
-                          {p.bookmaker || "-"}
+                          {p.bookmaker || selectedBookmaker}
                         </Badge>
                       </td>
                       <td className="p-4">
