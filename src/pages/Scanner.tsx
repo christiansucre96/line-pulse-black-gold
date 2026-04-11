@@ -112,6 +112,15 @@ export default function Scanner() {
 
   const currentProps = PROP_TYPES[sport as keyof typeof PROP_TYPES] || PROP_TYPES.nba;
 
+  // Get prop display name
+  const getPropDisplayName = () => {
+    if (selectedProps.length === 1) {
+      const prop = currentProps.find(p => p.id === selectedProps[0]);
+      return prop ? prop.label.toUpperCase() : selectedProps[0].toUpperCase();
+    }
+    return selectedProps.join("+").toUpperCase();
+  };
+
   const SortHeader = ({ label, sortKey }: { label: string; sortKey: string }) => (
     <th 
       className="p-4 text-left text-yellow-400 font-semibold cursor-pointer hover:text-yellow-300 select-none"
@@ -199,7 +208,7 @@ export default function Scanner() {
                           <div className="h-10 w-10 rounded-full bg-gradient-to-br from-yellow-500 to-yellow-700 flex items-center justify-center text-black font-bold text-sm">{p.full_name.split(" ").map(n=>n[0]).join("").slice(0,2)}</div>
                           <div>
                             <p className="font-semibold text-yellow-400">{p.full_name}</p>
-                            <p className="text-xs text-gray-400">{p.team} • L{p.line} {selectedProps.join("+").toUpperCase()}</p>
+                            <p className="text-xs text-gray-400">{p.team} • {getPropDisplayName()}</p>
                           </div>
                         </div>
                       </td>
