@@ -5,7 +5,13 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
-export function PlayerDetailView({ playerId, onBack }: { playerId: string; onBack: () => void }) {
+// 👇 Added proper types for props to prevent errors
+interface PlayerDetailViewProps {
+  playerId: string;
+  onBack: () => void;
+}
+
+export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
   const [player, setPlayer] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -13,56 +19,78 @@ export function PlayerDetailView({ playerId, onBack }: { playerId: string; onBac
   const [line, setLine] = useState(0);
   const [cacheInfo, setCacheInfo] = useState<{ cached: boolean; age?: number } | null>(null);
 
+  // 👇 Effect: Only fetch when playerId is actually available
   useEffect(() => {
-    if (playerId) {
+    if (playerId && typeof playerId === "string" && playerId.trim() !== "") {
       fetchPlayer();
+    } else {
+      console.log("⏳ Waiting for valid playerId...");
+      setLoading(false);
     }
   }, [playerId]);
 
   const fetchPlayer = async () => {
-    setLoading(true);
-    setError(null);
-    
-    // 👇 Safety check: ensure playerId is valid
-    if (!playerId || typeof playerId !== "string") {
+    // 👇 GUARD: Double-check playerId before fetching
+    if (!playerId || typeof playerId !== "string" || playerId.trim() === "") {
+      console.warn("⚠️  Skipping fetch: invalid playerId", playerId);
       setError("Invalid player ID");
       setLoading(false);
       return;
     }
 
+    setLoading(true);
+    setError(null);
     console.log("🎯 Fetching player:", playerId);
 
     try {
+      // 👇 Prepare body FIRST, then stringify (prevents JSON errors)
+      const requestBody = {
+        operation: "get_player_details",
+        player_id: playerId,
+      };
+      const bodyString = JSON.stringify(requestBody);
+      console.log("📤 Request body:", bodyString);
+
+      // 👇 FIXED: Removed 'apikey' header - Edge Functions use server-side env vars
       const res = await fetch(EDGE_URL, {
         method: "POST",
         headers: { 
-          "Content-Type": "application/json",
-          "apikey": import.meta.env.VITE_SUPABASE_ANON_KEY || ""
+          "Content-Type": "application/json"
+          // ✅ NO apikey header needed here
         },
-        body: JSON.stringify({
-          operation: "get_player_details",
-          player_id: playerId,
-        }),
+        body: bodyString,
       });
 
-      const data = await res.json();
-      console.log("📦 Response:", data);
+      // 👇 FIXED: Read as text first to debug empty responses
+      const responseText = await res.text();
+      console.log("📥 Raw response text:", responseText.substring(0, 300));
+      
+      // Parse JSON safely
+      let data;
+      try {
+        data = responseText ? JSON.parse(responseText) : { success: false, error: "Empty response from server" };
+      } catch (parseErr) {
+        console.error("❌ JSON parse error:", parseErr, "Raw text:", responseText);
+        throw new Error(`Invalid response format: ${parseErr instanceof Error ? parseErr.message : 'Unknown'}`);
+      }
+      
+      console.log("📦 Parsed data:", data);
 
       if (!res.ok) {
-        throw new Error(data.error || `HTTP ${res.status}`);
+        throw new Error(data.error || `HTTP ${res.status}: ${res.statusText}`);
       }
 
       if (!data.success) {
-        throw new Error(data.error || "Unknown error from server");
+        throw new Error(data.error || "Server returned success: false");
       }
 
+      // ✅ Success — update state
       setPlayer(data.player);
       setCacheInfo({ 
         cached: data.cached, 
         age: data.cache_age_hours 
       });
       
-      // Set initial line to 10-game average
       const avg = calcAvg(data.player.stats, 10);
       setLine(avg);
       
@@ -79,21 +107,25 @@ export function PlayerDetailView({ playerId, onBack }: { playerId: string; onBac
     selectedProps.reduce((sum, stat) => sum + (g[stat] || 0), 0);
 
   const calcAvg = (games: any[], n: number) => {
+    if (!games || games.length === 0) return 0;
     const slice = games.slice(0, n);
     if (!slice.length) return 0;
     return slice.reduce((a, g) => a + calcCombo(g), 0) / slice.length;
   };
 
   const hitRate = (games: any[], n: number) => {
+    if (!games || games.length === 0) return 0;
     const slice = games.slice(0, n);
     if (!slice.length) return 0;
-    const hits = slice.filter(g => calcCombo(g) > line).length;
+    const hits = slice.filter((g: any) => calcCombo(g) > line).length;
     return Math.round((hits / slice.length) * 100);
   };
 
   const maxStat = (key: string) => {
     if (!player?.stats?.length) return 0;
-    return Math.max(...player.stats.map((g: any) => g[key] || 0));
+    const values = player.stats.map((g: any) => g[key] || 0).filter((v: any) => typeof v === 'number');
+    if (values.length === 0) return 0;
+    return Math.max(...values);
   };
 
   // -------- UI STATES --------
@@ -101,7 +133,7 @@ export function PlayerDetailView({ playerId, onBack }: { playerId: string; onBac
     return (
       <DashboardLayout>
         <div className="p-10 flex flex-col items-center justify-center min-h-[400px]">
-          <RefreshCw className="animate-spin mb-4" />
+          <RefreshCw className="animate-spin mb-4 h-8 w-8 text-gray-400" />
           <p className="text-gray-400">Loading player data...</p>
           {cacheInfo?.cached && (
             <p className="text-xs text-green-400 mt-2">✓ Using cached data</p>
@@ -115,14 +147,15 @@ export function PlayerDetailView({ playerId, onBack }: { playerId: string; onBac
     return (
       <DashboardLayout>
         <div className="p-10">
-          <button onClick={onBack} className="flex items-center gap-2 mb-6 text-gray-400 hover:text-white">
+          <button onClick={onBack} className="flex items-center gap-2 mb-6 text-gray-400 hover:text-white transition">
             <ArrowLeft size={16} /> Back
           </button>
           <div className="bg-red-900/20 border border-red-800 rounded-lg p-6 text-center">
             <p className="text-red-400 font-medium mb-2">❌ {error || "No player found"}</p>
+            <p className="text-xs text-gray-500 mb-4">Player ID: {playerId}</p>
             <button 
               onClick={fetchPlayer}
-              className="mt-4 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded text-sm"
+              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded text-sm transition"
             >
               Try Again
             </button>
@@ -140,16 +173,16 @@ export function PlayerDetailView({ playerId, onBack }: { playerId: string; onBac
 
         {/* BACK + CACHE STATUS */}
         <div className="flex items-center justify-between mb-4">
-          <button onClick={onBack} className="flex items-center gap-2 text-gray-400 hover:text-white">
+          <button onClick={onBack} className="flex items-center gap-2 text-gray-400 hover:text-white transition">
             <ArrowLeft size={16} /> Back
           </button>
           
           {/* Cache badge */}
           {cacheInfo && (
-            <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs ${
+            <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs border ${
               cacheInfo.cached 
-                ? "bg-green-900/30 text-green-400 border border-green-800" 
-                : "bg-blue-900/30 text-blue-400 border border-blue-800"
+                ? "bg-green-900/30 text-green-400 border-green-800" 
+                : "bg-blue-900/30 text-blue-400 border-blue-800"
             }`}>
               <Database size={12} />
               {cacheInfo.cached 
@@ -175,7 +208,7 @@ export function PlayerDetailView({ playerId, onBack }: { playerId: string; onBac
           </div>
 
           {/* PLAYER MAX PANEL */}
-          <div className="bg-[#0f172a] p-4 rounded-xl text-sm">
+          <div className="bg-[#0f172a] p-4 rounded-xl text-sm border border-gray-800">
             <p>Max Points: {maxStat("points")}</p>
             <p>Max Rebounds: {maxStat("rebounds")}</p>
             <p>Max Assists: {maxStat("assists")}</p>
@@ -257,7 +290,7 @@ export function PlayerDetailView({ playerId, onBack }: { playerId: string; onBac
             <h3 className="font-medium">Recent Games</h3>
             <button 
               onClick={fetchPlayer}
-              className="text-xs text-gray-400 hover:text-white flex items-center gap-1"
+              className="text-xs text-gray-400 hover:text-white flex items-center gap-1 transition"
             >
               <RefreshCw size={12} /> Refresh
             </button>
