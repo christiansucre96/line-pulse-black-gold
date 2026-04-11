@@ -1,15 +1,27 @@
-// src/components/PlayerDetailView.tsx
-import { useEffect, useState } from "react";
-import { ArrowLeft, Activity, Minus, Plus } from "lucide-react";
+// src/pages/Scanner.tsx
+import { useEffect, useState, useMemo } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { createClient } from "@supabase/supabase-js";
 import { DashboardLayout } from "@/components/DashboardLayout";
+import { PlayerDetailView } from "@/components/PlayerDetailView";
+import { SubmitLineModal } from "@/components/SubmitLineModal";
+import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
+  DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent,
+  DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Search, ChevronDown, ArrowUpDown, TrendingUp, PlusCircle } from "lucide-react";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
-
-// ─────────────────────────────────────────────────────────────
-// 🌍 FULL PROP CONFIGURATION
-// ─────────────────────────────────────────────────────────────
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL!,
+  import.meta.env.VITE_SUPABASE_ANON_KEY!
+);
 
 const PROP_GROUPS: Record<string, { id: string; label: string; stackKeys?: string[]; isBoolean?: boolean }[]> = {
   nba: [
@@ -58,288 +70,280 @@ const PROP_GROUPS: Record<string, { id: string; label: string; stackKeys?: strin
   ]
 };
 
-interface PlayerDetailViewProps {
-  playerId: string;
-  sport: string;
-  selectedProps: string[];
-  onBack: () => void;
-}
+const SPORTSBOOKS = ["Stake", "BetOnline", "DraftKings", "FanDuel"];
 
-export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: PlayerDetailViewProps) {
-  const [player, setPlayer] = useState<any>(null);
+export default function Scanner() {
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  
+  const [sport, setSport] = useState("nba");
+  const [players, setPlayers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedProps, setSelectedProps] = useState<string[]>(["points"]);
+  const [selectedBookmaker, setSelectedBookmaker] = useState<string>("Stake");
+  const [viewMode, setViewMode] = useState<"all" | "over" | "under">("all");
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" } | null>(null);
+  const [showSubmitModal, setShowSubmitModal] = useState(false);
+  
+  const playerId = searchParams.get("playerId");
 
-  const [chartView, setChartView] = useState<5 | 10 | 15 | 20>(10);
-  const [selectedPlayerProp, setSelectedPlayerProp] = useState<string>(sport === "nba" ? "PRA" : "points"); 
-  const [playerLine, setPlayerLine] = useState(1);
+  useEffect(() => {
+    if (playerId) return;
+    fetchData();
+  }, [sport, searchQuery, selectedProps, selectedBookmaker]);
 
-  const [selectedTeamProp, setSelectedTeamProp] = useState<string>("points");
-  const [teamLine, setTeamLine] = useState(1);
-
-  useEffect(() => { fetchPlayer(); }, [playerId]);
-
-  const fetchPlayer = async () => {
+  const fetchData = async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(EDGE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ operation: "get_player_details", player_id: playerId, sport, props: selectedProps }),
+      const [edgeRes, linesRes] = await Promise.all([
+        fetch(EDGE_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            operation: "get_players_with_stats",
+            sport,
+            search: searchQuery || undefined,
+            props: selectedProps,
+            bookmakers: [selectedBookmaker],
+          }),
+        }),
+        supabase
+          .from("user_submitted_lines")
+          .select("*")
+          .eq("sport", sport)
+          .eq("status", "verified")
+          .eq("bookmaker", selectedBookmaker)
+          .gte("submitted_at", new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString())
+          .order("submitted_at", { ascending: false })
+      ]);
+
+      const edgeData = await edgeRes.json();
+      const {  communityLines } = linesRes;
+
+      if (!edgeData.success) throw new Error(edgeData.error || "Failed to fetch stats");
+
+      const merged = (edgeData.players || []).map((p: any) => {
+        const matchingLine = (communityLines || []).find(
+          (l: any) => l.player_name?.toLowerCase() === p.full_name?.toLowerCase() && l.prop_type === selectedProps[0]
+        );
+        return {
+          ...p,
+          line: matchingLine ? matchingLine.line_value.toFixed(1) : p.line,
+          bookmaker: matchingLine ? matchingLine.bookmaker : p.bookmaker,
+          isCommunity: !!matchingLine,
+        };
       });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error || "Failed");
-      
-      setPlayer(data.player);
-      const pAvg = calcAvgForProp(data.player.stats, 10, selectedPlayerProp);
-      setPlayerLine(Math.max(1, pAvg));
-      const tAvg = calcAvgForProp(data.player.stats, 10, selectedTeamProp);
-      setTeamLine(Math.max(1, tAvg));
+
+      setPlayers(merged);
     } catch (err: any) {
-      setError(err.message || "Failed to load");
-    } finally { setLoading(false); }
-  };
-
-  const getPropValue = (game: any, propId: string) => {
-    const group = PROP_GROUPS[sport]?.find(g => g.id === propId);
-    if (!group) return 0;
-    if (group.stackKeys) {
-      return group.stackKeys.reduce((sum, key) => sum + (game[key] || 0), 0);
+      setError(err.message || "Failed to load data");
+    } finally {
+      setLoading(false);
     }
-    if (group.isBoolean) {
-      if (propId === "doubleDouble") return ((game.points||0) >= 10 && (game.rebounds||0) >= 10) ? 1 : 0;
-      if (propId === "tripleDouble") return ((game.points||0) >= 10 && (game.rebounds||0) >= 10 && (game.assists||0) >= 10) ? 1 : 0;
-      if (propId.includes("TD") || propId.includes("Goal") || propId.includes("HR")) return (game.goals || game.rushTD || game.passTD || game.homeRuns || 0) > 0 ? 1 : 0;
-      return 0;
+  };
+
+  const sortedPlayers = useMemo(() => {
+    let sorted = [...players];
+    if (sortConfig) {
+      sorted.sort((a, b) => {
+        const aVal = a[sortConfig.key];
+        const bVal = b[sortConfig.key];
+        if (typeof aVal === "string") return sortConfig.direction === "asc" ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+        return sortConfig.direction === "asc" ? (aVal || 0) - (bVal || 0) : (bVal || 0) - (aVal || 0);
+      });
     }
-    return game[propId] || 0;
+    if (viewMode === "over") sorted = sorted.filter(p => (p.avgL10 || 0) > parseFloat(p.line || "0"));
+    if (viewMode === "under") sorted = sorted.filter(p => (p.avgL10 || 0) <= parseFloat(p.line || "0"));
+    return sorted;
+  }, [players, sortConfig, viewMode]);
+
+  const requestSort = (key: string) => {
+    setSortConfig(prev => {
+      if (prev?.key === key) return { key, direction: prev.direction === "asc" ? "desc" : "asc" };
+      return { key, direction: "desc" };
+    });
   };
 
-  const calcAvgForProp = (games: any[], n: number, propId: string) => {
-    if (!games?.length) return 0;
-    const slice = games.slice(0, n);
-    return slice.reduce((sum, g) => sum + getPropValue(g, propId), 0) / slice.length;
-  };
+  const handlePlayerClick = (id: string) => navigate(`/scanner?playerId=${id}&sport=${sport}&props=${selectedProps.join(",")}`);
+  const handleBack = () => navigate("/scanner");
 
-  const calcHitRate = (games: any[], n: number, propId: string, line: number) => {
-    if (!games?.length) return 0;
-    const slice = games.slice(0, n);
-    const hits = slice.filter(g => getPropValue(g, propId) > line).length;
-    return Math.round((hits / slice.length) * 100);
-  };
+  if (playerId) return <PlayerDetailView playerId={playerId} sport={sport} selectedProps={selectedProps} onBack={handleBack} />;
 
-  if (loading) return <DashboardLayout><div className="p-20 text-center text-yellow-400">Loading...</div></DashboardLayout>;
-  if (error) return <DashboardLayout><div className="p-20 text-center text-red-400">{error}</div></DashboardLayout>;
-  if (!player) return <DashboardLayout><div className="p-20 text-center">No data</div></DashboardLayout>;
+  const currentProps = PROP_GROUPS[sport as keyof typeof PROP_GROUPS] || PROP_GROUPS.nba;
 
-  const games = player.stats || [];
-  const chartGames = games.slice(0, chartView);
-  
-  const playerValues = chartGames.map(g => getPropValue(g, selectedPlayerProp));
-  const maxVal = Math.max(1, ...playerValues, playerLine * 1.2);
-  const playerLineTop = ((maxVal - playerLine) / maxVal) * 100;
-
-  const teamValues = games.slice(0, 10).map(g => getPropValue(g, selectedTeamProp));
-  const maxTeamVal = Math.max(1, ...teamValues, teamLine * 1.2);
-  const teamLineTop = ((maxTeamVal - teamLine) / maxTeamVal) * 100;
-
-  const renderChart = (
-     any[],
-    line: number,
-    lineTopPercent: number,
-    max: number,
-    propId: string,
-    heightClass: string = "h-64"
-  ) => (
-    <div className={`${heightClass} w-full flex items-end justify-between gap-1 pb-8 relative border-b border-gray-800`}>
-      <div className="absolute left-0 top-0 bottom-8 w-12 flex flex-col justify-between text-[10px] text-gray-500 pr-2 text-right pointer-events-none">
-        <span>{Math.round(max)}</span>
-        <span>{Math.round(max / 2)}</span>
-        <span>0</span>
+  const SortHeader = ({ label, sortKey }: { label: string; sortKey: string }) => (
+    <th 
+      className="p-4 text-left text-yellow-400 font-semibold cursor-pointer hover:text-yellow-300 select-none"
+      onClick={() => requestSort(sortKey)}
+    >
+      <div className="flex items-center gap-1">
+        {label}
+        <ArrowUpDown className={`h-3 w-3 ${sortConfig?.key === sortKey ? "text-yellow-400" : "text-gray-600"}`} />
       </div>
-
-      <div 
-        className="absolute left-12 right-0 border-t-2 border-dashed border-yellow-500/80 pointer-events-none z-20"
-        style={{ top: `${lineTopPercent}%` }}
-      >
-        <div className="absolute -left-16 -top-2 bg-yellow-500 text-black text-[10px] font-bold px-1.5 py-0.5 rounded">
-          Line: {line.toFixed(1)}
-        </div>
-      </div>
-
-      <div className="absolute left-12 right-0 top-0 bottom-8 pointer-events-none">
-        <div className="absolute w-full border-t border-gray-800/50" style={{ top: "25%" }} />
-        <div className="absolute w-full border-t border-gray-800/50" style={{ top: "50%" }} />
-        <div className="absolute w-full border-t border-gray-800/50" style={{ top: "75%" }} />
-      </div>
-
-      <div className="ml-14 flex items-end justify-between gap-1 w-full h-full">
-        {data.map((g: any, i: number) => {
-          const val = getPropValue(g, propId);
-          const isOver = val > line;
-          const barHeight = Math.max(4, (val / max) * 100);
-          return (
-            <div key={i} className="flex-1 flex flex-col items-center group relative h-full">
-              <div className="opacity-0 group-hover:opacity-100 absolute -top-10 bg-[#0f172a] border border-gray-700 text-xs p-2 rounded z-30 pointer-events-none whitespace-nowrap transition-opacity">
-                <p className="text-yellow-400 font-bold">{g.opponent} ({g.game_date})</p>
-                <p className={isOver ? "text-green-400" : "text-red-400"}>Val: {val} {isOver ? "✓" : "✗"}</p>
-              </div>
-              <div className="w-full flex flex-col justify-end h-full relative">
-                <div 
-                  className={`w-full rounded-t-sm transition-all duration-300 ${
-                    isOver ? "bg-gradient-to-t from-green-800 to-green-500" : "bg-gradient-to-t from-red-800 to-red-500"
-                  }`}
-                  style={{ height: `${barHeight}%` }}
-                />
-              </div>
-              <div className="absolute -bottom-6 w-full text-center">
-                <p className="text-[10px] text-gray-500 font-bold truncate">{g.opponent}</p>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
+    </th>
   );
 
   return (
     <DashboardLayout>
-      <div className="p-4 max-w-7xl mx-auto space-y-6">
-        
-        {/* ── HEADER ── */}
-        <div className="flex items-center justify-between">
-          <button onClick={onBack} className="flex items-center gap-2 text-gray-400 hover:text-yellow-400 transition">
-            <ArrowLeft size={20} /> Back
-          </button>
-          <div className="text-right">
-            <h1 className="text-2xl font-bold text-yellow-400">{player.full_name}</h1>
-            <p className="text-sm text-gray-400">{player.team} • {player.position}</p>
+      <div className="p-4 max-w-7xl mx-auto">
+        <div className="flex justify-between items-start mb-6">
+          <div>
+            <h1 className="text-3xl font-bold text-yellow-400 mb-2">📊 Line Pulse Scanner</h1>
+            <p className="text-gray-400 text-sm">Find betting edges across all major sportsbooks</p>
           </div>
+          <Button 
+            onClick={() => setShowSubmitModal(true)} 
+            className="bg-yellow-500 text-black hover:bg-yellow-600 gap-2"
+          >
+            <PlusCircle className="h-4 w-4" /> Report Line
+          </Button>
         </div>
 
-        {/* ── BLOCK 1: PLAYER PERFORMANCE ── */}
-        <div className="bg-[#0b1120] rounded-xl border border-gray-800 p-5 shadow-lg relative">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-            <div>
-              <h2 className="text-lg font-bold text-white mb-1">
-                {PROP_GROUPS[sport]?.find(p => p.id === selectedPlayerProp)?.label || selectedPlayerProp}
-              </h2>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-400">Line:</span>
-                <button onClick={() => setPlayerLine(v => Math.max(0.5, v - 0.5))} className="p-1 hover:bg-gray-700 rounded"><Minus size={14} className="text-yellow-400" /></button>
-                <span className="text-xl font-bold text-yellow-400 w-12 text-center">{playerLine.toFixed(1)}</span>
-                <button onClick={() => setPlayerLine(v => v + 0.5)} className="p-1 hover:bg-gray-700 rounded"><Plus size={14} className="text-yellow-400" /></button>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              {[5, 10, 15, 20].map((n) => {
-                const rate = calcHitRate(games, n, selectedPlayerProp, playerLine);
-                return (
-                  <button key={n} onClick={() => setChartView(n as any)} className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${chartView === n ? "bg-yellow-500 text-black" : "bg-[#1e293b] text-gray-400 hover:text-white"}`}>
-                    L{n}<div className={`text-[10px] ${rate >= 50 ? "text-green-400" : "text-red-400"}`}>{rate}%</div>
-                  </button>
-                );
-              })}
-            </div>
+        {/* Filters */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+          <Select value={sport} onValueChange={setSport}>
+            <SelectTrigger className="bg-[#0f172a] border-gray-700 text-yellow-400"><SelectValue /></SelectTrigger>
+            <SelectContent className="bg-[#0f172a] border-gray-700">
+              <SelectItem value="nba">🏀 NBA</SelectItem><SelectItem value="nhl">🏒 NHL</SelectItem>
+              <SelectItem value="nfl">🏈 NFL</SelectItem><SelectItem value="mlb">⚾ MLB</SelectItem>
+              <SelectItem value="soccer">⚽ Soccer</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Input placeholder="Search players..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="pl-10 bg-[#0f172a] border-gray-700 text-yellow-400" />
           </div>
 
-          <div className="relative inline-block mb-4 w-full sm:w-48">
-             <select value={selectedPlayerProp} onChange={e => setSelectedPlayerProp(e.target.value)} className="w-full bg-[#1e293b] text-yellow-400 text-sm rounded border border-gray-700 py-2 px-3 appearance-none focus:outline-none focus:border-yellow-500">
-               {PROP_GROUPS[sport]?.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
-             </select>
-          </div>
+          <Select value={selectedBookmaker} onValueChange={setSelectedBookmaker}>
+            <SelectTrigger className="bg-[#0f172a] border-gray-700 text-yellow-400 justify-between">
+              <SelectValue placeholder="Select Book" />
+            </SelectTrigger>
+            <SelectContent className="bg-[#0f172a] border-gray-700">
+              {SPORTSBOOKS.map(b => (
+                <SelectItem key={b} value={b} className="text-yellow-400 focus:bg-[#1e293b] focus:text-yellow-300">
+                  {b}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
-          {renderChart(chartGames, playerLine, playerLineTop, maxVal, selectedPlayerProp, "h-64")}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="w-full bg-[#0f172a] border-gray-700 text-yellow-400 justify-between">
+                {selectedProps.length} Props <ChevronDown className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-56 bg-[#0f172a] border-gray-700 max-h-80 overflow-y-auto">
+              <DropdownMenuLabel>Player Props</DropdownMenuLabel><DropdownMenuSeparator className="bg-gray-700" />
+              {currentProps.map(p => (
+                <DropdownMenuCheckboxItem 
+                  key={p.id} 
+                  checked={selectedProps.includes(p.id)} 
+                  onCheckedChange={() => setSelectedProps(prev => prev.includes(p.id) ? prev.filter(x => x !== p.id) : [...prev, p.id])} 
+                  className="text-yellow-400"
+                >
+                  {p.label}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
-        {/* ── BLOCK 2: TEAM STATS ── */}
-        <div className="bg-[#0b1120] rounded-xl border border-gray-800 p-5 shadow-lg">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-md font-bold text-gray-300">Team Stats (Last 10 Opponents)</h3>
-            <select value={selectedTeamProp} onChange={e => setSelectedTeamProp(e.target.value)} className="bg-[#1e293b] text-yellow-400 text-xs rounded border border-gray-700 py-1 px-2">
-              {PROP_GROUPS[sport]?.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
-            </select>
-          </div>
-
-          {renderChart(games.slice(0, 10).reverse(), teamLine, teamLineTop, maxTeamVal, selectedTeamProp, "h-48")}
-
-          <div className="flex justify-center mt-6">
-             <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-400">Line:</span>
-                <button onClick={() => setTeamLine(v => v - 1)} className="px-2 bg-gray-800 rounded text-yellow-400 hover:bg-gray-700">-</button>
-                <span className="text-sm font-bold text-yellow-400 w-8 text-center">{teamLine.toFixed(0)}</span>
-                <button onClick={() => setTeamLine(v => v + 1)} className="px-2 bg-gray-800 rounded text-yellow-400 hover:bg-gray-700">+</button>
-             </div>
-          </div>
+        {/* View Mode Toggle */}
+        <div className="flex gap-2 mb-4">
+          {(["all", "over", "under"] as const).map(mode => (
+            <button key={mode} onClick={() => setViewMode(mode)} className={`px-4 py-2 rounded-lg font-medium transition ${viewMode === mode ? "bg-yellow-500 text-black" : "bg-[#0f172a] text-gray-400 border border-gray-700 hover:border-yellow-600"}`}>
+              {mode.charAt(0).toUpperCase() + mode.slice(1)}
+            </button>
+          ))}
         </div>
 
-        {/* ── BLOCK 3: GAME LOG TABLE ── */}
-        <div className="bg-[#0b1120] rounded-xl border border-gray-800 overflow-hidden">
-          <div className="p-4 border-b border-gray-800 bg-[#111827] flex justify-between items-center">
-            <h3 className="text-yellow-400 font-bold">Game Log - Last 15 Games</h3>
-            <Button variant="ghost" size="sm" onClick={fetchPlayer} className="text-gray-400 hover:text-white">
-              <Activity size={14} className="mr-2" /> Refresh
-            </Button>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[600px]">
-              <thead className="bg-[#0f172a] text-gray-400 uppercase text-xs">
-                <tr>
-                  <th className="p-3 text-left">Opponent</th>
-                  <th className="p-3 text-left">Date</th>
-                  {PROP_GROUPS[sport]?.map(p => (
-                    <th 
-                      key={p.id} 
-                      className={`p-3 text-right ${p.id === selectedPlayerProp ? "text-yellow-400 font-bold" : ""}`}
-                    >
-                      {p.label}
-                    </th>
-                  ))}
-                  <th className="p-3 text-right text-yellow-400">Line</th>
-                  <th className="p-3 text-center">Result</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-800">
-                {games.slice(0, 15).map((g: any, i: number) => {
-                  const activeVal = getPropValue(g, selectedPlayerProp);
-                  const isOver = activeVal > playerLine;
-                  
-                  return (
-                    <tr key={i} className={`hover:bg-[#1e293b] transition ${isOver ? "bg-green-900/10" : "bg-red-900/10"}`}>
-                      <td className="p-3 font-medium text-gray-200 whitespace-nowrap">{g.opponent}</td>
-                      <td className="p-3 text-gray-400 whitespace-nowrap">{g.game_date}</td>
-                      
-                      {PROP_GROUPS[sport]?.map(p => {
-                        const val = getPropValue(g, p.id);
-                        return (
-                          <td 
-                            key={p.id} 
-                            className={`p-3 text-right font-medium whitespace-nowrap ${
-                              p.id === selectedPlayerProp 
-                                ? (val > playerLine ? "text-green-400" : "text-red-400") 
-                                : "text-gray-300"
-                            }`}
-                          >
-                            {val}
-                          </td>
-                        );
-                      })}
-                      
-                      <td className="p-3 text-right text-gray-400 font-mono">{playerLine.toFixed(1)}</td>
-                      
-                      <td className="p-3 text-center">
-                        <Badge variant={isOver ? "default" : "secondary"} className={isOver ? "bg-green-600 hover:bg-green-700" : "bg-red-600 hover:bg-red-700 text-white"}>
-                          {isOver ? "OVER" : "UNDER"}
+        {error && <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 mb-6 text-red-400">❌ {error}</div>}
+
+        {loading ? (
+          <div className="text-center py-12"><div className="animate-spin h-8 w-8 border-2 border-yellow-400 border-t-transparent rounded-full mx-auto mb-4" /><p className="text-gray-400">Loading...</p></div>
+        ) : (
+          <div className="bg-[#020617] rounded-xl border border-gray-800 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-[#0f172a] border-b border-gray-800">
+                  <tr>
+                    <SortHeader label="Player" sortKey="full_name" />
+                    <SortHeader label="Apps" sortKey="bookmaker" />
+                    <SortHeader label="Line" sortKey="line" />
+                    <SortHeader label="Avg L10" sortKey="avgL10" />
+                    <SortHeader label="Diff" sortKey="diff" />
+                    <SortHeader label="L5 %" sortKey="l5HitRate" />
+                    <SortHeader label="L10 %" sortKey="l10HitRate" />
+                    <SortHeader label="Streak" sortKey="streak" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedPlayers.map((p, i) => (
+                    <tr key={i} onClick={() => handlePlayerClick(p.player_id)} className="border-b border-gray-800 hover:bg-[#0f172a] cursor-pointer transition">
+                      <td className="p-4">
+                        <div className="flex items-center gap-3">
+                          <div className="h-10 w-10 rounded-full bg-gradient-to-br from-yellow-500 to-yellow-700 flex items-center justify-center text-black font-bold text-sm">{p.full_name?.split(" ").map((n:string)=>n[0]).join("").slice(0,2) || "?"}</div>
+                          <div>
+                            <p className="font-semibold text-yellow-400">{p.full_name || "Unknown"}</p>
+                            <p className="text-xs text-gray-400">{p.team || "-"} • {selectedProps.map(id => PROP_GROUPS[sport]?.find(x=>x.id===id)?.label).join("+")}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="border-gray-600 text-gray-300">
+                            {p.bookmaker || selectedBookmaker}
+                          </Badge>
+                          {p.isCommunity && (
+                            <Badge variant="secondary" className="bg-green-900/30 text-green-400 border-green-800 text-[10px]">
+                              Community
+                            </Badge>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <Badge variant="outline" className="border-yellow-600 text-yellow-400">
+                          {p.line || "-"}
                         </Badge>
                       </td>
+                      <td className="p-4 text-green-400 font-semibold">
+                        {p.avgL10 ? p.avgL10.toFixed(1) : "-"}
+                      </td>
+                      <td className="p-4">
+                        <span className={p.diff > 0 ? "text-green-400" : "text-red-400"}>
+                          {p.diff > 0 ? "+" : ""}{p.diff ? p.diff.toFixed(1) : "-"}
+                        </span>
+                      </td>
+                      <td className="p-4">
+                        <span className={p.l5HitRate >= 50 ? "text-green-400" : "text-red-400"}>{p.l5HitRate || 0}%</span>
+                      </td>
+                      <td className="p-4">
+                        <span className={p.l10HitRate >= 50 ? "text-green-400" : "text-red-400"}>{p.l10HitRate || 0}%</span>
+                      </td>
+                      <td className="p-4">
+                        <div className="flex items-center gap-1">
+                          <TrendingUp className={`h-4 w-4 ${p.streak > 0 ? "text-green-400" : "text-red-400"}`} />
+                          <span className={p.streak > 0 ? "text-green-400" : "text-red-400"}>{p.streak || 0}</span>
+                        </div>
+                      </td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+        )}
+
+        <SubmitLineModal 
+          open={showSubmitModal} 
+          onOpenChange={setShowSubmitModal}
+          sport={sport}
+        />
       </div>
     </DashboardLayout>
   );
