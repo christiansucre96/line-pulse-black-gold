@@ -121,6 +121,7 @@ export default function Scanner() {
       ]);
 
       const edgeData = await edgeRes.json();
+      // ✅ FIX: Correct destructuring for Supabase response
       const {  communityLines } = linesRes;
 
       if (!edgeData.success) throw new Error(edgeData.error || "Failed to fetch stats");
@@ -134,12 +135,13 @@ export default function Scanner() {
           line: matchingLine ? matchingLine.line_value.toFixed(1) : (p.generated_line?.line?.toFixed(1) || p.line),
           bookmaker: matchingLine ? matchingLine.bookmaker : p.bookmaker,
           isCommunity: !!matchingLine,
-          generated_line: p.generated_line, // Keep generated line data
+          generated_line: p.generated_line,
         };
       });
 
       setPlayers(merged);
     } catch (err: any) {
+      console.error("Fetch error:", err);
       setError(err.message || "Failed to load data");
     } finally {
       setLoading(false);
@@ -206,7 +208,7 @@ export default function Scanner() {
         {/* Filters */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
           <Select value={sport} onValueChange={setSport}>
-            <SelectTrigger className="bg-[#0f172a] border-gray-700 text-yellow-400"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="bg-[#0f172a] border-gray-700 text-yellow-400"><SelectValue placeholder="Select sport" /></SelectTrigger>
             <SelectContent className="bg-[#0f172a] border-gray-700">
               <SelectItem value="nba">🏀 NBA</SelectItem><SelectItem value="nhl">🏒 NHL</SelectItem>
               <SelectItem value="nfl">🏈 NFL</SelectItem><SelectItem value="mlb">⚾ MLB</SelectItem>
@@ -288,10 +290,12 @@ export default function Scanner() {
                     <tr key={i} onClick={() => handlePlayerClick(p.player_id)} className="border-b border-gray-800 hover:bg-[#0f172a] cursor-pointer transition">
                       <td className="p-4">
                         <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-full bg-gradient-to-br from-yellow-500 to-yellow-700 flex items-center justify-center text-black font-bold text-sm">{p.full_name?.split(" ").map((n:string)=>n[0]).join("").slice(0,2) || "?"}</div>
+                          <div className="h-10 w-10 rounded-full bg-gradient-to-br from-yellow-500 to-yellow-700 flex items-center justify-center text-black font-bold text-sm">
+                            {(p.full_name || "?").split(" ").map((n: string) => n[0]).join("").slice(0, 2)}
+                          </div>
                           <div>
                             <p className="font-semibold text-yellow-400">{p.full_name || "Unknown"}</p>
-                            <p className="text-xs text-gray-400">{p.team || "-"} • {selectedProps.map(id => PROP_GROUPS[sport]?.find(x=>x.id===id)?.label).join("+")}</p>
+                            <p className="text-xs text-gray-400">{p.team || "-"} • {selectedProps.map(id => PROP_GROUPS[sport]?.find(x => x.id === id)?.label).join("+")}</p>
                           </div>
                         </div>
                       </td>
