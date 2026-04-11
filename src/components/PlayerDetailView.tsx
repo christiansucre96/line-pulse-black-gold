@@ -1,11 +1,10 @@
 // src/components/PlayerDetailView.tsx
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { ArrowLeft, RefreshCw, Database } from "lucide-react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
-// 👇 Added proper types for props to prevent errors
 interface PlayerDetailViewProps {
   playerId: string;
   onBack: () => void;
@@ -18,82 +17,55 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
   const [selectedProps, setSelectedProps] = useState<string[]>(["points"]);
   const [line, setLine] = useState(0);
   const [cacheInfo, setCacheInfo] = useState<{ cached: boolean; age?: number } | null>(null);
+  
+  // 👇 Prevents React StrictMode from double-fetching in development
+  const fetchTriggeredRef = useRef(false);
 
-  // 👇 Effect: Only fetch when playerId is actually available
   useEffect(() => {
-    if (playerId && typeof playerId === "string" && playerId.trim() !== "") {
-      fetchPlayer();
-    } else {
-      console.log("⏳ Waiting for valid playerId...");
-      setLoading(false);
-    }
-  }, [playerId]);
-
-  const fetchPlayer = async () => {
-    // 👇 GUARD: Double-check playerId before fetching
     if (!playerId || typeof playerId !== "string" || playerId.trim() === "") {
-      console.warn("⚠️  Skipping fetch: invalid playerId", playerId);
-      setError("Invalid player ID");
       setLoading(false);
+      setError("Invalid player ID");
       return;
     }
 
+    // Reset guard when playerId changes
+    fetchTriggeredRef.current = false;
+    fetchPlayer();
+  }, [playerId]);
+
+  const fetchPlayer = async () => {
+    if (fetchTriggeredRef.current) return;
+    fetchTriggeredRef.current = true;
+
     setLoading(true);
     setError(null);
-    console.log("🎯 Fetching player:", playerId);
 
     try {
-      // 👇 Prepare body FIRST, then stringify (prevents JSON errors)
-      const requestBody = {
+      const payload = {
         operation: "get_player_details",
-        player_id: playerId,
+        player_id: playerId.trim(),
       };
-      const bodyString = JSON.stringify(requestBody);
-      console.log("📤 Request body:", bodyString);
 
-      // 👇 FIXED: Removed 'apikey' header - Edge Functions use server-side env vars
-      const res = await fetch(EDGE_URL, {
+      const response = await fetch(EDGE_URL, {
         method: "POST",
-        headers: { 
-          "Content-Type": "application/json"
-          // ✅ NO apikey header needed here
-        },
-        body: bodyString,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        cache: "no-store",
       });
 
-      // 👇 FIXED: Read as text first to debug empty responses
-      const responseText = await res.text();
-      console.log("📥 Raw response text:", responseText.substring(0, 300));
-      
-      // Parse JSON safely
-      let data;
-      try {
-        data = responseText ? JSON.parse(responseText) : { success: false, error: "Empty response from server" };
-      } catch (parseErr) {
-        console.error("❌ JSON parse error:", parseErr, "Raw text:", responseText);
-        throw new Error(`Invalid response format: ${parseErr instanceof Error ? parseErr.message : 'Unknown'}`);
-      }
-      
-      console.log("📦 Parsed data:", data);
+      // Read as text first to catch empty responses safely
+      const rawText = await response.text();
+      if (!rawText.trim()) throw new Error("Server returned empty response");
 
-      if (!res.ok) {
-        throw new Error(data.error || `HTTP ${res.status}: ${res.statusText}`);
+      const data = JSON.parse(rawText);
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || `HTTP ${response.status}`);
       }
 
-      if (!data.success) {
-        throw new Error(data.error || "Server returned success: false");
-      }
-
-      // ✅ Success — update state
       setPlayer(data.player);
-      setCacheInfo({ 
-        cached: data.cached, 
-        age: data.cache_age_hours 
-      });
-      
-      const avg = calcAvg(data.player.stats, 10);
-      setLine(avg);
-      
+      setCacheInfo({ cached: data.cached, age: data.cache_age_hours });
+      setLine(calcAvg(data.player.stats, 10));
     } catch (err: any) {
       console.error("❌ Fetch error:", err);
       setError(err.message || "Failed to load player data");
@@ -107,14 +79,14 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
     selectedProps.reduce((sum, stat) => sum + (g[stat] || 0), 0);
 
   const calcAvg = (games: any[], n: number) => {
-    if (!games || games.length === 0) return 0;
+    if (!games?.length) return 0;
     const slice = games.slice(0, n);
     if (!slice.length) return 0;
     return slice.reduce((a, g) => a + calcCombo(g), 0) / slice.length;
   };
 
   const hitRate = (games: any[], n: number) => {
-    if (!games || games.length === 0) return 0;
+    if (!games?.length) return 0;
     const slice = games.slice(0, n);
     if (!slice.length) return 0;
     const hits = slice.filter((g: any) => calcCombo(g) > line).length;
@@ -123,9 +95,8 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
 
   const maxStat = (key: string) => {
     if (!player?.stats?.length) return 0;
-    const values = player.stats.map((g: any) => g[key] || 0).filter((v: any) => typeof v === 'number');
-    if (values.length === 0) return 0;
-    return Math.max(...values);
+    const values = player.stats.map((g: any) => g[key] || 0).filter((v: any) => typeof v === "number");
+    return values.length ? Math.max(...values) : 0;
   };
 
   // -------- UI STATES --------
@@ -135,9 +106,6 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
         <div className="p-10 flex flex-col items-center justify-center min-h-[400px]">
           <RefreshCw className="animate-spin mb-4 h-8 w-8 text-gray-400" />
           <p className="text-gray-400">Loading player data...</p>
-          {cacheInfo?.cached && (
-            <p className="text-xs text-green-400 mt-2">✓ Using cached data</p>
-          )}
         </div>
       </DashboardLayout>
     );
@@ -152,11 +120,7 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
           </button>
           <div className="bg-red-900/20 border border-red-800 rounded-lg p-6 text-center">
             <p className="text-red-400 font-medium mb-2">❌ {error || "No player found"}</p>
-            <p className="text-xs text-gray-500 mb-4">Player ID: {playerId}</p>
-            <button 
-              onClick={fetchPlayer}
-              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded text-sm transition"
-            >
+            <button onClick={fetchPlayer} className="mt-4 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded text-sm transition">
               Try Again
             </button>
           </div>
@@ -177,7 +141,6 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
             <ArrowLeft size={16} /> Back
           </button>
           
-          {/* Cache badge */}
           {cacheInfo && (
             <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs border ${
               cacheInfo.cached 
@@ -185,9 +148,7 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
                 : "bg-blue-900/30 text-blue-400 border-blue-800"
             }`}>
               <Database size={12} />
-              {cacheInfo.cached 
-                ? `Cached ${cacheInfo.age?.toFixed(1)}h ago` 
-                : "Fresh data"}
+              {cacheInfo.cached ? `Cached ${cacheInfo.age?.toFixed(1)}h ago` : "Fresh data"}
             </div>
           )}
         </div>
@@ -196,18 +157,12 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
         <div className="flex justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold">{player.full_name}</h1>
-            <p className="text-gray-400">
-              {player.position} • {player.team}
-            </p>
-
+            <p className="text-gray-400">{player.position} • {player.team}</p>
             {player.injury_status && (
-              <p className="text-red-400 text-sm mt-1">
-                🚑 {player.injury_status} – {player.injury_description}
-              </p>
+              <p className="text-red-400 text-sm mt-1">🚑 {player.injury_status} – {player.injury_description}</p>
             )}
           </div>
 
-          {/* PLAYER MAX PANEL */}
           <div className="bg-[#0f172a] p-4 rounded-xl text-sm border border-gray-800">
             <p>Max Points: {maxStat("points")}</p>
             <p>Max Rebounds: {maxStat("rebounds")}</p>
@@ -217,25 +172,10 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
 
         {/* LINE CONTROL */}
         <div className="flex items-center gap-3 mb-4">
-          <button 
-            onClick={() => setLine(prev => Math.max(0, prev - 1))} 
-            className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded transition"
-          >
-            -
-          </button>
+          <button onClick={() => setLine(prev => Math.max(0, prev - 1))} className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded transition">-</button>
           <div className="text-lg font-bold min-w-[60px] text-center">{line.toFixed(1)}</div>
-          <button 
-            onClick={() => setLine(prev => prev + 1)} 
-            className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded transition"
-          >
-            +
-          </button>
-          <button
-            onClick={() => setLine(calcAvg(player.stats, 10))}
-            className="ml-2 text-xs text-gray-400 hover:text-white underline"
-          >
-            Reset to avg
-          </button>
+          <button onClick={() => setLine(prev => prev + 1)} className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded transition">+</button>
+          <button onClick={() => setLine(calcAvg(player.stats, 10))} className="ml-2 text-xs text-gray-400 hover:text-white underline">Reset to avg</button>
         </div>
 
         {/* HIT RATES */}
@@ -243,12 +183,8 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
           {[5, 10, 15, 20].map(n => (
             <div key={n} className="bg-[#020617] p-3 rounded text-center border border-gray-800">
               <p className="text-xs text-gray-400">L{n}</p>
-              <p className="text-green-400 font-bold">
-                {hitRate(player.stats, n)}%
-              </p>
-              <p className="text-xs text-gray-500">
-                Avg {calcAvg(player.stats, n).toFixed(1)}
-              </p>
+              <p className="text-green-400 font-bold">{hitRate(player.stats, n)}%</p>
+              <p className="text-xs text-gray-500">Avg {calcAvg(player.stats, n).toFixed(1)}</p>
             </div>
           ))}
         </div>
@@ -258,29 +194,18 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
           <div className="flex items-end gap-2 h-40 overflow-x-auto pb-2">
             {games.map((g: any, i: number) => {
               const val = calcCombo(g);
-              const height = Math.min(val * 3, 160); // Cap height
+              const height = Math.min(val * 3, 160);
               const color = val > line ? "bg-green-500" : "bg-red-500";
-
               return (
                 <div key={i} className="flex flex-col items-center w-8 flex-shrink-0">
-                  <div
-                    className={`${color} w-full rounded-t transition-all hover:opacity-80`}
-                    style={{ height: `${height}px` }}
-                    title={`${g.opponent}: ${val}`}
-                  />
-                  <p className="text-[10px] mt-1 text-gray-400 truncate w-full text-center">
-                    {g.opponent}
-                  </p>
+                  <div className={`${color} w-full rounded-t transition-all hover:opacity-80`} style={{ height: `${height}px` }} title={`${g.opponent}: ${val}`} />
+                  <p className="text-[10px] mt-1 text-gray-400 truncate w-full text-center">{g.opponent}</p>
                 </div>
               );
             })}
           </div>
-
-          {/* LINE MARKER */}
           <div className="border-t-2 border-dashed border-yellow-500/50 mt-2 relative pt-1">
-            <div className="absolute -top-5 left-0 text-xs text-yellow-500 font-medium bg-[#020617] px-2 py-0.5 rounded">
-              Line: {line.toFixed(1)}
-            </div>
+            <div className="absolute -top-5 left-0 text-xs text-yellow-500 font-medium bg-[#020617] px-2 py-0.5 rounded">Line: {line.toFixed(1)}</div>
           </div>
         </div>
 
@@ -288,10 +213,7 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
         <div className="bg-[#020617] rounded-xl overflow-hidden border border-gray-800">
           <div className="p-4 border-b border-gray-800 flex justify-between items-center">
             <h3 className="font-medium">Recent Games</h3>
-            <button 
-              onClick={fetchPlayer}
-              className="text-xs text-gray-400 hover:text-white flex items-center gap-1 transition"
-            >
+            <button onClick={fetchPlayer} className="text-xs text-gray-400 hover:text-white flex items-center gap-1 transition">
               <RefreshCw size={12} /> Refresh
             </button>
           </div>
@@ -312,22 +234,13 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
                   const combo = calcCombo(g);
                   const isOver = combo > line;
                   return (
-                    <tr 
-                      key={i} 
-                      className={`border-t border-gray-800 hover:bg-[#0f172a] transition ${
-                        isOver ? "bg-green-900/10" : ""
-                      }`}
-                    >
+                    <tr key={i} className={`border-t border-gray-800 hover:bg-[#0f172a] transition ${isOver ? "bg-green-900/10" : ""}`}>
                       <td className="p-3 text-gray-400">{g.game_date}</td>
                       <td className="p-3">{g.opponent}</td>
-                      <td className={`p-3 text-right ${isOver ? "text-green-400 font-medium" : ""}`}>
-                        {g.points}
-                      </td>
+                      <td className={`p-3 text-right ${isOver ? "text-green-400 font-medium" : ""}`}>{g.points}</td>
                       <td className="p-3 text-right text-gray-400">{g.rebounds}</td>
                       <td className="p-3 text-right text-gray-400">{g.assists}</td>
-                      <td className={`p-3 text-right font-bold ${isOver ? "text-green-400" : "text-red-400"}`}>
-                        {combo}
-                      </td>
+                      <td className={`p-3 text-right font-bold ${isOver ? "text-green-400" : "text-red-400"}`}>{combo}</td>
                     </tr>
                   );
                 })}
