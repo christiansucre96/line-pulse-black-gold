@@ -1,8 +1,10 @@
 // src/pages/Scanner.tsx
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { createClient } from "@supabase/supabase-js";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
+import { SubmitLineModal } from "@/components/SubmitLineModal";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -13,9 +15,13 @@ import {
   DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent,
   DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Search, ChevronDown, ArrowUpDown, TrendingUp } from "lucide-react";
+import { Search, ChevronDown, ArrowUpDown, TrendingUp, PlusCircle } from "lucide-react";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL!,
+  import.meta.env.VITE_SUPABASE_ANON_KEY!
+);
 
 const PROP_TYPES = {
   nba: [
@@ -50,35 +56,64 @@ export default function Scanner() {
   const [selectedBookmaker, setSelectedBookmaker] = useState<string>("Stake");
   const [viewMode, setViewMode] = useState<"all" | "over" | "under">("all");
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" } | null>(null);
+  const [showSubmitModal, setShowSubmitModal] = useState(false);
   
   const playerId = searchParams.get("playerId");
 
   useEffect(() => {
     if (playerId) return;
-    fetchPlayers();
+    fetchData();
   }, [sport, searchQuery, selectedProps, selectedBookmaker]);
 
-  const fetchPlayers = async () => {
+  const fetchData = async () => {
     setLoading(true);
     setError(null);
     try {
-      // ✅ FIX: Send as array 'bookmakers' to match Edge Function expectation
-      const response = await fetch(EDGE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          operation: "get_players_with_stats",
-          sport,
-          search: searchQuery || undefined,
-          props: selectedProps,
-          bookmakers: [selectedBookmaker], 
+      // 1️⃣ Fetch base stats from Edge Function
+      const [edgeRes, linesRes] = await Promise.all([
+        fetch(EDGE_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            operation: "get_players_with_stats",
+            sport,
+            search: searchQuery || undefined,
+            props: selectedProps,
+            bookmakers: [selectedBookmaker],
+          }),
         }),
+        // 2️⃣ Fetch community lines
+        supabase
+          .from("user_submitted_lines")
+          .select("*")
+          .eq("sport", sport)
+          .eq("status", "verified")
+          .eq("bookmaker", selectedBookmaker)
+          .gte("submitted_at", new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString())
+          .order("submitted_at", { ascending: false })
+      ]);
+
+      const edgeData = await edgeRes.json();
+      const {  communityLines } = linesRes;
+
+      if (!edgeData.success) throw new Error(edgeData.error || "Failed to fetch stats");
+
+      // 3️⃣ Merge base stats with community lines
+      const merged = edgeData.players.map((p: any) => {
+        const matchingLine = communityLines?.find(
+          (l: any) => l.player_name.toLowerCase() === p.full_name.toLowerCase() && l.prop_type === selectedProps[0]
+        );
+        return {
+          ...p,
+          line: matchingLine ? matchingLine.line_value.toFixed(1) : p.line,
+          bookmaker: matchingLine ? matchingLine.bookmaker : p.bookmaker,
+          isCommunity: !!matchingLine,
+        };
       });
-      const data = await response.json();
-      if (!data.success) throw new Error(data.error || "Failed to fetch");
-      setPlayers(data.players || []);
+
+      setPlayers(merged);
     } catch (err: any) {
-      setError(err.message || "Failed to load players");
+      setError(err.message || "Failed to load data");
     } finally {
       setLoading(false);
     }
@@ -136,8 +171,18 @@ export default function Scanner() {
   return (
     <DashboardLayout>
       <div className="p-4 max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold text-yellow-400 mb-2">📊 Line Pulse Scanner</h1>
-        <p className="text-gray-400 text-sm mb-6">Find betting edges across all major sportsbooks</p>
+        <div className="flex justify-between items-start mb-6">
+          <div>
+            <h1 className="text-3xl font-bold text-yellow-400 mb-2">📊 Line Pulse Scanner</h1>
+            <p className="text-gray-400 text-sm">Find betting edges across all major sportsbooks</p>
+          </div>
+          <Button 
+            onClick={() => setShowSubmitModal(true)} 
+            className="bg-yellow-500 text-black hover:bg-yellow-600 gap-2"
+          >
+            <PlusCircle className="h-4 w-4" /> Report Line
+          </Button>
+        </div>
 
         {/* Filters */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
@@ -155,7 +200,6 @@ export default function Scanner() {
             <Input placeholder="Search players..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="pl-10 bg-[#0f172a] border-gray-700 text-yellow-400" />
           </div>
 
-          {/* ✅ Sportsbook Selector */}
           <Select value={selectedBookmaker} onValueChange={setSelectedBookmaker}>
             <SelectTrigger className="bg-[#0f172a] border-gray-700 text-yellow-400 justify-between">
               <SelectValue placeholder="Select Book" />
@@ -233,10 +277,16 @@ export default function Scanner() {
                         </div>
                       </td>
                       <td className="p-4">
-                        {/* ✅ FIX: Show API data, fallback to selected book if API is slow */}
-                        <Badge variant="outline" className="border-gray-600 text-gray-300">
-                          {p.bookmaker || selectedBookmaker}
-                        </Badge>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="border-gray-600 text-gray-300">
+                            {p.bookmaker || selectedBookmaker}
+                          </Badge>
+                          {p.isCommunity && (
+                            <Badge variant="secondary" className="bg-green-900/30 text-green-400 border-green-800 text-[10px]">
+                              Community
+                            </Badge>
+                          )}
+                        </div>
                       </td>
                       <td className="p-4">
                         <Badge variant="outline" className="border-yellow-600 text-yellow-400">
@@ -270,6 +320,12 @@ export default function Scanner() {
             </div>
           </div>
         )}
+
+        <SubmitLineModal 
+          open={showSubmitModal} 
+          onOpenChange={setShowSubmitModal}
+          sport={sport}
+        />
       </div>
     </DashboardLayout>
   );
