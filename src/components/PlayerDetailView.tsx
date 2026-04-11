@@ -13,33 +13,33 @@ const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-a
 
 const PROP_GROUPS: Record<string, { id: string; label: string; stackKeys?: string[] }[]> = {
   nba: [
-    { id: "points", label: "Points" },
-    { id: "rebounds", label: "Rebounds" },
-    { id: "assists", label: "Assists" },
-    { id: "PR", label: "Pts + Reb", stackKeys: ["points", "rebounds"] },
-    { id: "PA", label: "Pts + Ast", stackKeys: ["points", "assists"] },
-    { id: "RA", label: "Reb + Ast", stackKeys: ["rebounds", "assists"] },
-    { id: "PRA", label: "Pts + Reb + Ast", stackKeys: ["points", "rebounds", "assists"] },
+    { id: "points", label: "PTS" },
+    { id: "rebounds", label: "REB" },
+    { id: "assists", label: "AST" },
+    { id: "PR", label: "PR", stackKeys: ["points", "rebounds"] },
+    { id: "PA", label: "PA", stackKeys: ["points", "assists"] },
+    { id: "RA", label: "RA", stackKeys: ["rebounds", "assists"] },
+    { id: "PRA", label: "PRA", stackKeys: ["points", "rebounds", "assists"] },
   ],
   nfl: [
     { id: "passYards", label: "Pass Yds" },
     { id: "recYards", label: "Rec Yds" },
     { id: "rushYards", label: "Rush Yds" },
-    { id: "PR", label: "Pass + Rec Yds", stackKeys: ["passYards", "recYards"] },
+    { id: "PR", label: "Pass+Rec", stackKeys: ["passYards", "recYards"] },
   ],
   mlb: [
-    { id: "hits", label: "Hits" },
+    { id: "hits", label: "H" },
     { id: "homeRuns", label: "HR" },
     { id: "rbi", label: "RBI" },
   ],
   nhl: [
-    { id: "goals", label: "Goals" },
-    { id: "assists", label: "Assists" },
-    { id: "shots", label: "Shots" },
+    { id: "goals", label: "G" },
+    { id: "assists", label: "A" },
+    { id: "shots", label: "SOG" },
   ],
   soccer: [
-    { id: "goals", label: "Goals" },
-    { id: "assists", label: "Assists" },
+    { id: "goals", label: "G" },
+    { id: "assists", label: "A" },
     { id: "shots", label: "Shots" },
   ],
 };
@@ -57,7 +57,7 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
   const [error, setError] = useState<string | null>(null);
 
   const [chartView, setChartView] = useState<5 | 10 | 15 | 20>(10);
-  const [selectedPlayerProp, setSelectedPlayerProp] = useState<string>("PR"); 
+  const [selectedPlayerProp, setSelectedPlayerProp] = useState<string>("PRA"); 
   const [playerLine, setPlayerLine] = useState(1);
 
   const [selectedTeamProp, setSelectedTeamProp] = useState<string>("points");
@@ -115,7 +115,6 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
   const games = player.stats || [];
   const chartGames = games.slice(0, chartView);
   
-  // ✅ Consistent scaling calculation
   const playerValues = chartGames.map(g => getPropValue(g, selectedPlayerProp));
   const maxVal = Math.max(1, ...playerValues, playerLine * 1.2);
   const playerLineTop = ((maxVal - playerLine) / maxVal) * 100;
@@ -134,14 +133,12 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
     heightClass: string = "h-64"
   ) => (
     <div className={`${heightClass} w-full flex items-end justify-between gap-1 pb-8 relative border-b border-gray-800`}>
-      {/* Y-Axis Scale */}
       <div className="absolute left-0 top-0 bottom-8 w-12 flex flex-col justify-between text-[10px] text-gray-500 pr-2 text-right pointer-events-none">
         <span>{Math.round(max)}</span>
         <span>{Math.round(max / 2)}</span>
         <span>0</span>
       </div>
 
-      {/* ✅ SINGLE CONTINUOUS LINE */}
       <div 
         className="absolute left-12 right-0 border-t-2 border-dashed border-yellow-500/80 pointer-events-none z-20"
         style={{ top: `${lineTopPercent}%` }}
@@ -151,14 +148,12 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
         </div>
       </div>
 
-      {/* Grid Lines (subtle) */}
       <div className="absolute left-12 right-0 top-0 bottom-8 pointer-events-none">
         <div className="absolute w-full border-t border-gray-800/50" style={{ top: "25%" }} />
         <div className="absolute w-full border-t border-gray-800/50" style={{ top: "50%" }} />
         <div className="absolute w-full border-t border-gray-800/50" style={{ top: "75%" }} />
       </div>
 
-      {/* Bars */}
       <div className="ml-14 flex items-end justify-between gap-1 w-full h-full">
         {data.map((g: any, i: number) => {
           const val = getPropValue(g, propId);
@@ -190,9 +185,9 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
 
   return (
     <DashboardLayout>
-      <div className="p-4 max-w-6xl mx-auto space-y-6">
+      <div className="p-4 max-w-7xl mx-auto space-y-6">
         
-        {/* ── HEADER ─ */}
+        {/* ── HEADER ── */}
         <div className="flex items-center justify-between">
           <button onClick={onBack} className="flex items-center gap-2 text-gray-400 hover:text-yellow-400 transition">
             <ArrowLeft size={20} /> Back
@@ -235,7 +230,6 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
              </select>
           </div>
 
-          {/* ✅ FIXED CHART WITH SINGLE LINE */}
           {renderChart(chartGames, playerLine, playerLineTop, maxVal, selectedPlayerProp, "h-64")}
         </div>
 
@@ -248,7 +242,6 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
             </select>
           </div>
 
-          {/* ✅ FIXED CHART WITH SINGLE LINE */}
           {renderChart(games.slice(0, 10).reverse(), teamLine, teamLineTop, maxTeamVal, selectedTeamProp, "h-48")}
 
           <div className="flex justify-center mt-6">
@@ -261,7 +254,7 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
           </div>
         </div>
 
-        {/* ── BLOCK 3: GAME LOG TABLE ── */}
+        {/* ── BLOCK 3: GAME LOG TABLE (FIXED: All Props + Combos + Line) ── */}
         <div className="bg-[#0b1120] rounded-xl border border-gray-800 overflow-hidden">
           <div className="p-4 border-b border-gray-800 bg-[#111827] flex justify-between items-center">
             <h3 className="text-yellow-400 font-bold">Game Log - Last 15 Games</h3>
@@ -270,26 +263,56 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
             </Button>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm min-w-[600px]">
               <thead className="bg-[#0f172a] text-gray-400 uppercase text-xs">
                 <tr>
                   <th className="p-3 text-left">Opponent</th>
                   <th className="p-3 text-left">Date</th>
-                  {PROP_GROUPS[sport]?.filter(p => !p.stackKeys).map(p => <th key={p.id} className="p-3 text-right">{p.label}</th>)}
-                  <th className="p-3 text-right text-yellow-400">Total</th>
+                  {/* ✅ ALL PROPS INCLUDING COMBOS */}
+                  {PROP_GROUPS[sport]?.map(p => (
+                    <th 
+                      key={p.id} 
+                      className={`p-3 text-right ${p.id === selectedPlayerProp ? "text-yellow-400 font-bold" : ""}`}
+                    >
+                      {p.label}
+                    </th>
+                  ))}
+                  <th className="p-3 text-right text-yellow-400">Line</th>
                   <th className="p-3 text-center">Result</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800">
                 {games.slice(0, 15).map((g: any, i: number) => {
-                  const total = getPropValue(g, selectedPlayerProp);
-                  const isOver = total > playerLine;
+                  const activeVal = getPropValue(g, selectedPlayerProp);
+                  const isOver = activeVal > playerLine;
+                  
                   return (
                     <tr key={i} className={`hover:bg-[#1e293b] transition ${isOver ? "bg-green-900/10" : "bg-red-900/10"}`}>
-                      <td className="p-3 font-medium text-gray-200">{g.opponent}</td>
-                      <td className="p-3 text-gray-400">{g.game_date}</td>
-                      {PROP_GROUPS[sport]?.filter(p => !p.stackKeys).map(p => <td key={p.id} className="p-3 text-right text-gray-300">{g[p.id] || 0}</td>)}
-                      <td className={`p-3 text-right font-bold ${isOver ? "text-green-400" : "text-red-400"}`}>{total}</td>
+                      <td className="p-3 font-medium text-gray-200 whitespace-nowrap">{g.opponent}</td>
+                      <td className="p-3 text-gray-400 whitespace-nowrap">{g.game_date}</td>
+                      
+                      {/* ✅ DYNAMIC COLUMNS FOR ALL PROPS/COMBOS */}
+                      {PROP_GROUPS[sport]?.map(p => {
+                        const val = getPropValue(g, p.id);
+                        const isThisOver = val > playerLine;
+                        return (
+                          <td 
+                            key={p.id} 
+                            className={`p-3 text-right font-medium whitespace-nowrap ${
+                              p.id === selectedPlayerProp 
+                                ? (isThisOver ? "text-green-400" : "text-red-400") 
+                                : "text-gray-300"
+                            }`}
+                          >
+                            {val}
+                          </td>
+                        );
+                      })}
+                      
+                      {/* Line Column */}
+                      <td className="p-3 text-right text-gray-400 font-mono">{playerLine.toFixed(1)}</td>
+                      
+                      {/* Result Badge */}
                       <td className="p-3 text-center">
                         <Badge variant={isOver ? "default" : "secondary"} className={isOver ? "bg-green-600 hover:bg-green-700" : "bg-red-600 hover:bg-red-700 text-white"}>
                           {isOver ? "OVER" : "UNDER"}
