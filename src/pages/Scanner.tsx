@@ -10,7 +10,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  DropdownMenu, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuContent,
+  DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent,
   DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Search, ChevronDown, ArrowUpDown, TrendingUp } from "lucide-react";
@@ -47,7 +47,7 @@ export default function Scanner() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedProps, setSelectedProps] = useState<string[]>(["points"]);
-  const [selectedBookmaker, setSelectedBookmaker] = useState<string>("Stake"); // SINGLE bookmaker
+  const [selectedBookmaker, setSelectedBookmaker] = useState<string>("Stake");
   const [viewMode, setViewMode] = useState<"all" | "over" | "under">("all");
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" } | null>(null);
   
@@ -70,7 +70,7 @@ export default function Scanner() {
           sport,
           search: searchQuery || undefined,
           props: selectedProps,
-          bookmaker: selectedBookmaker, // SINGLE bookmaker (not array)
+          bookmaker: selectedBookmaker,
         }),
       });
       const data = await response.json();
@@ -93,8 +93,8 @@ export default function Scanner() {
         return sortConfig.direction === "asc" ? aVal - bVal : bVal - aVal;
       });
     }
-    if (viewMode === "over") sorted = sorted.filter(p => p.avgL10 > parseFloat(p.line));
-    if (viewMode === "under") sorted = sorted.filter(p => p.avgL10 <= parseFloat(p.line));
+    if (viewMode === "over") sorted = sorted.filter(p => (p.avgL10 || 0) > parseFloat(p.line || "0"));
+    if (viewMode === "under") sorted = sorted.filter(p => (p.avgL10 || 0) <= parseFloat(p.line || "0"));
     return sorted;
   }, [players, sortConfig, viewMode]);
 
@@ -112,7 +112,6 @@ export default function Scanner() {
 
   const currentProps = PROP_TYPES[sport as keyof typeof PROP_TYPES] || PROP_TYPES.nba;
 
-  // Get prop display name
   const getPropDisplayName = () => {
     if (selectedProps.length === 1) {
       const prop = currentProps.find(p => p.id === selectedProps[0]);
@@ -155,36 +154,38 @@ export default function Scanner() {
             <Input placeholder="Search players..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="pl-10 bg-[#0f172a] border-gray-700 text-yellow-400" />
           </div>
 
-          {/* SINGLE Sportsbook Selector - Radio Buttons */}
+          {/* ✅ Sportsbook Selector (Safe Select Component) */}
+          <Select value={selectedBookmaker} onValueChange={setSelectedBookmaker}>
+            <SelectTrigger className="bg-[#0f172a] border-gray-700 text-yellow-400 justify-between">
+              <SelectValue placeholder="Select Book" />
+            </SelectTrigger>
+            <SelectContent className="bg-[#0f172a] border-gray-700">
+              {SPORTSBOOKS.map(b => (
+                <SelectItem key={b} value={b} className="text-yellow-400 focus:bg-[#1e293b] focus:text-yellow-300">
+                  {b}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" className="w-full bg-[#0f172a] border-gray-700 text-yellow-400 justify-between">
-                {selectedBookmaker}
-                <ChevronDown className="h-4 w-4" />
+                {selectedProps.length} Props <ChevronDown className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-56 bg-[#0f172a] border-gray-700">
-              <DropdownMenuLabel>Sportsbook</DropdownMenuLabel>
-              <DropdownMenuSeparator className="bg-gray-700" />
-              <DropdownMenuRadioGroup value={selectedBookmaker} onValueChange={setSelectedBookmaker}>
-                {SPORTSBOOKS.map(b => (
-                  <DropdownMenuRadioItem 
-                    key={b} 
-                    value={b}
-                    className="text-yellow-400 focus:text-yellow-300 cursor-pointer"
-                  >
-                    {b}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild><Button variant="outline" className="w-full bg-[#0f172a] border-gray-700 text-yellow-400 justify-between">{selectedProps.length} Props <ChevronDown className="h-4 w-4" /></Button></DropdownMenuTrigger>
             <DropdownMenuContent className="w-56 bg-[#0f172a] border-gray-700 max-h-80 overflow-y-auto">
               <DropdownMenuLabel>Player Props</DropdownMenuLabel><DropdownMenuSeparator className="bg-gray-700" />
-              {currentProps.map(p => <DropdownMenuCheckboxItem key={p.id} checked={selectedProps.includes(p.id)} onCheckedChange={() => setSelectedProps(prev => prev.includes(p.id) ? prev.filter(x => x !== p.id) : [...prev, p.id])} className="text-yellow-400">{p.label}</DropdownMenuCheckboxItem>)}
+              {currentProps.map(p => (
+                <DropdownMenuCheckboxItem 
+                  key={p.id} 
+                  checked={selectedProps.includes(p.id)} 
+                  onCheckedChange={() => setSelectedProps(prev => prev.includes(p.id) ? prev.filter(x => x !== p.id) : [...prev, p.id])} 
+                  className="text-yellow-400"
+                >
+                  {p.label}
+                </DropdownMenuCheckboxItem>
+              ))}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -232,15 +233,34 @@ export default function Scanner() {
                       </td>
                       <td className="p-4">
                         <Badge variant="outline" className="border-gray-600 text-gray-300">
-                          {p.bookmaker}
+                          {p.bookmaker || "-"}
                         </Badge>
                       </td>
-                      <td className="p-4"><Badge variant="outline" className="border-yellow-600 text-yellow-400">{p.line}</Badge></td>
-                      <td className="p-4 text-green-400 font-semibold">{p.avgL10.toFixed(1)}</td>
-                      <td className="p-4"><span className={p.diff > 0 ? "text-green-400" : "text-red-400"}>{p.diff > 0 ? "+" : ""}{p.diff.toFixed(1)}</span></td>
-                      <td className="p-4"><span className={p.l5HitRate >= 50 ? "text-green-400" : "text-red-400"}>{p.l5HitRate}%</span></td>
-                      <td className="p-4"><span className={p.l10HitRate >= 50 ? "text-green-400" : "text-red-400"}>{p.l10HitRate}%</span></td>
-                      <td className="p-4"><div className="flex items-center gap-1"><TrendingUp className={`h-4 w-4 ${p.streak > 0 ? "text-green-400" : "text-red-400"}`} /><span className={p.streak > 0 ? "text-green-400" : "text-red-400"}>{p.streak}</span></div></td>
+                      <td className="p-4">
+                        <Badge variant="outline" className="border-yellow-600 text-yellow-400">
+                          {p.line || "-"}
+                        </Badge>
+                      </td>
+                      <td className="p-4 text-green-400 font-semibold">
+                        {p.avgL10 ? p.avgL10.toFixed(1) : "-"}
+                      </td>
+                      <td className="p-4">
+                        <span className={p.diff > 0 ? "text-green-400" : "text-red-400"}>
+                          {p.diff > 0 ? "+" : ""}{p.diff ? p.diff.toFixed(1) : "-"}
+                        </span>
+                      </td>
+                      <td className="p-4">
+                        <span className={p.l5HitRate >= 50 ? "text-green-400" : "text-red-400"}>{p.l5HitRate || 0}%</span>
+                      </td>
+                      <td className="p-4">
+                        <span className={p.l10HitRate >= 50 ? "text-green-400" : "text-red-400"}>{p.l10HitRate || 0}%</span>
+                      </td>
+                      <td className="p-4">
+                        <div className="flex items-center gap-1">
+                          <TrendingUp className={`h-4 w-4 ${p.streak > 0 ? "text-green-400" : "text-red-400"}`} />
+                          <span className={p.streak > 0 ? "text-green-400" : "text-red-400"}>{p.streak || 0}</span>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
