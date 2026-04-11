@@ -10,7 +10,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent,
+  DropdownMenu, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuContent,
   DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Search, ChevronDown, ArrowUpDown, TrendingUp } from "lucide-react";
@@ -47,7 +47,7 @@ export default function Scanner() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedProps, setSelectedProps] = useState<string[]>(["points"]);
-  const [selectedBookmakers, setSelectedBookmakers] = useState<string[]>(["Stake", "BetOnline"]);
+  const [selectedBookmaker, setSelectedBookmaker] = useState<string>("Stake"); // SINGLE bookmaker
   const [viewMode, setViewMode] = useState<"all" | "over" | "under">("all");
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" } | null>(null);
   
@@ -56,7 +56,7 @@ export default function Scanner() {
   useEffect(() => {
     if (playerId) return;
     fetchPlayers();
-  }, [sport, searchQuery, selectedProps, selectedBookmakers]);
+  }, [sport, searchQuery, selectedProps, selectedBookmaker]);
 
   const fetchPlayers = async () => {
     setLoading(true);
@@ -70,7 +70,7 @@ export default function Scanner() {
           sport,
           search: searchQuery || undefined,
           props: selectedProps,
-          bookmakers: selectedBookmakers,
+          bookmaker: selectedBookmaker, // SINGLE bookmaker (not array)
         }),
       });
       const data = await response.json();
@@ -155,11 +155,28 @@ export default function Scanner() {
             <Input placeholder="Search players..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="pl-10 bg-[#0f172a] border-gray-700 text-yellow-400" />
           </div>
 
+          {/* SINGLE Sportsbook Selector - Radio Buttons */}
           <DropdownMenu>
-            <DropdownMenuTrigger asChild><Button variant="outline" className="w-full bg-[#0f172a] border-gray-700 text-yellow-400 justify-between">{selectedBookmakers.length} Books <ChevronDown className="h-4 w-4" /></Button></DropdownMenuTrigger>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="w-full bg-[#0f172a] border-gray-700 text-yellow-400 justify-between">
+                {selectedBookmaker}
+                <ChevronDown className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
             <DropdownMenuContent className="w-56 bg-[#0f172a] border-gray-700">
-              <DropdownMenuLabel>Sportsbooks</DropdownMenuLabel><DropdownMenuSeparator className="bg-gray-700" />
-              {SPORTSBOOKS.map(b => <DropdownMenuCheckboxItem key={b} checked={selectedBookmakers.includes(b)} onCheckedChange={() => setSelectedBookmakers(prev => prev.includes(b) ? prev.filter(x => x !== b) : [...prev, b])} className="text-yellow-400">{b}</DropdownMenuCheckboxItem>)}
+              <DropdownMenuLabel>Sportsbook</DropdownMenuLabel>
+              <DropdownMenuSeparator className="bg-gray-700" />
+              <DropdownMenuRadioGroup value={selectedBookmaker} onValueChange={setSelectedBookmaker}>
+                {SPORTSBOOKS.map(b => (
+                  <DropdownMenuRadioItem 
+                    key={b} 
+                    value={b}
+                    className="text-yellow-400 focus:text-yellow-300 cursor-pointer"
+                  >
+                    {b}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
             </DropdownMenuContent>
           </DropdownMenu>
 
