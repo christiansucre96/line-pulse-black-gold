@@ -121,7 +121,6 @@ export default function Scanner() {
       ]);
 
       const edgeData = await edgeRes.json();
-      // ✅ FIX: Correct destructuring
       const {  communityLines } = linesRes;
 
       if (!edgeData.success) throw new Error(edgeData.error || "Failed to fetch stats");
@@ -132,9 +131,10 @@ export default function Scanner() {
         );
         return {
           ...p,
-          line: matchingLine ? matchingLine.line_value.toFixed(1) : p.line,
+          line: matchingLine ? matchingLine.line_value.toFixed(1) : (p.generated_line?.line?.toFixed(1) || p.line),
           bookmaker: matchingLine ? matchingLine.bookmaker : p.bookmaker,
           isCommunity: !!matchingLine,
+          generated_line: p.generated_line, // Keep generated line data
         };
       });
 
