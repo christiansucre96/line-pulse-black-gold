@@ -91,7 +91,6 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
       setPlayer(data.player);
       setGeneratedLines(data.generated_lines || []);
       
-      // Set line from generated data if available
       const generatedProp = (data.generated_lines || []).find((l: any) => 
         l.prop === selectedPlayerProp.toUpperCase()
       );
@@ -152,8 +151,9 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
   const maxTeamVal = Math.max(1, ...teamValues, teamLine * 1.2);
   const teamLineTop = ((maxTeamVal - teamLine) / maxTeamVal) * 100;
 
+  // ✅ FIXED: Correct function signature with 'data' parameter name
   const renderChart = (
-     any[],
+    data: any[],
     line: number,
     lineTopPercent: number,
     max: number,
@@ -211,7 +211,6 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
     </div>
   );
 
-  // Get generated line for current prop
   const currentGeneratedLine = generatedLines?.find((l: any) => 
     l.prop === selectedPlayerProp.toUpperCase()
   );
@@ -220,7 +219,7 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
     <DashboardLayout>
       <div className="p-4 max-w-7xl mx-auto space-y-6">
         
-        {/* ── HEADER ─ */}
+        {/* ── HEADER ── */}
         <div className="flex items-center justify-between">
           <button onClick={onBack} className="flex items-center gap-2 text-gray-400 hover:text-yellow-400 transition">
             <ArrowLeft size={20} /> Back
@@ -257,7 +256,6 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
             </div>
           </div>
 
-          {/* ✅ NEW: Show Generated Line Info */}
           {currentGeneratedLine && (
             <div className="flex flex-wrap items-center gap-4 mb-4 p-3 bg-[#1e293b] rounded-lg border border-gray-700">
               <div className="text-sm">
