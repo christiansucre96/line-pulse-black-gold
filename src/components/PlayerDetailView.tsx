@@ -18,19 +18,29 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
   const [line, setLine] = useState(0);
   const [cacheInfo, setCacheInfo] = useState<{ cached: boolean; age?: number } | null>(null);
   
-  // 👇 Prevents React StrictMode from double-fetching in development
+  // 👇 Prevents React StrictMode from double-fetching
   const fetchTriggeredRef = useRef(false);
+  const timeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
+    // Clear any pending timeout on unmount or playerId change
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+
     if (!playerId || typeof playerId !== "string" || playerId.trim() === "") {
       setLoading(false);
       setError("Invalid player ID");
       return;
     }
 
-    // Reset guard when playerId changes
-    fetchTriggeredRef.current = false;
-    fetchPlayer();
+    // 👇 Micro-delay bypasses React 18 StrictMode double-invocation race condition
+    timeoutRef.current = window.setTimeout(() => {
+      fetchTriggeredRef.current = false;
+      fetchPlayer();
+    }, 50);
+
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
   }, [playerId]);
 
   const fetchPlayer = async () => {
@@ -48,19 +58,22 @@ export function PlayerDetailView({ playerId, onBack }: PlayerDetailViewProps) {
 
       const response = await fetch(EDGE_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
         body: JSON.stringify(payload),
-        cache: "no-store",
       });
 
-      // Read as text first to catch empty responses safely
-      const rawText = await response.text();
-      if (!rawText.trim()) throw new Error("Server returned empty response");
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(errText || `HTTP ${response.status}`);
+      }
 
-      const data = JSON.parse(rawText);
+      const data = await response.json();
 
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || `HTTP ${response.status}`);
+      if (!data.success) {
+        throw new Error(data.error || "Request failed");
       }
 
       setPlayer(data.player);
