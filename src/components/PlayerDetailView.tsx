@@ -8,40 +8,54 @@ import { Badge } from "@/components/ui/badge";
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
 // ─────────────────────────────────────────────────────────────
-// ⚙️ CONFIGURATION
+// 🌍 FULL PROP CONFIGURATION
 // ─────────────────────────────────────────────────────────────
 
-const PROP_GROUPS: Record<string, { id: string; label: string; stackKeys?: string[] }[]> = {
+const PROP_GROUPS: Record<string, { id: string; label: string; stackKeys?: string[]; isBoolean?: boolean }[]> = {
   nba: [
-    { id: "points", label: "PTS" },
-    { id: "rebounds", label: "REB" },
-    { id: "assists", label: "AST" },
+    { id: "points", label: "PTS" }, { id: "rebounds", label: "REB" }, { id: "assists", label: "AST" },
+    { id: "threes", label: "3PM" },
     { id: "PR", label: "PR", stackKeys: ["points", "rebounds"] },
     { id: "PA", label: "PA", stackKeys: ["points", "assists"] },
     { id: "RA", label: "RA", stackKeys: ["rebounds", "assists"] },
     { id: "PRA", label: "PRA", stackKeys: ["points", "rebounds", "assists"] },
+    { id: "steals", label: "STL" }, { id: "blocks", label: "BLK" },
+    { id: "SB", label: "STL+BLK", stackKeys: ["steals", "blocks"] },
+    { id: "doubleDouble", label: "DD", isBoolean: true },
+    { id: "tripleDouble", label: "TD", isBoolean: true },
+    { id: "turnovers", label: "TO" }, { id: "minutes", label: "MIN" }
   ],
   nfl: [
-    { id: "passYards", label: "Pass Yds" },
-    { id: "recYards", label: "Rec Yds" },
-    { id: "rushYards", label: "Rush Yds" },
-    { id: "PR", label: "Pass+Rec", stackKeys: ["passYards", "recYards"] },
+    { id: "passYards", label: "Pass Yds" }, { id: "passTD", label: "Pass TD" },
+    { id: "completions", label: "Comp" }, { id: "attempts", label: "Att" }, { id: "interceptions", label: "INT" },
+    { id: "rushYards", label: "Rush Yds" }, { id: "rushAtt", label: "Rush Att" }, { id: "rushTD", label: "Rush TD" },
+    { id: "receptions", label: "Rec" }, { id: "recYards", label: "Rec Yds" }, { id: "recTD", label: "Rec TD" },
+    { id: "passRushYds", label: "Pass+Rush", stackKeys: ["passYards", "rushYards"] },
+    { id: "rushRecYds", label: "Rush+Rec", stackKeys: ["rushYards", "recYards"] },
+    { id: "anytimeTD", label: "Anytime TD", isBoolean: true },
+    { id: "firstTD", label: "First TD", isBoolean: true },
+    { id: "sacks", label: "Sacks" }, { id: "tackles", label: "Tackles" }
   ],
   mlb: [
-    { id: "hits", label: "H" },
-    { id: "homeRuns", label: "HR" },
-    { id: "rbi", label: "RBI" },
+    { id: "hits", label: "H" }, { id: "runs", label: "R" }, { id: "rbi", label: "RBI" },
+    { id: "homeRuns", label: "HR" }, { id: "totalBases", label: "TB" },
+    { id: "strikeouts", label: "Ks" }, { id: "earnedRuns", label: "ER" },
+    { id: "hitsAllowed", label: "H All" }, { id: "walksAllowed", label: "BB All" },
+    { id: "HRR", label: "H+R+RBI", stackKeys: ["hits", "runs", "rbi"] },
+    { id: "TBLadder", label: "TB Ladder" }
   ],
   nhl: [
-    { id: "goals", label: "G" },
-    { id: "assists", label: "A" },
-    { id: "shots", label: "SOG" },
+    { id: "goals", label: "G" }, { id: "assists", label: "A" },
+    { id: "points", label: "Pts", stackKeys: ["goals", "assists"] },
+    { id: "shots", label: "SOG" }, { id: "saves", label: "Saves" },
+    { id: "goalsAllowed", label: "GA" },
+    { id: "ptsShots", label: "Pts+SOG", stackKeys: ["goals", "assists", "shots"] },
+    { id: "anytimeGoal", label: "Anytime G", isBoolean: true }
   ],
   soccer: [
-    { id: "goals", label: "G" },
-    { id: "assists", label: "A" },
-    { id: "shots", label: "Shots" },
-  ],
+    { id: "goals", label: "G" }, { id: "assists", label: "A" },
+    { id: "shots", label: "Shots" }, { id: "shotsOnTarget", label: "SOT" }
+  ]
 };
 
 interface PlayerDetailViewProps {
@@ -57,7 +71,7 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
   const [error, setError] = useState<string | null>(null);
 
   const [chartView, setChartView] = useState<5 | 10 | 15 | 20>(10);
-  const [selectedPlayerProp, setSelectedPlayerProp] = useState<string>("PRA"); 
+  const [selectedPlayerProp, setSelectedPlayerProp] = useState<string>(sport === "nba" ? "PRA" : "points"); 
   const [playerLine, setPlayerLine] = useState(1);
 
   const [selectedTeamProp, setSelectedTeamProp] = useState<string>("points");
@@ -89,8 +103,15 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
 
   const getPropValue = (game: any, propId: string) => {
     const group = PROP_GROUPS[sport]?.find(g => g.id === propId);
-    if (group?.stackKeys) {
+    if (!group) return 0;
+    if (group.stackKeys) {
       return group.stackKeys.reduce((sum, key) => sum + (game[key] || 0), 0);
+    }
+    if (group.isBoolean) {
+      if (propId === "doubleDouble") return ((game.points||0) >= 10 && (game.rebounds||0) >= 10) ? 1 : 0;
+      if (propId === "tripleDouble") return ((game.points||0) >= 10 && (game.rebounds||0) >= 10 && (game.assists||0) >= 10) ? 1 : 0;
+      if (propId.includes("TD") || propId.includes("Goal") || propId.includes("HR")) return (game.goals || game.rushTD || game.passTD || game.homeRuns || 0) > 0 ? 1 : 0;
+      return 0;
     }
     return game[propId] || 0;
   };
@@ -123,9 +144,8 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
   const maxTeamVal = Math.max(1, ...teamValues, teamLine * 1.2);
   const teamLineTop = ((maxTeamVal - teamLine) / maxTeamVal) * 100;
 
-  // Reusable Chart Component
   const renderChart = (
-    data: any[],
+     any[],
     line: number,
     lineTopPercent: number,
     max: number,
@@ -254,7 +274,7 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
           </div>
         </div>
 
-        {/* ── BLOCK 3: GAME LOG TABLE (FIXED: All Props + Combos + Line) ── */}
+        {/* ── BLOCK 3: GAME LOG TABLE ── */}
         <div className="bg-[#0b1120] rounded-xl border border-gray-800 overflow-hidden">
           <div className="p-4 border-b border-gray-800 bg-[#111827] flex justify-between items-center">
             <h3 className="text-yellow-400 font-bold">Game Log - Last 15 Games</h3>
@@ -268,7 +288,6 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
                 <tr>
                   <th className="p-3 text-left">Opponent</th>
                   <th className="p-3 text-left">Date</th>
-                  {/* ✅ ALL PROPS INCLUDING COMBOS */}
                   {PROP_GROUPS[sport]?.map(p => (
                     <th 
                       key={p.id} 
@@ -291,16 +310,14 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
                       <td className="p-3 font-medium text-gray-200 whitespace-nowrap">{g.opponent}</td>
                       <td className="p-3 text-gray-400 whitespace-nowrap">{g.game_date}</td>
                       
-                      {/* ✅ DYNAMIC COLUMNS FOR ALL PROPS/COMBOS */}
                       {PROP_GROUPS[sport]?.map(p => {
                         const val = getPropValue(g, p.id);
-                        const isThisOver = val > playerLine;
                         return (
                           <td 
                             key={p.id} 
                             className={`p-3 text-right font-medium whitespace-nowrap ${
                               p.id === selectedPlayerProp 
-                                ? (isThisOver ? "text-green-400" : "text-red-400") 
+                                ? (val > playerLine ? "text-green-400" : "text-red-400") 
                                 : "text-gray-300"
                             }`}
                           >
@@ -309,10 +326,8 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
                         );
                       })}
                       
-                      {/* Line Column */}
                       <td className="p-3 text-right text-gray-400 font-mono">{playerLine.toFixed(1)}</td>
                       
-                      {/* Result Badge */}
                       <td className="p-3 text-center">
                         <Badge variant={isOver ? "default" : "secondary"} className={isOver ? "bg-green-600 hover:bg-green-700" : "bg-red-600 hover:bg-red-700 text-white"}>
                           {isOver ? "OVER" : "UNDER"}
