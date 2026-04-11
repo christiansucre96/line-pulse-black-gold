@@ -192,6 +192,7 @@ export default function Scanner() {
                 <thead className="bg-[#0f172a] border-b border-gray-800">
                   <tr>
                     <SortHeader label="Player" sortKey="full_name" />
+                    <SortHeader label="Apps" sortKey="bookmaker" />
                     <SortHeader label="Line" sortKey="line" />
                     <SortHeader label="Avg L10" sortKey="avgL10" />
                     <SortHeader label="Diff" sortKey="diff" />
@@ -211,6 +212,11 @@ export default function Scanner() {
                             <p className="text-xs text-gray-400">{p.team} • {getPropDisplayName()}</p>
                           </div>
                         </div>
+                      </td>
+                      <td className="p-4">
+                        <Badge variant="outline" className="border-gray-600 text-gray-300">
+                          {p.bookmaker}
+                        </Badge>
                       </td>
                       <td className="p-4"><Badge variant="outline" className="border-yellow-600 text-yellow-400">{p.line}</Badge></td>
                       <td className="p-4 text-green-400 font-semibold">{p.avgL10.toFixed(1)}</td>
