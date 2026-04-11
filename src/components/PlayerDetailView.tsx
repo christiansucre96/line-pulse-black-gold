@@ -1,6 +1,6 @@
 // src/components/PlayerDetailView.tsx
 import { useEffect, useState } from "react";
-import { ArrowLeft, TrendingUp, Activity, ChevronDown, Minus, Plus } from "lucide-react";
+import { ArrowLeft, Activity, Minus, Plus } from "lucide-react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -56,14 +56,12 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // --- STATE FOR BLOCK 1: Player Performance ---
   const [chartView, setChartView] = useState<5 | 10 | 15 | 20>(10);
   const [selectedPlayerProp, setSelectedPlayerProp] = useState<string>("PR"); 
-  const [playerLine, setPlayerLine] = useState(1); // ✅ Start at 1 to prevent 0 height
+  const [playerLine, setPlayerLine] = useState(1);
 
-  // --- STATE FOR BLOCK 2: Team Stats ---
   const [selectedTeamProp, setSelectedTeamProp] = useState<string>("points");
-  const [teamLine, setTeamLine] = useState(1); // ✅ Start at 1
+  const [teamLine, setTeamLine] = useState(1);
 
   useEffect(() => { fetchPlayer(); }, [playerId]);
 
@@ -80,20 +78,15 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
       if (!data.success) throw new Error(data.error || "Failed");
       
       setPlayer(data.player);
-      
-      // Calculate initial lines
       const pAvg = calcAvgForProp(data.player.stats, 10, selectedPlayerProp);
-      setPlayerLine(Math.max(1, pAvg)); // Ensure line is at least 1
-      
+      setPlayerLine(Math.max(1, pAvg));
       const tAvg = calcAvgForProp(data.player.stats, 10, selectedTeamProp);
       setTeamLine(Math.max(1, tAvg));
-
     } catch (err: any) {
       setError(err.message || "Failed to load");
     } finally { setLoading(false); }
   };
 
-  // --- CALCULATION HELPERS ---
   const getPropValue = (game: any, propId: string) => {
     const group = PROP_GROUPS[sport]?.find(g => g.id === propId);
     if (group?.stackKeys) {
@@ -120,12 +113,80 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
   if (!player) return <DashboardLayout><div className="p-20 text-center">No data</div></DashboardLayout>;
 
   const games = player.stats || [];
-  const viewLimit = chartView; 
-  const chartGames = games.slice(0, viewLimit);
+  const chartGames = games.slice(0, chartView);
   
-  // ✅ FIX: Calculate Max Value Safely
-  const propValues = chartGames.map(g => getPropValue(g, selectedPlayerProp));
-  const maxVal = Math.max(1, ...propValues, playerLine * 1.2); // Ensure maxVal is at least 1
+  // ✅ Consistent scaling calculation
+  const playerValues = chartGames.map(g => getPropValue(g, selectedPlayerProp));
+  const maxVal = Math.max(1, ...playerValues, playerLine * 1.2);
+  const playerLineTop = ((maxVal - playerLine) / maxVal) * 100;
+
+  const teamValues = games.slice(0, 10).map(g => getPropValue(g, selectedTeamProp));
+  const maxTeamVal = Math.max(1, ...teamValues, teamLine * 1.2);
+  const teamLineTop = ((maxTeamVal - teamLine) / maxTeamVal) * 100;
+
+  // Reusable Chart Component
+  const renderChart = (
+    data: any[],
+    line: number,
+    lineTopPercent: number,
+    max: number,
+    propId: string,
+    heightClass: string = "h-64"
+  ) => (
+    <div className={`${heightClass} w-full flex items-end justify-between gap-1 pb-8 relative border-b border-gray-800`}>
+      {/* Y-Axis Scale */}
+      <div className="absolute left-0 top-0 bottom-8 w-12 flex flex-col justify-between text-[10px] text-gray-500 pr-2 text-right pointer-events-none">
+        <span>{Math.round(max)}</span>
+        <span>{Math.round(max / 2)}</span>
+        <span>0</span>
+      </div>
+
+      {/* ✅ SINGLE CONTINUOUS LINE */}
+      <div 
+        className="absolute left-12 right-0 border-t-2 border-dashed border-yellow-500/80 pointer-events-none z-20"
+        style={{ top: `${lineTopPercent}%` }}
+      >
+        <div className="absolute -left-16 -top-2 bg-yellow-500 text-black text-[10px] font-bold px-1.5 py-0.5 rounded">
+          Line: {line.toFixed(1)}
+        </div>
+      </div>
+
+      {/* Grid Lines (subtle) */}
+      <div className="absolute left-12 right-0 top-0 bottom-8 pointer-events-none">
+        <div className="absolute w-full border-t border-gray-800/50" style={{ top: "25%" }} />
+        <div className="absolute w-full border-t border-gray-800/50" style={{ top: "50%" }} />
+        <div className="absolute w-full border-t border-gray-800/50" style={{ top: "75%" }} />
+      </div>
+
+      {/* Bars */}
+      <div className="ml-14 flex items-end justify-between gap-1 w-full h-full">
+        {data.map((g: any, i: number) => {
+          const val = getPropValue(g, propId);
+          const isOver = val > line;
+          const barHeight = Math.max(4, (val / max) * 100);
+          return (
+            <div key={i} className="flex-1 flex flex-col items-center group relative h-full">
+              <div className="opacity-0 group-hover:opacity-100 absolute -top-10 bg-[#0f172a] border border-gray-700 text-xs p-2 rounded z-30 pointer-events-none whitespace-nowrap transition-opacity">
+                <p className="text-yellow-400 font-bold">{g.opponent} ({g.game_date})</p>
+                <p className={isOver ? "text-green-400" : "text-red-400"}>Val: {val} {isOver ? "✓" : "✗"}</p>
+              </div>
+              <div className="w-full flex flex-col justify-end h-full relative">
+                <div 
+                  className={`w-full rounded-t-sm transition-all duration-300 ${
+                    isOver ? "bg-gradient-to-t from-green-800 to-green-500" : "bg-gradient-to-t from-red-800 to-red-500"
+                  }`}
+                  style={{ height: `${barHeight}%` }}
+                />
+              </div>
+              <div className="absolute -bottom-6 w-full text-center">
+                <p className="text-[10px] text-gray-500 font-bold truncate">{g.opponent}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 
   return (
     <DashboardLayout>
@@ -144,8 +205,6 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
 
         {/* ── BLOCK 1: PLAYER PERFORMANCE ── */}
         <div className="bg-[#0b1120] rounded-xl border border-gray-800 p-5 shadow-lg relative">
-          
-          {/* Top Bar */}
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
             <div>
               <h2 className="text-lg font-bold text-white mb-1">
@@ -158,129 +217,40 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
                 <button onClick={() => setPlayerLine(v => v + 0.5)} className="p-1 hover:bg-gray-700 rounded"><Plus size={14} className="text-yellow-400" /></button>
               </div>
             </div>
-
-            {/* Hit Rate Badges */}
             <div className="flex gap-2">
               {[5, 10, 15, 20].map((n) => {
                 const rate = calcHitRate(games, n, selectedPlayerProp, playerLine);
                 return (
-                  <button
-                    key={n}
-                    onClick={() => setChartView(n as any)}
-                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                      chartView === n 
-                        ? "bg-yellow-500 text-black shadow-md shadow-yellow-500/20" 
-                        : "bg-[#1e293b] text-gray-400 hover:text-white"
-                    }`}
-                  >
-                    L{n}
-                    <div className={`text-[10px] ${rate >= 50 ? "text-green-400" : "text-red-400"}`}>{rate}%</div>
+                  <button key={n} onClick={() => setChartView(n as any)} className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${chartView === n ? "bg-yellow-500 text-black" : "bg-[#1e293b] text-gray-400 hover:text-white"}`}>
+                    L{n}<div className={`text-[10px] ${rate >= 50 ? "text-green-400" : "text-red-400"}`}>{rate}%</div>
                   </button>
                 );
               })}
             </div>
           </div>
 
-          {/* Prop Selector */}
           <div className="relative inline-block mb-4 w-full sm:w-48">
-             <select 
-               value={selectedPlayerProp} 
-               onChange={e => setSelectedPlayerProp(e.target.value)}
-               className="w-full bg-[#1e293b] text-yellow-400 text-sm rounded border border-gray-700 py-2 px-3 appearance-none focus:outline-none focus:border-yellow-500"
-             >
-               {PROP_GROUPS[sport]?.map(p => (
-                 <option key={p.id} value={p.id}>{p.label}</option>
-               ))}
+             <select value={selectedPlayerProp} onChange={e => setSelectedPlayerProp(e.target.value)} className="w-full bg-[#1e293b] text-yellow-400 text-sm rounded border border-gray-700 py-2 px-3 appearance-none focus:outline-none focus:border-yellow-500">
+               {PROP_GROUPS[sport]?.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
              </select>
-             <ChevronDown className="absolute right-3 top-2.5 h-4 w-4 text-gray-400 pointer-events-none" />
           </div>
 
-          {/* ✅ Chart Area - Fixed Height & Flex */}
-          <div className="h-64 w-full flex items-end justify-between gap-1 pb-8 relative border-b border-gray-800">
-            {chartGames.length > 0 ? chartGames.map((g: any, i: number) => {
-              const totalVal = getPropValue(g, selectedPlayerProp);
-              const isOver = totalVal > playerLine;
-              // ✅ Safe height calculation
-              const barHeight = Math.max(2, (totalVal / maxVal) * 100); 
-              
-              return (
-                <div key={i} className="flex-1 flex flex-col items-center group relative h-full">
-                  {/* Tooltip */}
-                  <div className="absolute bottom-full mb-2 hidden group-hover:block bg-black border border-gray-700 text-xs p-2 rounded z-20 whitespace-nowrap">
-                    <p className="text-yellow-400 font-bold">{g.opponent} ({g.game_date})</p>
-                    <p className={isOver ? "text-green-400" : "text-red-400"}>
-                      Total: {totalVal} {isOver ? "✓" : "✗"}
-                    </p>
-                  </div>
-
-                  {/* Bar Container */}
-                  <div className="w-full flex flex-col justify-end h-full relative">
-                    {/* Line Marker */}
-                    {isOver && (
-                      <div 
-                        className="absolute w-full border-t-2 border-dashed border-yellow-500/80 z-10 pointer-events-none"
-                        style={{ bottom: `${(playerLine / totalVal) * 100}%` }}
-                      />
-                    )}
-                    
-                    {/* ✅ The Bar */}
-                    <div 
-                      className={`w-full rounded-t-sm transition-all duration-300 ${
-                        isOver 
-                          ? "bg-gradient-to-t from-green-800 to-green-500" 
-                          : "bg-gradient-to-t from-red-800 to-red-500"
-                      }`}
-                      style={{ height: `${barHeight}%` }}
-                    />
-                  </div>
-
-                  {/* Label */}
-                  <div className="absolute -bottom-6 w-full text-center">
-                    <p className="text-[10px] text-gray-500 font-bold truncate">{g.opponent}</p>
-                  </div>
-                </div>
-              );
-            }) : (
-              <div className="w-full h-full flex items-center justify-center text-gray-500">No data to display</div>
-            )}
-          </div>
+          {/* ✅ FIXED CHART WITH SINGLE LINE */}
+          {renderChart(chartGames, playerLine, playerLineTop, maxVal, selectedPlayerProp, "h-64")}
         </div>
 
         {/* ── BLOCK 2: TEAM STATS ── */}
         <div className="bg-[#0b1120] rounded-xl border border-gray-800 p-5 shadow-lg">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-md font-bold text-gray-300">Team Stats (Last 10 Opponents)</h3>
-            <div className="flex items-center gap-2">
-               <select 
-                 value={selectedTeamProp} 
-                 onChange={e => setSelectedTeamProp(e.target.value)}
-                 className="bg-[#1e293b] text-yellow-400 text-xs rounded border border-gray-700 py-1 px-2"
-               >
-                 {PROP_GROUPS[sport]?.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
-               </select>
-            </div>
+            <select value={selectedTeamProp} onChange={e => setSelectedTeamProp(e.target.value)} className="bg-[#1e293b] text-yellow-400 text-xs rounded border border-gray-700 py-1 px-2">
+              {PROP_GROUPS[sport]?.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+            </select>
           </div>
 
-          <div className="h-48 flex items-end gap-2 pb-6 relative border-b border-gray-800 overflow-x-auto">
-            {games.slice(0, 10).reverse().map((g: any, i: number) => {
-              const val = getPropValue(g, selectedTeamProp);
-              const isOver = val > teamLine;
-              const maxTeamVal = Math.max(1, ...games.slice(0, 10).map(x => getPropValue(x, selectedTeamProp)), teamLine * 1.2);
-              const height = Math.max(2, (val / maxTeamVal) * 100);
+          {/* ✅ FIXED CHART WITH SINGLE LINE */}
+          {renderChart(games.slice(0, 10).reverse(), teamLine, teamLineTop, maxTeamVal, selectedTeamProp, "h-48")}
 
-              return (
-                <div key={i} className="flex-1 min-w-[30px] flex flex-col items-center group relative h-full">
-                  <div 
-                    className={`w-full rounded-t transition-all ${isOver ? "bg-green-600" : "bg-red-600"}`}
-                    style={{ height: `${height}%` }}
-                  />
-                  <div className="absolute -bottom-6 text-center w-full">
-                    <p className="text-[10px] font-bold text-gray-400">{g.opponent}</p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
           <div className="flex justify-center mt-6">
              <div className="flex items-center gap-2">
                 <span className="text-xs text-gray-400">Line:</span>
@@ -299,16 +269,13 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
               <Activity size={14} className="mr-2" /> Refresh
             </Button>
           </div>
-          
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-[#0f172a] text-gray-400 uppercase text-xs">
                 <tr>
                   <th className="p-3 text-left">Opponent</th>
                   <th className="p-3 text-left">Date</th>
-                  {PROP_GROUPS[sport]?.filter(p => !p.stackKeys).map(p => (
-                    <th key={p.id} className="p-3 text-right">{p.label}</th>
-                  ))}
+                  {PROP_GROUPS[sport]?.filter(p => !p.stackKeys).map(p => <th key={p.id} className="p-3 text-right">{p.label}</th>)}
                   <th className="p-3 text-right text-yellow-400">Total</th>
                   <th className="p-3 text-center">Result</th>
                 </tr>
@@ -317,17 +284,12 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
                 {games.slice(0, 15).map((g: any, i: number) => {
                   const total = getPropValue(g, selectedPlayerProp);
                   const isOver = total > playerLine;
-                  
                   return (
                     <tr key={i} className={`hover:bg-[#1e293b] transition ${isOver ? "bg-green-900/10" : "bg-red-900/10"}`}>
                       <td className="p-3 font-medium text-gray-200">{g.opponent}</td>
                       <td className="p-3 text-gray-400">{g.game_date}</td>
-                      {PROP_GROUPS[sport]?.filter(p => !p.stackKeys).map(p => (
-                        <td key={p.id} className="p-3 text-right text-gray-300">{g[p.id] || 0}</td>
-                      ))}
-                      <td className={`p-3 text-right font-bold ${isOver ? "text-green-400" : "text-red-400"}`}>
-                        {total}
-                      </td>
+                      {PROP_GROUPS[sport]?.filter(p => !p.stackKeys).map(p => <td key={p.id} className="p-3 text-right text-gray-300">{g[p.id] || 0}</td>)}
+                      <td className={`p-3 text-right font-bold ${isOver ? "text-green-400" : "text-red-400"}`}>{total}</td>
                       <td className="p-3 text-center">
                         <Badge variant={isOver ? "default" : "secondary"} className={isOver ? "bg-green-600 hover:bg-green-700" : "bg-red-600 hover:bg-red-700 text-white"}>
                           {isOver ? "OVER" : "UNDER"}
@@ -340,7 +302,6 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
             </table>
           </div>
         </div>
-
       </div>
     </DashboardLayout>
   );
