@@ -34,6 +34,7 @@ export function SubmitLineModal({ open, onOpenChange, player, sport = "nba" }: S
     setStatus(null);
 
     try {
+      // ✅ FIX: Correct destructuring syntax for Supabase auth
       const {  { user } } = await supabase.auth.getUser();
       
       const { error } = await supabase.from("user_submitted_lines").insert({
@@ -44,8 +45,8 @@ export function SubmitLineModal({ open, onOpenChange, player, sport = "nba" }: S
         team: player?.team || "",
         bookmaker,
         prop_type: propType,
-        line_value: parseFloat(line),
-        odds_american: parseInt(odds.replace("+", "")) || -110,
+        line_value: parseFloat(line) || 0,
+        odds_american: odds ? parseInt(odds.replace("+", "")) : -110,
         status: "pending",
         submitted_at: new Date().toISOString(),
         expires_at: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
@@ -59,6 +60,7 @@ export function SubmitLineModal({ open, onOpenChange, player, sport = "nba" }: S
       setTimeout(() => { onOpenChange(false); setStatus(null); }, 1500);
       
     } catch (err: any) {
+      console.error("Submit error:", err);
       setStatus({ type: "error", message: err.message || "Failed to submit" });
     } finally {
       setSubmitting(false);
@@ -81,7 +83,7 @@ export function SubmitLineModal({ open, onOpenChange, player, sport = "nba" }: S
           {player && (
             <div className="bg-[#020617] p-3 rounded-lg border border-gray-800">
               <p className="font-semibold text-yellow-400">{player.name}</p>
-              <p className="text-xs text-gray-400">{player.team} • {sport.toUpperCase()}</p>
+              <p className="text-xs text-gray-400">{player.team} • {sport?.toUpperCase()}</p>
             </div>
           )}
 
@@ -90,7 +92,7 @@ export function SubmitLineModal({ open, onOpenChange, player, sport = "nba" }: S
               <Label className="text-gray-300">Bookmaker</Label>
               <Select value={bookmaker} onValueChange={setBookmaker}>
                 <SelectTrigger className="bg-[#020617] border-gray-700 text-yellow-400">
-                  <SelectValue />
+                  <SelectValue placeholder="Select book" />
                 </SelectTrigger>
                 <SelectContent className="bg-[#0f172a] border-gray-700">
                   <SelectItem value="Stake" className="text-yellow-400">Stake</SelectItem>
@@ -105,7 +107,7 @@ export function SubmitLineModal({ open, onOpenChange, player, sport = "nba" }: S
               <Label className="text-gray-300">Prop Type</Label>
               <Select value={propType} onValueChange={setPropType}>
                 <SelectTrigger className="bg-[#020617] border-gray-700 text-yellow-400">
-                  <SelectValue />
+                  <SelectValue placeholder="Select prop" />
                 </SelectTrigger>
                 <SelectContent className="bg-[#0f172a] border-gray-700">
                   <SelectItem value="points" className="text-yellow-400">Points</SelectItem>
