@@ -121,6 +121,7 @@ export default function Scanner() {
       ]);
 
       const edgeData = await edgeRes.json();
+      // ✅ FIX: Correct destructuring
       const {  communityLines } = linesRes;
 
       if (!edgeData.success) throw new Error(edgeData.error || "Failed to fetch stats");
