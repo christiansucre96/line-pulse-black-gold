@@ -151,7 +151,7 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
   const maxTeamVal = Math.max(1, ...teamValues, teamLine * 1.2);
   const teamLineTop = ((maxTeamVal - teamLine) / maxTeamVal) * 100;
 
-  // ✅ FIXED: Correct function signature with 'data' parameter name
+  // ✅ FIXED: Added 'data' parameter name
   const renderChart = (
     data: any[],
     line: number,
@@ -219,7 +219,7 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
     <DashboardLayout>
       <div className="p-4 max-w-7xl mx-auto space-y-6">
         
-        {/* ── HEADER ── */}
+        {/* ── HEADER ─ */}
         <div className="flex items-center justify-between">
           <button onClick={onBack} className="flex items-center gap-2 text-gray-400 hover:text-yellow-400 transition">
             <ArrowLeft size={20} /> Back
