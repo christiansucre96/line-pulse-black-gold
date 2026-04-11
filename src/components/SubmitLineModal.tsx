@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
 import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 
 const supabase = createClient(
@@ -35,11 +34,10 @@ export function SubmitLineModal({ open, onOpenChange, player, sport = "nba" }: S
     setStatus(null);
 
     try {
-      // ✅ FIX: Correct destructuring syntax
-      const { data: { user } } = await supabase.auth.getUser();
+      const {  { user } } = await supabase.auth.getUser();
       
       const { error } = await supabase.from("user_submitted_lines").insert({
-        user_id: user?.id || null, // Allow null if anonymous
+        user_id: user?.id || null,
         sport,
         player_id: player?.id || null,
         player_name: player?.name || "",
@@ -50,21 +48,15 @@ export function SubmitLineModal({ open, onOpenChange, player, sport = "nba" }: S
         odds_american: parseInt(odds.replace("+", "")) || -110,
         status: "pending",
         submitted_at: new Date().toISOString(),
-        expires_at: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(), // 48h expiry
+        expires_at: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
       });
 
       if (error) throw error;
 
       setStatus({ type: "success", message: "✅ Line submitted! Earn reputation when verified." });
-      
-      // Reset form after success
       setLine("");
       setOdds("-110");
-      
-      setTimeout(() => {
-        onOpenChange(false);
-        setStatus(null);
-      }, 1500);
+      setTimeout(() => { onOpenChange(false); setStatus(null); }, 1500);
       
     } catch (err: any) {
       setStatus({ type: "error", message: err.message || "Failed to submit" });
@@ -119,7 +111,7 @@ export function SubmitLineModal({ open, onOpenChange, player, sport = "nba" }: S
                   <SelectItem value="points" className="text-yellow-400">Points</SelectItem>
                   <SelectItem value="rebounds" className="text-yellow-400">Rebounds</SelectItem>
                   <SelectItem value="assists" className="text-yellow-400">Assists</SelectItem>
-                  <SelectItem value="ptra" className="text-yellow-400">PTS+REB+AST</SelectItem>
+                  <SelectItem value="PRA" className="text-yellow-400">Pts+Reb+Ast</SelectItem>
                 </SelectContent>
               </Select>
             </div>
