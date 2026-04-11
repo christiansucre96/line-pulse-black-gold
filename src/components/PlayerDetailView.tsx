@@ -7,10 +7,6 @@ import { Badge } from "@/components/ui/badge";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
-// ─────────────────────────────────────────────────────────────
-// 🌍 FULL PROP CONFIGURATION
-// ─────────────────────────────────────────────────────────────
-
 const PROP_GROUPS: Record<string, { id: string; label: string; stackKeys?: string[]; isBoolean?: boolean }[]> = {
   nba: [
     { id: "points", label: "PTS" }, { id: "rebounds", label: "REB" }, { id: "assists", label: "AST" },
@@ -69,6 +65,7 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
   const [player, setPlayer] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [generatedLines, setGeneratedLines] = useState<any[]>([]);
 
   const [chartView, setChartView] = useState<5 | 10 | 15 | 20>(10);
   const [selectedPlayerProp, setSelectedPlayerProp] = useState<string>(sport === "nba" ? "PRA" : "points"); 
@@ -92,8 +89,19 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
       if (!data.success) throw new Error(data.error || "Failed");
       
       setPlayer(data.player);
-      const pAvg = calcAvgForProp(data.player.stats, 10, selectedPlayerProp);
-      setPlayerLine(Math.max(1, pAvg));
+      setGeneratedLines(data.generated_lines || []);
+      
+      // Set line from generated data if available
+      const generatedProp = (data.generated_lines || []).find((l: any) => 
+        l.prop === selectedPlayerProp.toUpperCase()
+      );
+      if (generatedProp) {
+        setPlayerLine(generatedProp.line);
+      } else {
+        const pAvg = calcAvgForProp(data.player.stats, 10, selectedPlayerProp);
+        setPlayerLine(Math.max(1, pAvg));
+      }
+      
       const tAvg = calcAvgForProp(data.player.stats, 10, selectedTeamProp);
       setTeamLine(Math.max(1, tAvg));
     } catch (err: any) {
@@ -144,9 +152,8 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
   const maxTeamVal = Math.max(1, ...teamValues, teamLine * 1.2);
   const teamLineTop = ((maxTeamVal - teamLine) / maxTeamVal) * 100;
 
-  // ✅ FIXED: Corrected function signature (added 'data:' parameter name)
   const renderChart = (
-    data: any[],
+     any[],
     line: number,
     lineTopPercent: number,
     max: number,
@@ -204,6 +211,11 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
     </div>
   );
 
+  // Get generated line for current prop
+  const currentGeneratedLine = generatedLines?.find((l: any) => 
+    l.prop === selectedPlayerProp.toUpperCase()
+  );
+
   return (
     <DashboardLayout>
       <div className="p-4 max-w-7xl mx-auto space-y-6">
@@ -244,6 +256,32 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
               })}
             </div>
           </div>
+
+          {/* ✅ NEW: Show Generated Line Info */}
+          {currentGeneratedLine && (
+            <div className="flex flex-wrap items-center gap-4 mb-4 p-3 bg-[#1e293b] rounded-lg border border-gray-700">
+              <div className="text-sm">
+                <span className="text-gray-400">Our Line:</span>
+                <span className="ml-2 font-bold text-yellow-400">{currentGeneratedLine.line.toFixed(1)}</span>
+              </div>
+              <div className="text-sm">
+                <span className="text-gray-400">Projection:</span>
+                <span className="ml-2 font-bold text-white">{currentGeneratedLine.projection.toFixed(2)}</span>
+              </div>
+              <div className="text-sm">
+                <span className="text-gray-400">Confidence:</span>
+                <span className={`ml-2 font-bold ${currentGeneratedLine.confidence > 70 ? "text-green-400" : "text-yellow-400"}`}>
+                  {currentGeneratedLine.confidence}%
+                </span>
+              </div>
+              <div className="text-sm">
+                <span className="text-gray-400">Implied Odds:</span>
+                <span className="ml-2 font-bold text-white">
+                  {currentGeneratedLine.americanOdds > 0 ? "+" : ""}{currentGeneratedLine.americanOdds}
+                </span>
+              </div>
+            </div>
+          )}
 
           <div className="relative inline-block mb-4 w-full sm:w-48">
              <select value={selectedPlayerProp} onChange={e => setSelectedPlayerProp(e.target.value)} className="w-full bg-[#1e293b] text-yellow-400 text-sm rounded border border-gray-700 py-2 px-3 appearance-none focus:outline-none focus:border-yellow-500">
