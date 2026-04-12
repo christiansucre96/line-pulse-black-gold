@@ -1,6 +1,6 @@
 // src/components/PlayerDetailView.tsx
 import { useEffect, useState } from "react";
-import { ArrowLeft, Activity, Minus, Plus } from "lucide-react";
+import { ArrowLeft, Activity, Minus, Plus, TrendingUp } from "lucide-react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -112,22 +112,16 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
   // ✅ FIX: Convert stats object to array of game objects
   const convertStatsToGames = (stats: any) => {
     if (!stats || typeof stats !== "object") return [];
-    
-    // Get the first array to determine length
     const firstKey = Object.keys(stats)[0];
     if (!firstKey) return [];
-    
     const length = Array.isArray(stats[firstKey]) ? stats[firstKey].length : 0;
     if (length === 0) return [];
     
-    // Convert to array of game objects
     const games = [];
     for (let i = 0; i < length; i++) {
       const game: any = {};
       for (const key in stats) {
-        if (Array.isArray(stats[key])) {
-          game[key] = stats[key][i];
-        }
+        if (Array.isArray(stats[key])) game[key] = stats[key][i];
       }
       games.push(game);
     }
@@ -174,7 +168,6 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
   if (error) return <DashboardLayout><div className="p-20 text-center text-red-400">{error}</div></DashboardLayout>;
   if (!player) return <DashboardLayout><div className="p-20 text-center">No data</div></DashboardLayout>;
 
-  // ✅ FIX: Convert stats object to games array
   const games = convertStatsToGames(player.stats);
   const chartGames = games.slice(0, chartView);
   
@@ -188,11 +181,7 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
 
   const renderChart = (data: any[], line: number, lineTopPercent: number, max: number, propId: string, heightClass: string = "h-64") => {
     if (!Array.isArray(data) || data.length === 0) {
-      return (
-        <div className={`${heightClass} flex items-center justify-center text-gray-500`}>
-          No data available
-        </div>
-      );
+      return <div className={`${heightClass} flex items-center justify-center text-gray-500`}>No data available</div>;
     }
     
     return (
@@ -256,7 +245,7 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
     <DashboardLayout>
       <div className="p-4 max-w-7xl mx-auto space-y-6">
         
-        {/* ── HEADER ── */}
+        {/* ── HEADER ─ */}
         <div className="flex items-center justify-between">
           <button onClick={onBack} className="flex items-center gap-2 text-gray-400 hover:text-yellow-400 transition">
             <ArrowLeft size={20} /> Back
@@ -304,15 +293,15 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
                 <span className="ml-2 font-bold text-white">{typeof currentGeneratedLine.projection === "number" ? currentGeneratedLine.projection.toFixed(2) : "-"}</span>
               </div>
               <div className="text-sm">
-                <span className="text-gray-400">Confidence:</span>
-                <span className={`ml-2 font-bold ${typeof currentGeneratedLine.confidence === "number" && currentGeneratedLine.confidence > 70 ? "text-green-400" : "text-yellow-400"}`}>
-                  {typeof currentGeneratedLine.confidence === "number" ? currentGeneratedLine.confidence : 0}%
+                <span className="text-gray-400">Edge:</span>
+                <span className={`ml-2 font-bold ${currentGeneratedLine.edgePct && currentGeneratedLine.edgePct.includes('-') ? "text-red-400" : "text-green-400"}`}>
+                  {currentGeneratedLine.edgePct || "0%"}
                 </span>
               </div>
               <div className="text-sm">
-                <span className="text-gray-400">Implied Odds:</span>
-                <span className="ml-2 font-bold text-white">
-                  {typeof currentGeneratedLine.americanOdds === "number" ? (currentGeneratedLine.americanOdds > 0 ? "+" : "") + currentGeneratedLine.americanOdds : "-110"}
+                <span className="text-gray-400">EV:</span>
+                <span className={`ml-2 font-bold ${typeof currentGeneratedLine.ev === "number" && currentGeneratedLine.ev > 0 ? "text-green-400" : "text-red-400"}`}>
+                  {typeof currentGeneratedLine.ev === "number" ? currentGeneratedLine.ev.toFixed(3) : "0.000"}
                 </span>
               </div>
             </div>
