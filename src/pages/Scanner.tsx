@@ -110,7 +110,9 @@ export default function Scanner() {
       const edgeData = await edgeRes.json();
       if (!edgeData.success) throw new Error(edgeData.error || "Failed to fetch stats");
 
-      setPlayers(edgeData.players || []);
+      // ✅ FIX: Ensure players is always an array
+      const playersList = Array.isArray(edgeData.players) ? edgeData.players : [];
+      setPlayers(playersList);
     } catch (err: any) {
       setError(err.message || "Failed to load data");
     } finally {
@@ -159,6 +161,28 @@ export default function Scanner() {
     </th>
   );
 
+  // ✅ FIX: Safe function to get prop labels
+  const getPropLabels = () => {
+    if (!Array.isArray(selectedProps)) return "";
+    return selectedProps
+      .map(id => {
+        const prop = currentProps.find(p => p.id === id);
+        return prop?.label || id;
+      })
+      .join("+");
+  };
+
+  // ✅ FIX: Safe function to get initials
+  const getInitials = (name: any) => {
+    if (typeof name !== "string" || !name) return "??";
+    return name
+      .split(" ")
+      .map((n: string) => n[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase();
+  };
+
   return (
     <DashboardLayout>
       <div className="p-4 max-w-7xl mx-auto">
@@ -194,7 +218,7 @@ export default function Scanner() {
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" className="w-full bg-[#0f172a] border-gray-700 text-yellow-400 justify-between">
-                {selectedProps.length} Props <ChevronDown className="h-4 w-4" />
+                {Array.isArray(selectedProps) ? selectedProps.length : 0} Props <ChevronDown className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent className="w-56 bg-[#0f172a] border-gray-700 max-h-80 overflow-y-auto">
@@ -202,8 +226,15 @@ export default function Scanner() {
               {currentProps.map(p => (
                 <DropdownMenuCheckboxItem 
                   key={p.id} 
-                  checked={selectedProps.includes(p.id)} 
-                  onCheckedChange={() => setSelectedProps(prev => prev.includes(p.id) ? prev.filter(x => x !== p.id) : [...prev, p.id])} 
+                  checked={Array.isArray(selectedProps) && selectedProps.includes(p.id)} 
+                  onCheckedChange={() => {
+                    if (!Array.isArray(selectedProps)) return;
+                    setSelectedProps(prev => 
+                      prev.includes(p.id) 
+                        ? prev.filter(x => x !== p.id) 
+                        : [...prev, p.id]
+                    );
+                  }} 
                   className="text-yellow-400"
                 >
                   {p.label}
@@ -242,46 +273,58 @@ export default function Scanner() {
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedPlayers.map((p, i) => (
-                    <tr key={i} onClick={() => handlePlayerClick(p.player_id)} className="border-b border-gray-800 hover:bg-[#0f172a] cursor-pointer transition">
-                      <td className="p-4">
-                        <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-full bg-gradient-to-br from-yellow-500 to-yellow-700 flex items-center justify-center text-black font-bold text-sm">
-                            {(p.full_name || "?").split(" ").map((n: string) => n[0]).join("").slice(0, 2)}
+                  {sortedPlayers.map((p, i) => {
+                    // ✅ FIX: Safe access to player data
+                    const fullName = typeof p.full_name === "string" ? p.full_name : "Unknown";
+                    const team = typeof p.team === "string" ? p.team : "-";
+                    const line = p.line ? String(p.line) : "-";
+                    const avgL10 = typeof p.avgL10 === "number" ? p.avgL10.toFixed(1) : "-";
+                    const diff = typeof p.diff === "number" ? (p.diff > 0 ? "+" : "") + p.diff.toFixed(1) : "-";
+                    const l5HitRate = typeof p.l5HitRate === "number" ? `${p.l5HitRate}%` : "0%";
+                    const l10HitRate = typeof p.l10HitRate === "number" ? `${p.l10HitRate}%` : "0%";
+                    const streak = typeof p.streak === "number" ? p.streak : 0;
+
+                    return (
+                      <tr key={i} onClick={() => handlePlayerClick(p.player_id)} className="border-b border-gray-800 hover:bg-[#0f172a] cursor-pointer transition">
+                        <td className="p-4">
+                          <div className="flex items-center gap-3">
+                            <div className="h-10 w-10 rounded-full bg-gradient-to-br from-yellow-500 to-yellow-700 flex items-center justify-center text-black font-bold text-sm">
+                              {getInitials(fullName)}
+                            </div>
+                            <div>
+                              <p className="font-semibold text-yellow-400">{fullName}</p>
+                              <p className="text-xs text-gray-400">{team} • {getPropLabels()}</p>
+                            </div>
                           </div>
-                          <div>
-                            <p className="font-semibold text-yellow-400">{p.full_name || "Unknown"}</p>
-                            <p className="text-xs text-gray-400">{p.team || "-"} • {selectedProps.map(id => PROP_GROUPS[sport]?.find(x => x.id === id)?.label).join("+")}</p>
+                        </td>
+                        <td className="p-4">
+                          <Badge variant="outline" className="border-yellow-600 text-yellow-400 font-bold">
+                            {line}
+                          </Badge>
+                        </td>
+                        <td className="p-4 text-green-400 font-semibold">
+                          {avgL10}
+                        </td>
+                        <td className="p-4">
+                          <span className={typeof p.diff === "number" && p.diff > 0 ? "text-green-400" : "text-red-400"}>
+                            {diff}
+                          </span>
+                        </td>
+                        <td className="p-4">
+                          <span className={typeof p.l5HitRate === "number" && p.l5HitRate >= 50 ? "text-green-400" : "text-red-400"}>{l5HitRate}</span>
+                        </td>
+                        <td className="p-4">
+                          <span className={typeof p.l10HitRate === "number" && p.l10HitRate >= 50 ? "text-green-400" : "text-red-400"}>{l10HitRate}</span>
+                        </td>
+                        <td className="p-4">
+                          <div className="flex items-center gap-1">
+                            <TrendingUp className={`h-4 w-4 ${streak > 0 ? "text-green-400" : "text-red-400"}`} />
+                            <span className={streak > 0 ? "text-green-400" : "text-red-400"}>{streak}</span>
                           </div>
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <Badge variant="outline" className="border-yellow-600 text-yellow-400 font-bold">
-                          {p.line || "-"}
-                        </Badge>
-                      </td>
-                      <td className="p-4 text-green-400 font-semibold">
-                        {p.avgL10 ? p.avgL10.toFixed(1) : "-"}
-                      </td>
-                      <td className="p-4">
-                        <span className={p.diff > 0 ? "text-green-400" : "text-red-400"}>
-                          {p.diff > 0 ? "+" : ""}{p.diff ? p.diff.toFixed(1) : "-"}
-                        </span>
-                      </td>
-                      <td className="p-4">
-                        <span className={p.l5HitRate >= 50 ? "text-green-400" : "text-red-400"}>{p.l5HitRate || 0}%</span>
-                      </td>
-                      <td className="p-4">
-                        <span className={p.l10HitRate >= 50 ? "text-green-400" : "text-red-400"}>{p.l10HitRate || 0}%</span>
-                      </td>
-                      <td className="p-4">
-                        <div className="flex items-center gap-1">
-                          <TrendingUp className={`h-4 w-4 ${p.streak > 0 ? "text-green-400" : "text-red-400"}`} />
-                          <span className={p.streak > 0 ? "text-green-400" : "text-red-400"}>{p.streak || 0}</span>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
