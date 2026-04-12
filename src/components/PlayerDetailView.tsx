@@ -152,7 +152,8 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
   const maxTeamVal = Math.max(1, ...teamValues, teamLine * 1.2);
   const teamLineTop = ((maxTeamVal - teamLine) / maxTeamVal) * 100;
 
-  const renderChart = ( any[], line: number, lineTopPercent: number, max: number, propId: string, heightClass: string = "h-64") => (
+  // ✅ FIXED: Added 'data' parameter name
+  const renderChart = (data: any[], line: number, lineTopPercent: number, max: number, propId: string, heightClass: string = "h-64") => (
     <div className={`${heightClass} w-full flex items-end justify-between gap-1 pb-8 relative border-b border-gray-800`}>
       <div className="absolute left-0 top-0 bottom-8 w-12 flex flex-col justify-between text-[10px] text-gray-500 pr-2 text-right pointer-events-none">
         <span>{Math.round(max)}</span>
