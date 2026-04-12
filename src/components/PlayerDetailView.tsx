@@ -109,6 +109,31 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
     } finally { setLoading(false); }
   };
 
+  // ✅ FIX: Convert stats object to array of game objects
+  const convertStatsToGames = (stats: any) => {
+    if (!stats || typeof stats !== "object") return [];
+    
+    // Get the first array to determine length
+    const firstKey = Object.keys(stats)[0];
+    if (!firstKey) return [];
+    
+    const length = Array.isArray(stats[firstKey]) ? stats[firstKey].length : 0;
+    if (length === 0) return [];
+    
+    // Convert to array of game objects
+    const games = [];
+    for (let i = 0; i < length; i++) {
+      const game: any = {};
+      for (const key in stats) {
+        if (Array.isArray(stats[key])) {
+          game[key] = stats[key][i];
+        }
+      }
+      games.push(game);
+    }
+    return games;
+  };
+
   const getPropValue = (game: any, propId: string) => {
     if (!game || typeof game !== "object") return 0;
     const group = PROP_GROUPS[sport]?.find(g => g.id === propId);
@@ -130,13 +155,15 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
     return typeof val === "number" ? val : 0;
   };
 
-  const calcAvgForProp = (games: any, n: number, propId: string) => {
+  const calcAvgForProp = (stats: any, n: number, propId: string) => {
+    const games = convertStatsToGames(stats);
     if (!Array.isArray(games) || games.length === 0) return 0;
     const slice = games.slice(0, n);
     return slice.reduce((sum, g) => sum + getPropValue(g, propId), 0) / slice.length;
   };
 
-  const calcHitRate = (games: any, n: number, propId: string, line: number) => {
+  const calcHitRate = (stats: any, n: number, propId: string, line: number) => {
+    const games = convertStatsToGames(stats);
     if (!Array.isArray(games) || games.length === 0) return 0;
     const slice = games.slice(0, n);
     const hits = slice.filter((g: any) => getPropValue(g, propId) > line).length;
@@ -147,7 +174,8 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
   if (error) return <DashboardLayout><div className="p-20 text-center text-red-400">{error}</div></DashboardLayout>;
   if (!player) return <DashboardLayout><div className="p-20 text-center">No data</div></DashboardLayout>;
 
-  const games = Array.isArray(player.stats) ? player.stats : [];
+  // ✅ FIX: Convert stats object to games array
+  const games = convertStatsToGames(player.stats);
   const chartGames = games.slice(0, chartView);
   
   const playerValues = chartGames.map(g => getPropValue(g, selectedPlayerProp));
@@ -158,9 +186,14 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
   const maxTeamVal = Math.max(1, ...teamValues, teamLine * 1.2);
   const teamLineTop = ((maxTeamVal - teamLine) / maxTeamVal) * 100;
 
-  // ✅ FIXED: Added 'data' parameter name with type guard
   const renderChart = (data: any[], line: number, lineTopPercent: number, max: number, propId: string, heightClass: string = "h-64") => {
-    if (!Array.isArray(data)) return null;
+    if (!Array.isArray(data) || data.length === 0) {
+      return (
+        <div className={`${heightClass} flex items-center justify-center text-gray-500`}>
+          No data available
+        </div>
+      );
+    }
     
     return (
       <div className={`${heightClass} w-full flex items-end justify-between gap-1 pb-8 relative border-b border-gray-800`}>
@@ -250,7 +283,7 @@ export function PlayerDetailView({ playerId, sport, selectedProps, onBack }: Pla
             </div>
             <div className="flex gap-2">
               {[5, 10, 15, 20].map((n) => {
-                const rate = calcHitRate(games, n, selectedPlayerProp, playerLine);
+                const rate = calcHitRate(player.stats, n, selectedPlayerProp, playerLine);
                 return (
                   <button key={n} onClick={() => setChartView(n as any)} className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${chartView === n ? "bg-yellow-500 text-black" : "bg-[#1e293b] text-gray-400 hover:text-white"}`}>
                     L{n}<div className={`text-[10px] ${rate >= 50 ? "text-green-400" : "text-red-400"}`}>{rate}%</div>
