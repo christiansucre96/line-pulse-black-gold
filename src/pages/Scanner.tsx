@@ -70,8 +70,6 @@ const PROP_GROUPS: Record<string, { id: string; label: string; stackKeys?: strin
   ]
 };
 
-const SPORTSBOOKS = ["Stake", "BetOnline", "DraftKings", "FanDuel"];
-
 export default function Scanner() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -82,7 +80,6 @@ export default function Scanner() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedProps, setSelectedProps] = useState<string[]>(["points"]);
-  const [selectedBookmaker, setSelectedBookmaker] = useState<string>("Stake");
   const [viewMode, setViewMode] = useState<"all" | "over" | "under">("all");
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" } | null>(null);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
@@ -92,53 +89,28 @@ export default function Scanner() {
   useEffect(() => {
     if (playerId) return;
     fetchData();
-  }, [sport, searchQuery, selectedProps, selectedBookmaker]);
+  }, [sport, searchQuery, selectedProps]);
 
   const fetchData = async () => {
     setLoading(true);
     setError(null);
     try {
-      const [edgeRes, linesRes] = await Promise.all([
-        fetch(EDGE_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            operation: "get_players_with_stats",
-            sport,
-            search: searchQuery || undefined,
-            props: selectedProps,
-            bookmakers: [selectedBookmaker],
-          }),
+      const edgeRes = await fetch(EDGE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          operation: "get_players_with_stats",
+          sport,
+          search: searchQuery || undefined,
+          props: selectedProps,
+          bookmakers: ["Stake"],
         }),
-        supabase
-          .from("user_submitted_lines")
-          .select("*")
-          .eq("sport", sport)
-          .eq("status", "verified")
-          .eq("bookmaker", selectedBookmaker)
-          .gte("submitted_at", new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString())
-          .order("submitted_at", { ascending: false })
-      ]);
-
-      const edgeData = await edgeRes.json();
-      const { data: communityLines } = linesRes;
-
-      if (!edgeData.success) throw new Error(edgeData.error || "Failed to fetch stats");
-
-      const merged = (edgeData.players || []).map((p: any) => {
-        const matchingLine = (communityLines || []).find(
-          (l: any) => l.player_name?.toLowerCase() === p.full_name?.toLowerCase() && l.prop_type === selectedProps[0]
-        );
-        return {
-          ...p,
-          line: matchingLine ? matchingLine.line_value.toFixed(1) : (p.generated_line?.line?.toFixed(1) || p.line),
-          bookmaker: matchingLine ? matchingLine.bookmaker : p.bookmaker,
-          isCommunity: !!matchingLine,
-          generated_line: p.generated_line,
-        };
       });
 
-      setPlayers(merged);
+      const edgeData = await edgeRes.json();
+      if (!edgeData.success) throw new Error(edgeData.error || "Failed to fetch stats");
+
+      setPlayers(edgeData.players || []);
     } catch (err: any) {
       setError(err.message || "Failed to load data");
     } finally {
@@ -204,7 +176,7 @@ export default function Scanner() {
         </div>
 
         {/* Filters */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
           <Select value={sport} onValueChange={setSport}>
             <SelectTrigger className="bg-[#0f172a] border-gray-700 text-yellow-400"><SelectValue placeholder="Select sport" /></SelectTrigger>
             <SelectContent className="bg-[#0f172a] border-gray-700">
@@ -218,19 +190,6 @@ export default function Scanner() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input placeholder="Search players..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="pl-10 bg-[#0f172a] border-gray-700 text-yellow-400" />
           </div>
-
-          <Select value={selectedBookmaker} onValueChange={setSelectedBookmaker}>
-            <SelectTrigger className="bg-[#0f172a] border-gray-700 text-yellow-400 justify-between">
-              <SelectValue placeholder="Select Book" />
-            </SelectTrigger>
-            <SelectContent className="bg-[#0f172a] border-gray-700">
-              {SPORTSBOOKS.map(b => (
-                <SelectItem key={b} value={b} className="text-yellow-400 focus:bg-[#1e293b] focus:text-yellow-300">
-                  {b}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -274,9 +233,7 @@ export default function Scanner() {
                 <thead className="bg-[#0f172a] border-b border-gray-800">
                   <tr>
                     <SortHeader label="Player" sortKey="full_name" />
-                    {/* ✅ RENAMED: "Apps" → "BETTING LINE" */}
                     <SortHeader label="BETTING LINE" sortKey="line" />
-                    <SortHeader label="Line" sortKey="line" />
                     <SortHeader label="Avg L10" sortKey="avgL10" />
                     <SortHeader label="Diff" sortKey="diff" />
                     <SortHeader label="L5 %" sortKey="l5HitRate" />
@@ -298,23 +255,10 @@ export default function Scanner() {
                           </div>
                         </div>
                       </td>
-                      {/* ✅ RENAMED COLUMN: Shows betting line */}
                       <td className="p-4">
                         <Badge variant="outline" className="border-yellow-600 text-yellow-400 font-bold">
                           {p.line || "-"}
                         </Badge>
-                      </td>
-                      <td className="p-4">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline" className="border-gray-600 text-gray-300">
-                            {p.bookmaker || selectedBookmaker}
-                          </Badge>
-                          {p.isCommunity && (
-                            <Badge variant="secondary" className="bg-green-900/30 text-green-400 border-green-800 text-[10px]">
-                              Community
-                            </Badge>
-                          )}
-                        </div>
                       </td>
                       <td className="p-4 text-green-400 font-semibold">
                         {p.avgL10 ? p.avgL10.toFixed(1) : "-"}
