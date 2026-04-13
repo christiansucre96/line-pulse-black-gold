@@ -1,7 +1,7 @@
 // src/pages/Scanner.tsx
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client"; // ✅ SHARED CLIENT
+import { supabase } from "@/integrations/supabase/client";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { SubmitLineModal } from "@/components/SubmitLineModal";
@@ -251,6 +251,11 @@ export default function Scanner() {
 
         {loading ? (
           <div className="text-center py-12"><div className="animate-spin h-8 w-8 border-2 border-yellow-400 border-t-transparent rounded-full mx-auto mb-4" /><p className="text-gray-400">Loading...</p></div>
+        ) : players.length === 0 ? (
+          <div className="text-center py-20 text-gray-500 bg-[#020617] rounded-xl border border-gray-800">
+            <p className="text-xl font-medium">No players found.</p>
+            <p className="text-sm mt-2">Try adjusting your search or sport selection.</p>
+          </div>
         ) : (
           <div className="bg-[#020617] rounded-xl border border-gray-800 overflow-hidden">
             <div className="overflow-x-auto">
