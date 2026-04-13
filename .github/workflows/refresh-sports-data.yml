@@ -1,0 +1,19 @@
+name: Refresh Sports Data
+
+on:
+  schedule:
+    - cron: "0 */12 * * *"  # Every 12 hours
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Edge Function
+        run: |
+          for sport in nba nfl mlb nhl soccer; do
+            curl -s -X POST https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/refresh-sports-data \
+              -H "Content-Type: application/json" \
+              -d "{\"sport\":\"$sport\"}" \
+              -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}"
+          done
