@@ -2,7 +2,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.7.1";
 
-// ✅ FIX: CORS headers for ALL responses
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -10,29 +9,21 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
-  // ✅ Handle preflight OPTIONS request FIRST (critical for CORS)
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders, status: 204 });
-  }
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders, status: 204 });
 
   try {
     let rawBody = await req.text();
     let requestBody = rawBody ? JSON.parse(rawBody) : {};
     const { operation, sport = "nba" } = requestBody;
 
-    // ✅ NEW: Handle Admin Sync Operation
-    if (operation === "sync_sport") {
-      return await handleSyncSport(requestBody, sport);
-    }
-    
-    // Existing Operations
+    if (operation === "sync_sport") return await handleSyncSport(requestBody, sport);
     if (operation === "get_player_details") return await handleGetPlayerDetails(requestBody, sport);
     if (operation === "get_players_with_stats") return await handleGetPlayersWithStats(requestBody, sport);
     
-    // ✅ FIX: Return CORS headers on error responses too
-    return new Response(JSON.stringify({ success: false, error: "Unknown operation" }), 
+    return new Response(JSON.stringify({ success: false, error: "Unknown op" }), 
       { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 });
   } catch (error: any) {
+    console.error("Edge Function Error:", error);
     return new Response(JSON.stringify({ success: false, error: error.message }), 
       { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500 });
   }
@@ -45,32 +36,55 @@ serve(async (req) => {
 async function handleSyncSport(requestBody: any, sport: string) {
   const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
   
-  // Sample players to "warm" the cache for each sport
-  const samplePlayers = [
-    { player_id: "237", full_name: "LeBron James", team: "LAL" },
-    { player_id: "201939", full_name: "Stephen Curry", team: "GSW" },
-    { player_id: "660673", full_name: "Aaron Judge", team: "NYY" },
-    { player_id: "8478402", full_name: "Auston Matthews", team: "TOR" },
-    { player_id: "276", full_name: "Erling Haaland", team: "MCI" }
-  ];
+  // ✅ Correct player IDs per sport/API
+  const playersBySport: Record<string, Array<{id: string, name: string, team: string}>> = {
+    nba: [
+      { id: "237", name: "LeBron James", team: "LAL" },
+      { id: "115", name: "Stephen Curry", team: "GSW" },
+      { id: "140", name: "Kevin Durant", team: "PHX" },
+      { id: "246", name: "Nikola Jokic", team: "DEN" },
+      { id: "666", name: "Luka Doncic", team: "DAL" }
+    ],
+    nfl: [
+      { id: "1845", name: "Patrick Mahomes", team: "KC" },
+      { id: "4035", name: "Josh Allen", team: "BUF" },
+      { id: "4046", name: "Justin Jefferson", team: "MIN" }
+    ],
+    mlb: [
+      { id: "660673", name: "Aaron Judge", team: "NYY" },
+      { id: "592450", name: "Mookie Betts", team: "LAD" },
+      { id: "665742", name: "Ronald Acuña Jr.", team: "ATL" }
+    ],
+    nhl: [
+      { id: "8478402", name: "Auston Matthews", team: "TOR" },
+      { id: "8477934", name: "Connor McDavid", team: "EDM" },
+      { id: "8479318", name: "Nathan MacKinnon", team: "COL" }
+    ],
+    soccer: [
+      { id: "276", name: "Erling Haaland", team: "MCI" },
+      { id: "874", name: "Kylian Mbappé", team: "PSG" },
+      { id: "154", name: "Mohamed Salah", team: "LIV" }
+    ]
+  };
 
+  const players = playersBySport[sport] || [];
   let inserted = 0;
-  for (const p of samplePlayers) {
-    try {
-      // Trigger the data fetch pipeline (this will cache the stats)
-      await getOrFetchPlayerData(p.player_id, sport, supabase);
-      inserted++;
+  
+  for (const p of players) {
+    try { 
+      await getOrFetchPlayerData(p.id, sport, supabase); 
+      inserted++; 
     } catch (e) {
-      console.warn(`Failed to sync ${p.full_name}:`, e);
+      console.error(`Failed to sync ${p.name}:`, e);
     }
   }
-
+  
   return new Response(JSON.stringify({ success: true, inserted, sport }), 
     { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 
 // ─────────────────────────────────────────────────────────────
-// 📐 SHARP LINE GENERATOR (Math Engine)
+// 📐 SHARP LINE GENERATOR
 // ─────────────────────────────────────────────────────────────
 
 function stdDev(arr: number[]): number {
@@ -113,15 +127,48 @@ function generateLineFromHistory(values: number[], sport: string, prop: string) 
 }
 
 // ─────────────────────────────────────────────────────────────
-// 🌍 PROP DEFINITIONS
+// 🌍 PROP DEFINITIONS (All 5 Sports)
 // ─────────────────────────────────────────────────────────────
 
 const SPORT_PROPS: Record<string, any> = {
-  nba: { singles: ["points","rebounds","assists","threes","steals","blocks","turnovers","minutes"], combos: [{id:"PR",keys:["points","rebounds"]},{id:"PA",keys:["points","assists"]},{id:"RA",keys:["rebounds","assists"]},{id:"PRA",keys:["points","rebounds","assists"]},{id:"STL+BLK",keys:["steals","blocks"]}], booleans: ["doubleDouble","tripleDouble"] },
-  nfl: { singles: ["passYards","passTD","completions","attempts","interceptions","rushYards","rushAtt","rushTD","receptions","recYards","recTD","sacks","tackles"], combos: [{id:"Pass+Rush",keys:["passYards","rushYards"]},{id:"Rush+Rec",keys:["rushYards","recYards"]},{id:"Pass+Rush+Rec",keys:["passYards","rushYards","recYards"]}], booleans: ["anytimeTD","firstTD"] },
-  mlb: { singles: ["hits","runs","rbi","homeRuns","totalBases","strikeouts","earnedRuns","hitsAllowed","walksAllowed"], combos: [{id:"H+R+RBI",keys:["hits","runs","rbi"]},{id:"TB+HR",keys:["totalBases","homeRuns"]}], booleans: [] },
-  nhl: { singles: ["goals","assists","shots","saves","goalsAllowed","hits","blocks"], combos: [{id:"Pts",keys:["goals","assists"]},{id:"Pts+SOG",keys:["goals","assists","shots"]}], booleans: ["anytimeGoal"] },
-  soccer: { singles: ["goals","assists","shots","shotsOnTarget","passes","tackles","saves"], combos: [{id:"G+A",keys:["goals","assists"]},{id:"G+A+SOT",keys:["goals","assists","shotsOnTarget"]}], booleans: [] }
+  nba: { 
+    singles: ["points","rebounds","assists","threes","steals","blocks","turnovers","minutes"], 
+    combos: [
+      {id:"PR",keys:["points","rebounds"]},{id:"PA",keys:["points","assists"]},
+      {id:"RA",keys:["rebounds","assists"]},{id:"PRA",keys:["points","rebounds","assists"]},
+      {id:"STL+BLK",keys:["steals","blocks"]}
+    ], 
+    booleans: ["doubleDouble","tripleDouble"] 
+  },
+  nfl: { 
+    singles: ["passYards","passTD","completions","attempts","interceptions","rushYards","rushAtt","rushTD","receptions","recYards","recTD","sacks","tackles"], 
+    combos: [
+      {id:"Pass+Rush",keys:["passYards","rushYards"]},{id:"Rush+Rec",keys:["rushYards","recYards"]},
+      {id:"Pass+Rush+Rec",keys:["passYards","rushYards","recYards"]}
+    ], 
+    booleans: ["anytimeTD","firstTD"] 
+  },
+  mlb: { 
+    singles: ["hits","runs","rbi","homeRuns","totalBases","strikeouts","earnedRuns","hitsAllowed","walksAllowed"], 
+    combos: [
+      {id:"H+R+RBI",keys:["hits","runs","rbi"]},{id:"TB+HR",keys:["totalBases","homeRuns"]}
+    ], 
+    booleans: [] 
+  },
+  nhl: { 
+    singles: ["goals","assists","shots","saves","goalsAllowed","hits","blocks"], 
+    combos: [
+      {id:"Pts",keys:["goals","assists"]},{id:"Pts+SOG",keys:["goals","assists","shots"]}
+    ], 
+    booleans: ["anytimeGoal"] 
+  },
+  soccer: { 
+    singles: ["goals","assists","shots","shotsOnTarget","passes","tackles","saves"], 
+    combos: [
+      {id:"G+A",keys:["goals","assists"]},{id:"G+A+SOT",keys:["goals","assists","shotsOnTarget"]}
+    ], 
+    booleans: [] 
+  }
 };
 
 function generateAllLines(player: any, sport: string) {
@@ -149,7 +196,7 @@ function generateAllLines(player: any, sport: string) {
   config.booleans.forEach((p: string) => {
     const d = getArr(p);
     if (d.length >= 3) {
-      const hr = d.filter(v=>v===1).length/d.length;
+      const hr = d.filter((v: number) => v===1).length/d.length;
       const ev = hr*1.909-1;
       lines.push({ prop: p.toUpperCase(), line: 0.5, projection: +(hr*100).toFixed(1), americanOdds: probToAmericanOdds(hr), confidence: Math.round(hr*100), ev: +ev.toFixed(3), edgePct: `${((hr-0.5238)*100).toFixed(1)}%`, recommendation: ev>0.03?"YES":ev<-0.03?"NO":"PASS", hitRate: Math.round(hr*100) });
     }
@@ -158,76 +205,134 @@ function generateAllLines(player: any, sport: string) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 🔌 LIVE DATA FETCHERS
+// 🔌 LIVE DATA FETCHERS (All 5 Sports - No Mock Data)
 // ─────────────────────────────────────────────────────────────
 
 async function fetchNBAStats(playerId: string) {
-  const res = await fetch(`https://www.balldontlie.io/api/v1/stats?player_ids[]=${playerId}&seasons[]=2023&per_page=100`);
-  if (!res.ok) return [];
-  const json = await res.json();
-  return json.data.map((g: any) => ({
-    game_date: g.game.date.split("T")[0], opponent: g.game.visitor_team.abbreviation === g.team.abbreviation ? g.game.home_team.abbreviation : g.game.visitor_team.abbreviation,
-    is_home: g.team.abbreviation === g.game.home_team.abbreviation,
-    points: g.pts, rebounds: g.reb, assists: g.ast, threes: g.fg3m, steals: g.stl, blocks: g.blk, turnovers: g.turnover, minutes: g.min
-  }));
+  try {
+    const res = await fetch(`https://www.balldontlie.io/api/v1/stats?player_ids[]=${playerId}&seasons[]=2023&per_page=100`);
+    if (!res.ok) {
+      console.error(`NBA API failed: ${res.status}`);
+      return [];
+    }
+    const json = await res.json();
+    console.log(`✅ NBA: Fetched ${json.data?.length || 0} games for player ${playerId}`);
+    return json.data.map((g: any) => ({
+      game_date: g.game.date.split("T")[0], 
+      opponent: g.game.visitor_team.abbreviation === g.team.abbreviation ? g.game.home_team.abbreviation : g.game.visitor_team.abbreviation,
+      is_home: g.team.abbreviation === g.game.home_team.abbreviation,
+      points: g.pts, rebounds: g.reb, assists: g.ast, threes: g.fg3m, steals: g.stl, blocks: g.blk, turnovers: g.turnover, minutes: g.min
+    }));
+  } catch (e) {
+    console.error("NBA Fetch Error:", e);
+    return [];
+  }
 }
 
 async function fetchNFLStats(playerId: string) {
   const API_KEY = Deno.env.get("API_SPORTS_KEY");
-  if (!API_KEY) return [];
-  const res = await fetch(`https://api-american-football.com/players/statistics?player=${playerId}&season=2024`, { headers: { "x-apisports-key": API_KEY } });
-  if (!res.ok) return [];
-  const json = await res.json();
-  const allGames = (json.response || []).flatMap((r: any) => r.games || []);
-  return allGames.slice(0, 20).map((g: any) => ({
-    game_date: g.date?.split("T")[0], opponent: g.teams?.away?.name || "OPP", is_home: false,
-    passYards: g.statistics?.yards_passing || 0, passTD: g.statistics?.touchdowns_passing || 0,
-    completions: g.statistics?.completions_passing || 0, attempts: g.statistics?.attempts_passing || 0,
-    interceptions: g.statistics?.interceptions || 0, rushYards: g.statistics?.yards_rushing || 0,
-    rushAtt: g.statistics?.attempts_rushing || 0, rushTD: g.statistics?.touchdowns_rushing || 0,
-    receptions: g.statistics?.receptions || 0, recYards: g.statistics?.yards_receiving || 0, recTD: g.statistics?.touchdowns_receiving || 0,
-    sacks: g.statistics?.sacks || 0, tackles: g.statistics?.tackles || 0
-  }));
+  if (!API_KEY) {
+    console.error("❌ API_SPORTS_KEY not set for NFL");
+    return [];
+  }
+  try {
+    const res = await fetch(`https://api-american-football.com/players/statistics?player=${playerId}&season=2024`, { 
+      headers: { "x-apisports-key": API_KEY } 
+    });
+    if (!res.ok) {
+      console.error(`NFL API failed: ${res.status}`);
+      return [];
+    }
+    const json = await res.json();
+    const allGames = (json.response || []).flatMap((r: any) => r.games || []);
+    console.log(`✅ NFL: Fetched ${allGames.length} games for player ${playerId}`);
+    return allGames.slice(0, 20).map((g: any) => ({
+      game_date: g.date?.split("T")[0], opponent: g.teams?.away?.name || "OPP", is_home: false,
+      passYards: g.statistics?.yards_passing || 0, passTD: g.statistics?.touchdowns_passing || 0,
+      completions: g.statistics?.completions_passing || 0, attempts: g.statistics?.attempts_passing || 0,
+      interceptions: g.statistics?.interceptions || 0, rushYards: g.statistics?.yards_rushing || 0,
+      rushAtt: g.statistics?.attempts_rushing || 0, rushTD: g.statistics?.touchdowns_rushing || 0,
+      receptions: g.statistics?.receptions || 0, recYards: g.statistics?.yards_receiving || 0, recTD: g.statistics?.touchdowns_receiving || 0,
+      sacks: g.statistics?.sacks || 0, tackles: g.statistics?.tackles || 0
+    }));
+  } catch (e) {
+    console.error("NFL Fetch Error:", e);
+    return [];
+  }
 }
 
 async function fetchMLBStats(playerId: string) {
-  const res = await fetch(`https://statsapi.mlb.com/api/v1/people/${playerId}/stats?stats=gameLog&gameType=R&season=2024`);
-  if (!res.ok) return [];
-  const json = await res.json();
-  return (json.stats?.[0]?.splits || []).map((s: any) => ({
-    game_date: s.date.split("T")[0], opponent: s.opponent?.abbreviation || "OPP", is_home: s.gameType === "R",
-    hits: s.stat.hits, runs: s.stat.runs, rbi: s.stat.rbi, homeRuns: s.stat.homeRuns, totalBases: s.stat.totalBases,
-    strikeouts: s.stat.strikeOuts, earnedRuns: s.stat.earnedRuns || 0, hitsAllowed: s.stat.hitsAllowed || 0, walksAllowed: s.stat.baseOnBalls || 0
-  }));
+  try {
+    const res = await fetch(`https://statsapi.mlb.com/api/v1/people/${playerId}/stats?stats=gameLog&gameType=R&season=2024`);
+    if (!res.ok) {
+      console.error(`MLB API failed: ${res.status}`);
+      return [];
+    }
+    const json = await res.json();
+    const splits = json.stats?.[0]?.splits || [];
+    console.log(`✅ MLB: Fetched ${splits.length} games for player ${playerId}`);
+    return splits.map((s: any) => ({
+      game_date: s.date.split("T")[0], opponent: s.opponent?.abbreviation || "OPP", is_home: s.gameType === "R",
+      hits: s.stat.hits, runs: s.stat.runs, rbi: s.stat.rbi, homeRuns: s.stat.homeRuns, totalBases: s.stat.totalBases,
+      strikeouts: s.stat.strikeOuts, earnedRuns: s.stat.earnedRuns || 0, hitsAllowed: s.stat.hitsAllowed || 0, walksAllowed: s.stat.baseOnBalls || 0
+    }));
+  } catch (e) {
+    console.error("MLB Fetch Error:", e);
+    return [];
+  }
 }
 
 async function fetchNHLStats(playerId: string) {
-  const res = await fetch(`https://statsapi.web.nhl.com/api/v1/people/${playerId}/stats?stats=gameLog&season=20232024`);
-  if (!res.ok) return [];
-  const json = await res.json();
-  return (json.stats?.[0]?.splits || []).map((s: any) => ({
-    game_date: s.date.split("T")[0], opponent: s.opponent?.abbreviation || "OPP", is_home: s.gameType === "R",
-    goals: s.stat.goals, assists: s.stat.assists, shots: s.stat.shots, saves: s.stat.saves || 0, goalsAllowed: s.stat.goalsAgainst || 0, hits: s.stat.hits || 0, blocks: s.stat.blocked || 0
-  }));
+  try {
+    const res = await fetch(`https://statsapi.web.nhl.com/api/v1/people/${playerId}/stats?stats=gameLog&season=20232024`);
+    if (!res.ok) {
+      console.error(`NHL API failed: ${res.status}`);
+      return [];
+    }
+    const json = await res.json();
+    const splits = json.stats?.[0]?.splits || [];
+    console.log(`✅ NHL: Fetched ${splits.length} games for player ${playerId}`);
+    return splits.map((s: any) => ({
+      game_date: s.date.split("T")[0], opponent: s.opponent?.abbreviation || "OPP", is_home: s.gameType === "R",
+      goals: s.stat.goals, assists: s.stat.assists, shots: s.stat.shots, saves: s.stat.saves || 0, goalsAllowed: s.stat.goalsAgainst || 0, hits: s.stat.hits || 0, blocks: s.stat.blocked || 0
+    }));
+  } catch (e) {
+    console.error("NHL Fetch Error:", e);
+    return [];
+  }
 }
 
 async function fetchSoccerStats(playerId: string) {
   const API_KEY = Deno.env.get("API_SPORTS_KEY");
-  if (!API_KEY) return [];
-  const res = await fetch(`https://api-football.com/players/statistics?player=${playerId}&season=2024`, { headers: { "x-apisports-key": API_KEY } });
-  if (!res.ok) return [];
-  const json = await res.json();
-  const allStats = (json.response || []).flatMap((r: any) => r.statistics || []);
-  const allGames = allStats.flatMap((s: any) => s.games || []);
-  return allGames.slice(0, 20).map((g: any) => ({
-    game_date: g.fixture?.date?.split("T")[0], opponent: g.fixture?.teams?.away?.name || "OPP", is_home: false,
-    goals: g.statistics?.goals?.total || 0, assists: g.statistics?.goals?.assists || 0, shots: g.statistics?.shots?.total || 0,
-    shotsOnTarget: g.statistics?.shots?.on || 0, passes: g.statistics?.passes?.total || 0, tackles: g.statistics?.tackles?.total || 0, saves: g.statistics?.goals?.saves || 0
-  }));
+  if (!API_KEY) {
+    console.error("❌ API_SPORTS_KEY not set for Soccer");
+    return [];
+  }
+  try {
+    const res = await fetch(`https://api-football.com/players/statistics?player=${playerId}&season=2024`, { 
+      headers: { "x-apisports-key": API_KEY } 
+    });
+    if (!res.ok) {
+      console.error(`Soccer API failed: ${res.status}`);
+      return [];
+    }
+    const json = await res.json();
+    const allStats = (json.response || []).flatMap((r: any) => r.statistics || []);
+    const allGames = allStats.flatMap((s: any) => s.games || []);
+    console.log(`✅ Soccer: Fetched ${allGames.length} games for player ${playerId}`);
+    return allGames.slice(0, 20).map((g: any) => ({
+      game_date: g.fixture?.date?.split("T")[0], opponent: g.fixture?.teams?.away?.name || "OPP", is_home: false,
+      goals: g.statistics?.goals?.total || 0, assists: g.statistics?.goals?.assists || 0, shots: g.statistics?.shots?.total || 0,
+      shotsOnTarget: g.statistics?.shots?.on || 0, passes: g.statistics?.passes?.total || 0, tackles: g.statistics?.tackles?.total || 0, saves: g.statistics?.goals?.saves || 0
+    }));
+  } catch (e) {
+    console.error("Soccer Fetch Error:", e);
+    return [];
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
-// 🔄 CACHE-AWARE DATA PIPELINE
+// 🔄 CACHE-AWARE DATA PIPELINE (NO MOCK DATA)
 // ─────────────────────────────────────────────────────────────
 
 async function getOrFetchPlayerData(playerId: string, sport: string, supabaseClient?: any) {
@@ -243,6 +348,7 @@ async function getOrFetchPlayerData(playerId: string, sport: string, supabaseCli
     .order("game_date", { ascending: false });
 
   if (cachedGames && cachedGames.length >= 10) {
+    console.log(`✅ Cache hit for ${playerId} (${cachedGames.length} games)`);
     const statsObj: Record<string, number[]> = {};
     cachedGames.forEach(g => {
       Object.entries(g.stats).forEach(([k, v]: any) => {
@@ -253,7 +359,9 @@ async function getOrFetchPlayerData(playerId: string, sport: string, supabaseCli
     return { stats: statsObj, source: "cache" };
   }
 
-  // 2. Fetch Live
+  console.log(`🔄 Cache miss for ${playerId} (${sport}), fetching live...`);
+
+  // 2. Fetch Live (NO MOCK FALLBACK)
   let rawGames: any[] = [];
   try {
     if (sport === "nba") rawGames = await fetchNBAStats(playerId);
@@ -262,27 +370,85 @@ async function getOrFetchPlayerData(playerId: string, sport: string, supabaseCli
     else if (sport === "nhl") rawGames = await fetchNHLStats(playerId);
     else if (sport === "soccer") rawGames = await fetchSoccerStats(playerId);
   } catch (e) {
+    console.error("Fetch Error:", e);
     return { stats: {}, source: "error" };
   }
 
-  if (!rawGames.length) return { stats: {}, source: "empty" };
+  if (!rawGames.length) {
+    console.warn(`⚠️ No data returned for ${playerId} (${sport})`);
+    return { stats: {}, source: "empty" };
+  }
+
+  console.log(`✅ Fetched ${rawGames.length} games for ${playerId}`);
 
   // 3. Upsert to Cache
   const inserts = rawGames.map(g => ({
-    player_id: playerId, sport, season: "2024", game_date: g.game_date, opponent: g.opponent, is_home: g.is_home,
-    data: { points: g.points||0, rebounds: g.rebounds||0, assists: g.assists||0, threes: g.threes||0, steals: g.steals||0, blocks: g.blocks||0, turnovers: g.turnovers||0, minutes: g.minutes||0, passYards: g.passYards||0, passTD: g.passTD||0, completions: g.completions||0, attempts: g.attempts||0, interceptions: g.interceptions||0, rushYards: g.rushYards||0, rushAtt: g.rushAtt||0, rushTD: g.rushTD||0, receptions: g.receptions||0, recYards: g.recYards||0, recTD: g.recTD||0, sacks: g.sacks||0, tackles: g.tackles||0, hits: g.hits||0, runs: g.runs||0, rbi: g.rbi||0, homeRuns: g.homeRuns||0, totalBases: g.totalBases||0, strikeouts: g.strikeouts||0, earnedRuns: g.earnedRuns||0, hitsAllowed: g.hitsAllowed||0, walksAllowed: g.walksAllowed||0, goals: g.goals||0, shots: g.shots||0, saves: g.saves||0, goalsAllowed: g.goalsAllowed||0, blocks: g.blocks||0, shotsOnTarget: g.shotsOnTarget||0, passes: g.passes||0, doubleDouble: (g.points>=10 && g.rebounds>=10)?1:0, tripleDouble: (g.points>=10 && g.rebounds>=10 && g.assists>=10)?1:0, anytimeTD: ((g.passTD||0)+(g.rushTD||0)+(g.recTD||0))>0?1:0, anytimeGoal: (g.goals||0)>0?1:0 },
+    player_id: playerId, 
+    sport, 
+    season: "2024", 
+    game_date: g.game_date, 
+    opponent: g.opponent, 
+    is_home: g.is_home,
+    stats: { 
+      points: g.points||0, 
+      rebounds: g.rebounds||0, 
+      assists: g.assists||0, 
+      threes: g.threes||0, 
+      steals: g.steals||0, 
+      blocks: g.blocks||0, 
+      turnovers: g.turnovers||0, 
+      minutes: g.minutes||0, 
+      passYards: g.passYards||0, 
+      passTD: g.passTD||0, 
+      completions: g.completions||0, 
+      attempts: g.attempts||0, 
+      interceptions: g.interceptions||0, 
+      rushYards: g.rushYards||0, 
+      rushAtt: g.rushAtt||0, 
+      rushTD: g.rushTD||0, 
+      receptions: g.receptions||0, 
+      recYards: g.recYards||0, 
+      recTD: g.recTD||0, 
+      sacks: g.sacks||0, 
+      tackles: g.tackles||0, 
+      hits: g.hits||0, 
+      runs: g.runs||0, 
+      rbi: g.rbi||0, 
+      homeRuns: g.homeRuns||0, 
+      totalBases: g.totalBases||0, 
+      strikeouts: g.strikeouts||0, 
+      earnedRuns: g.earnedRuns||0, 
+      hitsAllowed: g.hitsAllowed||0, 
+      walksAllowed: g.walksAllowed||0, 
+      goals: g.goals||0, 
+      shots: g.shots||0, 
+      saves: g.saves||0, 
+      goalsAllowed: g.goalsAllowed||0, 
+      blocks: g.blocks||0, 
+      shotsOnTarget: g.shotsOnTarget||0, 
+      passes: g.passes||0, 
+      doubleDouble: (g.points>=10 && g.rebounds>=10)?1:0, 
+      tripleDouble: (g.points>=10 && g.rebounds>=10 && g.assists>=10)?1:0, 
+      anytimeTD: ((g.passTD||0)+(g.rushTD||0)+(g.recTD||0))>0?1:0, 
+      anytimeGoal: (g.goals||0)>0?1:0 
+    },
     updated_at: new Date().toISOString()
   }));
 
   if (inserts.length > 0) {
     await supabase.from("player_game_logs").upsert(inserts, { onConflict: "player_id,sport,game_date" });
+    console.log(`💾 Cached ${inserts.length} games for ${playerId}`);
   }
 
   // 4. Transform
   const statsObj: Record<string, number[]> = {};
   if (inserts.length > 0) {
-    const keys = Object.keys(inserts[0].data);
-    keys.forEach(k => { statsObj[k] = inserts.map(i => i.data[k]); });
+    const keys = Object.keys(inserts[0].stats);
+    keys.forEach(k => { 
+      if (Array.isArray(inserts[0].stats[k])) {
+        statsObj[k] = inserts.map(i => i.stats[k]); 
+      }
+    });
   }
   return { stats: statsObj, source: "live" };
 }
@@ -296,7 +462,9 @@ async function handleGetPlayerDetails(requestBody: any, sport: string) {
   if (!player_id) return new Response(JSON.stringify({ success: false, error: "Missing ID" }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 });
 
   const { stats, source } = await getOrFetchPlayerData(player_id, sport);
-  if (!stats || Object.keys(stats).length === 0) return new Response(JSON.stringify({ success: false, error: "No data" }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 404 });
+  if (!stats || Object.keys(stats).length === 0) {
+    return new Response(JSON.stringify({ success: false, error: `No live data available for player ${player_id}. Check API keys and logs.` }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 404 });
+  }
 
   const player = { player_id, full_name: `Player ${player_id}`, team: "LAL", position: "F", sport, stats };
   const lines = generateAllLines(player, sport);
@@ -305,27 +473,78 @@ async function handleGetPlayerDetails(requestBody: any, sport: string) {
 
 async function handleGetPlayersWithStats(requestBody: any, sport: string) {
   const { search, props = ["points"] } = requestBody;
-  const playersList = [
-    { player_id: "237", full_name: "LeBron James", team: "LAL" },
-    { player_id: "201939", full_name: "Stephen Curry", team: "GSW" },
-    { player_id: "660673", full_name: "Aaron Judge", team: "NYY" },
-    { player_id: "8478402", full_name: "Auston Matthews", team: "TOR" },
-    { player_id: "276", full_name: "Erling Haaland", team: "MCI" }
-  ].filter(p => !search || p.full_name.toLowerCase().includes(search.toLowerCase()));
+  
+  // ✅ Correct player IDs per sport/API
+  const playersBySport: Record<string, Array<{player_id: string, full_name: string, team: string}>> = {
+    nba: [
+      { player_id: "237", full_name: "LeBron James", team: "LAL" },
+      { player_id: "115", full_name: "Stephen Curry", team: "GSW" },
+      { player_id: "140", full_name: "Kevin Durant", team: "PHX" },
+      { player_id: "246", full_name: "Nikola Jokic", team: "DEN" },
+      { player_id: "666", full_name: "Luka Doncic", team: "DAL" }
+    ],
+    nfl: [
+      { player_id: "1845", full_name: "Patrick Mahomes", team: "KC" },
+      { player_id: "4035", full_name: "Josh Allen", team: "BUF" },
+      { player_id: "4046", full_name: "Justin Jefferson", team: "MIN" }
+    ],
+    mlb: [
+      { player_id: "660673", full_name: "Aaron Judge", team: "NYY" },
+      { player_id: "592450", full_name: "Mookie Betts", team: "LAD" },
+      { player_id: "665742", full_name: "Ronald Acuña Jr.", team: "ATL" }
+    ],
+    nhl: [
+      { player_id: "8478402", full_name: "Auston Matthews", team: "TOR" },
+      { player_id: "8477934", full_name: "Connor McDavid", team: "EDM" },
+      { player_id: "8479318", full_name: "Nathan MacKinnon", team: "COL" }
+    ],
+    soccer: [
+      { player_id: "276", full_name: "Erling Haaland", team: "MCI" },
+      { player_id: "874", full_name: "Kylian Mbappé", team: "PSG" },
+      { player_id: "154", full_name: "Mohamed Salah", team: "LIV" }
+    ]
+  };
 
-  const results = await Promise.all(playersList.map(async (p) => {
+  const playersList = playersBySport[sport] || [];
+  const filteredList = playersList.filter(p => 
+    !search || p.full_name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  console.log(`🔍 Filtering for sport="${sport}", found ${filteredList.length} players to fetch`);
+
+  const results = await Promise.all(filteredList.map(async (p) => {
     const { stats } = await getOrFetchPlayerData(p.player_id, sport);
-    if (!stats || Object.keys(stats).length === 0) return null;
+    
+    // ✅ NO MOCK DATA - Return null if no live data
+    if (!stats || Object.keys(stats).length === 0) {
+      console.warn(`⚠️ No data for ${p.full_name} (${p.player_id}), skipping...`);
+      return null;
+    }
+
     const player = { ...p, sport, stats };
     const lines = generateAllLines(player, sport);
     const target = lines.find(l => l.prop === props[0]?.toUpperCase());
     if (!target) return null;
+    
     return {
-      ...p, bookmaker: "Consensus", line: target.line.toFixed(1), avgL10: target.projection,
+      ...p, 
+      bookmaker: "Consensus", 
+      line: target.line.toFixed(1), 
+      avgL10: target.projection,
       diff: parseFloat((target.projection - target.line).toFixed(1)),
-      l5HitRate: target.hitRate || 50, l10HitRate: target.hitRate || 50, streak: 0,
-      edgePct: target.edgePct, ev: target.ev, recommendation: target.recommendation
+      l5HitRate: target.hitRate || 50, 
+      l10HitRate: target.hitRate || 50, 
+      streak: 0,
+      edgePct: target.edgePct, 
+      ev: target.ev, 
+      recommendation: target.recommendation
     };
   }));
-  return new Response(JSON.stringify({ success: true, players: results.filter(Boolean) }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  
+  const validResults = results.filter(Boolean);
+  console.log(`📊 Returning ${validResults.length} players with live data for ${sport}`);
+  
+  return new Response(JSON.stringify({ success: true, players: validResults }), { 
+    headers: { ...corsHeaders, "Content-Type": "application/json" } 
+  });
 }
