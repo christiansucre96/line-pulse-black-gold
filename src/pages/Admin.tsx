@@ -1,6 +1,6 @@
 // src/pages/Admin.tsx
 import { useAuth } from "@/hooks/useAuth";
-import { supabase } from "@/integrations/supabase/client"; // ✅ SHARED CLIENT
+import { supabase } from "@/integrations/supabase/client";
 import { useEffect, useState } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { toast } from "sonner";
@@ -92,7 +92,7 @@ export default function Admin() {
         </div>
 
         <div className="bg-green-900/20 border border-green-800 p-4 rounded-lg text-sm text-green-400">
-          ✅ Data pulled from historical APIs & cached<br />
+          ✅ Live data from official APIs<br />
           ⚡ Combo props (PRA, etc.) auto-calculated<br />
           🔄 Manual sync only (auto-sync disabled)
         </div>
