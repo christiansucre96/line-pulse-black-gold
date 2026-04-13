@@ -1,7 +1,7 @@
 // src/pages/Scanner.tsx
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "@/integrations/supabase/client"; // ✅ SHARED CLIENT
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { SubmitLineModal } from "@/components/SubmitLineModal";
@@ -18,10 +18,6 @@ import {
 import { Search, ChevronDown, ArrowUpDown, TrendingUp, PlusCircle } from "lucide-react";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL!,
-  import.meta.env.VITE_SUPABASE_ANON_KEY!
-);
 
 const PROP_GROUPS: Record<string, { id: string; label: string; stackKeys?: string[]; isBoolean?: boolean }[]> = {
   nba: [
@@ -110,7 +106,6 @@ export default function Scanner() {
       const edgeData = await edgeRes.json();
       if (!edgeData.success) throw new Error(edgeData.error || "Failed to fetch stats");
 
-      // ✅ FIX: Ensure players is always an array
       const playersList = Array.isArray(edgeData.players) ? edgeData.players : [];
       setPlayers(playersList);
     } catch (err: any) {
@@ -200,7 +195,6 @@ export default function Scanner() {
           </Button>
         </div>
 
-        {/* Filters */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
           <Select value={sport} onValueChange={setSport}>
             <SelectTrigger className="bg-[#0f172a] border-gray-700 text-yellow-400"><SelectValue placeholder="Select sport" /></SelectTrigger>
@@ -245,7 +239,6 @@ export default function Scanner() {
           </DropdownMenu>
         </div>
 
-        {/* View Mode Toggle */}
         <div className="flex gap-2 mb-4">
           {(["all", "over", "under"] as const).map(mode => (
             <button key={mode} onClick={() => setViewMode(mode)} className={`px-4 py-2 rounded-lg font-medium transition ${viewMode === mode ? "bg-yellow-500 text-black" : "bg-[#0f172a] text-gray-400 border border-gray-700 hover:border-yellow-600"}`}>
@@ -300,9 +293,7 @@ export default function Scanner() {
                             {line}
                           </Badge>
                         </td>
-                        <td className="p-4 text-green-400 font-semibold">
-                          {avgL10}
-                        </td>
+                        <td className="p-4 text-green-400 font-semibold">{avgL10}</td>
                         <td className="p-4">
                           <span className={edgePct.includes('-') ? "text-red-400" : "text-green-400"}>{edgePct}</span>
                         </td>
