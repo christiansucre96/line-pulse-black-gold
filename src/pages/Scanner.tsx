@@ -1,7 +1,6 @@
 // src/pages/Scanner.tsx
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { SubmitLineModal } from "@/components/SubmitLineModal";
@@ -18,6 +17,7 @@ import {
 import { Search, ChevronDown, ArrowUpDown, PlusCircle } from "lucide-react";
 import { toast } from "sonner";
 
+// ✅ Edge Function URL - ONLY used with POST + JSON body
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
 const PROP_GROUPS: Record<string, { id: string; label: string }[]> = {
@@ -62,122 +62,218 @@ export default function Scanner() {
   
   const playerId = searchParams.get("playerId");
 
-  // ✅ Fetch +EV Opportunities
+  // ✅ Fetch +EV Opportunities - PROPER POST REQUEST
   const fetchData = async () => {
     setLoading(true);
     setError(null);
     try {
+      // ✅ CRITICAL: Must be POST with JSON body
       const res = await fetch(EDGE_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
         body: JSON.stringify({
           operation: "ev_scan",
-          sport,
+          sport: sport,
           bankroll: 1000,
           min_edge: 0.03,
         }),
       });
 
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error || "Failed to fetch opportunities");
+      // ✅ Check response status
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP ${res.status}: ${res.statusText}`);
+      }
 
+      const data = await res.json();
+      
+      if (!data.success) {
+        throw new Error(data.error || "Failed to fetch opportunities");
+      }
+
+      // ✅ Map opportunities to UI format
       const mapped = (data.opportunities || []).map((opp: any) => ({
-        player_id: opp.player_id || opp.id,
-        full_name: opp.full_name || opp.player_name || "Unknown",
-        team: opp.team || opp.team_abbr || "N/A",
-        line: opp.line,
-        avgL10: opp.avg_last10 || (parseFloat(opp.line) * (1 + parseFloat(opp.edge_pct)/100)).toFixed(1),
-        diff: opp.diff || ((parseFloat(opp.edge_pct) / 100 * parseFloat(opp.line)).toFixed(1)),
-        edgePct: opp.edge_pct,
-        ev: opp.ev,
-        recommendation: parseFloat(opp.ev) > 0.03 ? "STRONG OVER" : parseFloat(opp.ev) > 0.01 ? "OVER" : parseFloat(opp.ev) < -0.03 ? "STRONG UNDER" : parseFloat(opp.ev) < -0.01 ? "UNDER" : "NO BET",
-        kellyStake: opp.kelly_stake || "0.00",
-        confidence: opp.confidence || "50",
+        player_id: opp.player_id || opp.id || `opp_${Math.random()}`,
+        full_name: opp.full_name || opp.player_name || opp.name || "Unknown",
+        team: opp.team || opp.team_abbr || opp.abbreviation || "N/A",
+        line: opp.line?.toString() || "0.0",
+        avgL10: opp.avg_last10?.toString() || opp.model_probability ? (parseFloat(opp.line) * (1 + parseFloat(opp.edge_pct || 0)/100)).toFixed(1) : "0.0",
+        diff: opp.diff?.toString() || ((parseFloat(opp.edge_pct || 0) / 100 * parseFloat(opp.line)).toFixed(1)),
+        edgePct: opp.edge_pct?.toString() || "0.0",
+        ev: opp.ev?.toString() || "0.000",
+        recommendation: (() => {
+          const ev = parseFloat(opp.ev || 0);
+          if (ev > 0.03) return "STRONG OVER";
+          if (ev > 0.01) return "OVER";
+          if (ev < -0.03) return "STRONG UNDER";
+          if (ev < -0.01) return "UNDER";
+          return "NO BET";
+        })(),
+        kellyStake: opp.kelly_stake?.toString() || "0.00",
+        confidence: opp.confidence?.toString() || "50",
         prop_type: opp.prop_type || selectedProp,
       }));
 
       setPlayers(mapped);
+      console.log(`✅ Loaded ${mapped.length} +EV opportunities for ${sport}`);
+      
     } catch (err: any) {
+      console.error("❌ Fetch error:", err);
       setError(err.message || "Failed to load opportunities");
+      toast.error(`Error: ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
 
+  // ✅ Fetch data when sport changes (not on mount if playerId present)
   useEffect(() => {
     if (playerId) return;
     fetchData();
   }, [sport]);
 
-  // ✅ Sorting & Filtering
+  // ✅ Sorting & Filtering Logic
   const sortedPlayers = useMemo(() => {
     let sorted = [...players];
-    if (searchQuery) {
+    
+    // Search filter
+    if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      sorted = sorted.filter(p => p.full_name.toLowerCase().includes(q) || p.team.toLowerCase().includes(q));
+      sorted = sorted.filter(p => 
+        p.full_name?.toLowerCase().includes(q) || 
+        p.team?.toLowerCase().includes(q)
+      );
     }
-    if (sortConfig) {
+    
+    // Sort
+    if (sortConfig?.key) {
       sorted.sort((a, b) => {
-        const aVal = a[sortConfig.key] ?? 0;
-        const bVal = b[sortConfig.key] ?? 0;
-        return sortConfig.direction === "asc" 
-          ? (typeof aVal === "string" ? aVal.localeCompare(bVal) : aVal - bVal)
-          : (typeof aVal === "string" ? bVal.localeCompare(aVal) : bVal - aVal);
+        const aVal = a[sortConfig.key];
+        const bVal = b[sortConfig.key];
+        if (aVal == null && bVal == null) return 0;
+        if (aVal == null) return 1;
+        if (bVal == null) return -1;
+        
+        if (typeof aVal === "string" && typeof bVal === "string") {
+          return sortConfig.direction === "asc" 
+            ? aVal.localeCompare(bVal) 
+            : bVal.localeCompare(aVal);
+        }
+        
+        const aNum = parseFloat(aVal) || 0;
+        const bNum = parseFloat(bVal) || 0;
+        return sortConfig.direction === "asc" ? aNum - bNum : bNum - aNum;
       });
     }
-    if (viewMode === "over") sorted = sorted.filter(p => parseFloat(p.avgL10) > parseFloat(p.line));
-    if (viewMode === "under") sorted = sorted.filter(p => parseFloat(p.avgL10) <= parseFloat(p.line));
+    
+    // View mode filter
+    if (viewMode === "over") {
+      sorted = sorted.filter(p => {
+        const avg = parseFloat(p.avgL10) || 0;
+        const line = parseFloat(p.line) || 0;
+        return avg > line;
+      });
+    } else if (viewMode === "under") {
+      sorted = sorted.filter(p => {
+        const avg = parseFloat(p.avgL10) || 0;
+        const line = parseFloat(p.line) || 0;
+        return avg <= line;
+      });
+    }
+    
     return sorted;
   }, [players, searchQuery, sortConfig, viewMode]);
 
   const requestSort = (key: string) => {
-    setSortConfig(prev => ({
-      key,
-      direction: prev?.key === key && prev.direction === "asc" ? "desc" : "asc"
-    }));
+    setSortConfig(prev => {
+      if (prev?.key === key) {
+        return { key, direction: prev.direction === "asc" ? "desc" : "asc" };
+      }
+      return { key, direction: "desc" };
+    });
   };
 
-  // ✅ Place Bet Tracking
-  const handlePlaceBet = async (opp: any) => {
+  // ✅ Place Bet Tracking - PROPER POST REQUEST
+  const handlePlaceBet = async (opp: any, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    
     const stake = parseFloat(opp.kellyStake) || 10;
+    
     try {
+      // ✅ CRITICAL: Must be POST with JSON body
       const res = await fetch(EDGE_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
         body: JSON.stringify({
           operation: "place_bet",
           player_name: opp.full_name,
-          sport,
+          sport: sport,
           prop_type: opp.prop_type,
-          side: opp.recommendation.includes("OVER") ? "over" : "under",
-          line: parseFloat(opp.line),
-          odds: -110,
-          stake,
-          bankroll_before: 1000,
-          edge_pct: opp.edge_pct,
-          ev: opp.ev,
-          kelly_stake_pct: stake / 1000,
+          side: opp.recommendation?.includes("OVER") ? "over" : "under",
+          line: parseFloat(opp.line) || 0,
+          odds: -110, // Example odds; replace with real odds API later
+          stake: stake,
+          bankroll_before: 1000, // Get from user settings in production
+          edge_pct: parseFloat(opp.edgePct) || 0,
+          ev: parseFloat(opp.ev) || 0,
+          kelly_stake_pct: stake / 1000, // Assuming $1000 bankroll
           bookmaker: "Consensus"
         }),
       });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP ${res.status}`);
+      }
+
       const result = await res.json();
+      
       if (result.success) {
-        toast.success(`Bet tracked: $${stake} on ${opp.full_name} ${opp.prop_type}`);
+        toast.success(`✓ Bet tracked: $${stake} on ${opp.full_name} ${opp.prop_type}`);
       } else {
         toast.error(`Failed: ${result.error}`);
       }
     } catch (err: any) {
+      console.error("❌ Place bet error:", err);
       toast.error(`Error: ${err.message}`);
     }
   };
 
-  const handlePlayerClick = (id: string) => navigate(`/scanner?playerId=${id}&sport=${sport}`);
-  const handleBack = () => navigate("/scanner");
-  if (playerId) return <PlayerDetailView playerId={playerId} sport={sport} selectedProps={[selectedProp]} onBack={handleBack} />;
+  // ✅ Navigation handlers
+  const handlePlayerClick = (id: string) => {
+    navigate(`/scanner?playerId=${id}&sport=${sport}`);
+  };
+  
+  const handleBack = () => {
+    navigate("/scanner");
+  };
+
+  // ✅ Show Player Detail View if playerId in URL
+  if (playerId) {
+    return (
+      <PlayerDetailView 
+        playerId={playerId} 
+        sport={sport} 
+        selectedProps={[selectedProp]} 
+        onBack={handleBack} 
+      />
+    );
+  }
 
   const currentProps = PROP_GROUPS[sport as keyof typeof PROP_GROUPS] || PROP_GROUPS.nba;
-  const getInitials = (name: string) => name ? name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase() : "??";
+  
+  const getInitials = (name: string) => {
+    if (!name) return "??";
+    return name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
+  };
 
+  // ✅ Sortable Header Component
   const SortHeader = ({ label, sortKey }: { label: string; sortKey: string }) => (
     <th 
       className="p-4 text-left text-yellow-400 font-semibold cursor-pointer hover:text-yellow-300 select-none"
@@ -193,6 +289,7 @@ export default function Scanner() {
   return (
     <DashboardLayout>
       <div className="p-4 max-w-7xl mx-auto">
+        {/* Header */}
         <div className="flex justify-between items-start mb-6">
           <div>
             <h1 className="text-3xl font-bold text-yellow-400 mb-2">📊 Line Pulse Scanner</h1>
@@ -208,8 +305,11 @@ export default function Scanner() {
 
         {/* Filters */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+          {/* Sport Selector */}
           <Select value={sport} onValueChange={setSport}>
-            <SelectTrigger className="bg-[#0f172a] border-gray-700 text-yellow-400"><SelectValue placeholder="Select sport" /></SelectTrigger>
+            <SelectTrigger className="bg-[#0f172a] border-gray-700 text-yellow-400">
+              <SelectValue placeholder="Select sport" />
+            </SelectTrigger>
             <SelectContent className="bg-[#0f172a] border-gray-700">
               <SelectItem value="nba">🏀 NBA</SelectItem>
               <SelectItem value="nfl">🏈 NFL</SelectItem>
@@ -219,13 +319,22 @@ export default function Scanner() {
             </SelectContent>
           </Select>
 
+          {/* Search */}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input placeholder="Search players..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="pl-10 bg-[#0f172a] border-gray-700 text-yellow-400" />
+            <Input 
+              placeholder="Search players..." 
+              value={searchQuery} 
+              onChange={e => setSearchQuery(e.target.value)} 
+              className="pl-10 bg-[#0f172a] border-gray-700 text-yellow-400" 
+            />
           </div>
 
+          {/* Prop Selector */}
           <Select value={selectedProp} onValueChange={setSelectedProp}>
-            <SelectTrigger className="bg-[#0f172a] border-gray-700 text-yellow-400"><SelectValue placeholder="Select prop" /></SelectTrigger>
+            <SelectTrigger className="bg-[#0f172a] border-gray-700 text-yellow-400">
+              <SelectValue placeholder="Select prop" />
+            </SelectTrigger>
             <SelectContent className="bg-[#0f172a] border-gray-700">
               {currentProps.map(p => (
                 <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>
@@ -237,22 +346,41 @@ export default function Scanner() {
         {/* View Mode Toggle */}
         <div className="flex gap-2 mb-4">
           {(["all", "over", "under"] as const).map(mode => (
-            <button key={mode} onClick={() => setViewMode(mode)} className={`px-4 py-2 rounded-lg font-medium transition ${viewMode === mode ? "bg-yellow-500 text-black" : "bg-[#0f172a] text-gray-400 border border-gray-700 hover:border-yellow-600"}`}>
+            <button 
+              key={mode} 
+              onClick={() => setViewMode(mode)} 
+              className={`px-4 py-2 rounded-lg font-medium transition ${
+                viewMode === mode 
+                  ? "bg-yellow-500 text-black" 
+                  : "bg-[#0f172a] text-gray-400 border border-gray-700 hover:border-yellow-600"
+              }`}
+            >
               {mode.charAt(0).toUpperCase() + mode.slice(1)}
             </button>
           ))}
         </div>
 
-        {error && <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 mb-6 text-red-400">❌ {error}</div>}
+        {/* Error Display */}
+        {error && (
+          <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 mb-6 text-red-400">
+            ❌ {error}
+          </div>
+        )}
 
+        {/* Loading State */}
         {loading ? (
-          <div className="text-center py-12"><div className="animate-spin h-8 w-8 border-2 border-yellow-400 border-t-transparent rounded-full mx-auto mb-4" /><p className="text-gray-400">Scanning for +EV edges...</p></div>
+          <div className="text-center py-12">
+            <div className="animate-spin h-8 w-8 border-2 border-yellow-400 border-t-transparent rounded-full mx-auto mb-4" />
+            <p className="text-gray-400">Scanning for +EV edges...</p>
+          </div>
         ) : sortedPlayers.length === 0 ? (
+          /* Empty State */
           <div className="text-center py-20 text-gray-500 bg-[#020617] rounded-xl border border-gray-800">
             <p className="text-xl font-medium">No +EV opportunities found.</p>
             <p className="text-sm mt-2">Try lowering the edge threshold or changing sports.</p>
           </div>
         ) : (
+          /* Results Table */
           <div className="bg-[#020617] rounded-xl border border-gray-800 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -270,7 +398,12 @@ export default function Scanner() {
                 </thead>
                 <tbody>
                   {sortedPlayers.map((p, i) => (
-                    <tr key={`${p.player_id}-${i}`} onClick={() => handlePlayerClick(p.player_id)} className="border-b border-gray-800 hover:bg-[#0f172a] cursor-pointer transition">
+                    <tr 
+                      key={`${p.player_id}-${i}`} 
+                      onClick={() => handlePlayerClick(p.player_id)} 
+                      className="border-b border-gray-800 hover:bg-[#0f172a] cursor-pointer transition"
+                    >
+                      {/* Player */}
                       <td className="p-4">
                         <div className="flex items-center gap-3">
                           <div className="h-10 w-10 rounded-full bg-gradient-to-br from-yellow-500 to-yellow-700 flex items-center justify-center text-black font-bold text-sm">
@@ -282,16 +415,51 @@ export default function Scanner() {
                           </div>
                         </div>
                       </td>
-                      <td className="p-4"><Badge variant="outline" className="border-yellow-600 text-yellow-400 font-bold">{p.line}</Badge></td>
+                      
+                      {/* Line */}
+                      <td className="p-4">
+                        <Badge variant="outline" className="border-yellow-600 text-yellow-400 font-bold">
+                          {p.line}
+                        </Badge>
+                      </td>
+                      
+                      {/* Avg L10 */}
                       <td className="p-4 text-green-400 font-semibold">{p.avgL10}</td>
-                      <td className="p-4"><span className={p.edgePct.includes('-') ? "text-red-400" : "text-green-400"}>{p.edgePct}%</span></td>
-                      <td className="p-4"><span className={parseFloat(p.ev) > 0 ? "text-green-400" : "text-red-400"}>{p.ev}</span></td>
-                      <td className="p-4 text-yellow-400 font-semibold">${p.kellyStake}</td>
-                      <td className="p-4"><span className={`text-xs font-bold ${p.recommendation.includes('OVER') ? 'text-green-400' : p.recommendation.includes('UNDER') ? 'text-red-400' : 'text-gray-500'}`}>{p.recommendation}</span></td>
+                      
+                      {/* Edge % */}
+                      <td className="p-4">
+                        <span className={p.edgePct?.includes('-') ? "text-red-400" : "text-green-400"}>
+                          {p.edgePct}%
+                        </span>
+                      </td>
+                      
+                      {/* EV */}
+                      <td className="p-4">
+                        <span className={parseFloat(p.ev) > 0 ? "text-green-400" : "text-red-400"}>
+                          {p.ev}
+                        </span>
+                      </td>
+                      
+                      {/* Kelly Stake */}
+                      <td className="p-4 text-yellow-400 font-semibold">
+                        ${p.kellyStake}
+                      </td>
+                      
+                      {/* Recommendation */}
+                      <td className="p-4">
+                        <span className={`text-xs font-bold ${
+                          p.recommendation?.includes('OVER') ? 'text-green-400' : 
+                          p.recommendation?.includes('UNDER') ? 'text-red-400' : 'text-gray-500'
+                        }`}>
+                          {p.recommendation}
+                        </span>
+                      </td>
+                      
+                      {/* Action Button */}
                       <td className="p-4">
                         <Button 
                           size="sm" 
-                          onClick={(e) => { e.stopPropagation(); handlePlaceBet(p); }}
+                          onClick={(e) => handlePlaceBet(p, e)}
                           className="bg-green-600 hover:bg-green-700 text-xs h-7"
                         >
                           Place Bet
@@ -305,7 +473,12 @@ export default function Scanner() {
           </div>
         )}
 
-        <SubmitLineModal open={showSubmitModal} onOpenChange={setShowSubmitModal} sport={sport} />
+        {/* Submit Line Modal */}
+        <SubmitLineModal 
+          open={showSubmitModal} 
+          onOpenChange={setShowSubmitModal}
+          sport={sport}
+        />
       </div>
     </DashboardLayout>
   );
