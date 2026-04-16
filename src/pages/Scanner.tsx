@@ -14,11 +14,52 @@ import { Search, ArrowUpDown } from "lucide-react";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
+// ✅ Prop type groups by sport
+const PROP_GROUPS: Record<string, { id: string; label: string }[]> = {
+  nba: [
+    { id: "points", label: "PTS" },
+    { id: "rebounds", label: "REB" },
+    { id: "assists", label: "AST" },
+    { id: "threes", label: "3PM" },
+    { id: "steals", label: "STL" },
+    { id: "blocks", label: "BLK" },
+    { id: "Pts+Reb", label: "P+R" },
+    { id: "Pts+Ast", label: "P+A" },
+    { id: "Reb+Ast", label: "R+A" },
+    { id: "Pts+Reb+Ast", label: "PRA" }
+  ],
+  nfl: [
+    { id: "passing_yards", label: "Pass Yds" },
+    { id: "rushing_yards", label: "Rush Yds" },
+    { id: "receiving_yards", label: "Rec Yds" },
+    { id: "passing_tds", label: "Pass TD" },
+    { id: "receptions", label: "Rec" }
+  ],
+  mlb: [
+    { id: "hits", label: "H" },
+    { id: "runs", label: "R" },
+    { id: "rbi", label: "RBI" },
+    { id: "home_runs", label: "HR" }
+  ],
+  nhl: [
+    { id: "goals", label: "G" },
+    { id: "assists_hockey", label: "A" },
+    { id: "shots_on_goal", label: "SOG" }
+  ],
+  soccer: [
+    { id: "goals_soccer", label: "G" },
+    { id: "assists_soccer", label: "A" },
+    { id: "shots_soccer", label: "Shots" }
+  ]
+};
+
 export default function Scanner() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   
   const [sport, setSport] = useState("nba");
+  const [selectedProp, setSelectedProp] = useState("points"); // ✅ Prop selector
+  const [viewMode, setViewMode] = useState<"all" | "over" | "under">("all"); // ✅ Over/Under toggle
   const [players, setPlayers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -55,79 +96,41 @@ export default function Scanner() {
         throw new Error(data.error || "Failed to fetch players");
       }
 
-      // ✅ CORRECTED MAPPING - Display actual betting lines
-      const mapped = (data.players || []).map((p: any) => {
-        // Debug first player
-        if (p.player_id === data.players[0]?.player_id) {
-          console.log("📊 Raw player data:", p);
-        }
-        
-        // ✅ Extract line - handle different field names
-        let lineValue = 0;
-        if (p.line != null && p.line !== "") {
-          lineValue = parseFloat(p.line);
-        } else if (p.baseline_line != null) {
-          lineValue = parseFloat(p.baseline_line);
-        } else if (p.projected_value != null) {
-          lineValue = parseFloat(p.projected_value);
-        }
-        
-        // ✅ Extract avg_last10
-        let avgValue = 0;
-        if (p.avg_last10 != null && p.avg_last10 !== "") {
-          avgValue = parseFloat(p.avg_last10);
-        } else if (p.avgL10 != null) {
-          avgValue = parseFloat(p.avgL10);
-        } else if (p.avg_last5 != null) {
-          avgValue = parseFloat(p.avg_last5);
-        }
-        
-        // ✅ Calculate edge from confidence or edge_type
-        const confidence = p.confidence_score || p.confidence || 50;
-        const edgeType = p.edge_type || (confidence > 55 ? "OVER" : confidence < 45 ? "UNDER" : "NONE");
-        const edgePct = ((confidence - 50)).toFixed(1);
-        
-        // ✅ Calculate EV
-        const evValue = edgeType === "OVER" ? 0.05 : edgeType === "UNDER" ? -0.05 : 0;
+      // ✅ Filter by selected prop type
+      let filteredPlayers = data.players || [];
+      if (selectedProp && selectedProp !== "all") {
+        filteredPlayers = filteredPlayers.filter((p: any) => 
+          p.prop_type?.toLowerCase() === selectedProp.toLowerCase() ||
+          p.stat_type?.toLowerCase() === selectedProp.toLowerCase()
+        );
+      }
+
+      // ✅ Map response to UI format
+      const mapped = filteredPlayers.map((p: any) => {
+        const lineVal = p.line ?? p.baseline_line ?? p.projected_value ?? 0;
+        const avgVal = p.avg_last10 ?? p.avgL10 ?? p.avg_last5 ?? 0;
+        const conf = p.confidence_score ?? p.confidence ?? 50;
+        const edgeType = p.edge_type ?? (conf > 55 ? "OVER" : conf < 45 ? "UNDER" : "NONE");
         
         return {
-          player_id: p.player_id || p.id,
-          full_name: p.name || p.full_name || p.player_name || "Unknown",
-          team: p.team_abbr || p.team || p.abbreviation || "N/A",
+          player_id: p.player_id,
+          full_name: p.name || p.full_name || "Unknown",
+          team: p.team_abbr || p.team || "N/A",
           position: p.position || "N/A",
-          
-          // ✅ BETTING LINE - Display as decimal (22.5, 8.5, etc.)
-          line: lineValue.toFixed(1),
-          
-          // ✅ AVG L10
-          avgL10: avgValue.toFixed(1),
-          
-          // ✅ DIFF
-          diff: ((avgValue - lineValue)).toFixed(1),
-          
-          // ✅ EDGE %
-          edgePct: `${edgePct}%`,
-          
-          // ✅ EV
-          ev: evValue.toFixed(3),
-          
-          // ✅ RECOMMENDATION
+          line: parseFloat(lineVal).toFixed(1),
+          avgL10: parseFloat(avgVal).toFixed(1),
+          diff: (parseFloat(avgVal) - parseFloat(lineVal)).toFixed(1),
+          edgePct: `${(conf - 50).toFixed(1)}%`,
+          ev: edgeType === "OVER" ? "0.050" : edgeType === "UNDER" ? "-0.050" : "0.000",
           recommendation: edgeType === "OVER" ? "OVER" : edgeType === "UNDER" ? "UNDER" : "NO BET",
-          
-          prop_type: p.prop_type || p.stat_type || "points",
+          prop_type: p.prop_type || p.stat_type || selectedProp,
           opponent: p.opponent || "TBD",
-          
-          // Store raw values for sorting
-          _confidence: confidence,
-          _ev: evValue,
+          _confidence: conf,
+          _ev: edgeType === "OVER" ? 0.05 : edgeType === "UNDER" ? -0.05 : 0,
         };
       });
 
-      console.log(`✅ Mapped ${mapped.length} players`);
-      if (mapped.length > 0) {
-        console.log("📊 Sample player:", mapped[0]);
-      }
-      
+      console.log(`✅ Mapped ${mapped.length} players (filtered by ${selectedProp})`);
       setPlayers(mapped);
       
     } catch (err: any) {
@@ -141,12 +144,20 @@ export default function Scanner() {
   useEffect(() => {
     if (playerId) return;
     fetchData();
-  }, [sport]);
+  }, [sport, selectedProp]); // ✅ Re-fetch when sport OR prop changes
 
-  // ✅ Sorting & Filtering
+  // ✅ Sorting & Filtering with Over/Under toggle
   const sortedPlayers = useMemo(() => {
     let sorted = [...players];
     
+    // ✅ Filter by view mode (OVER/UNDER/ALL)
+    if (viewMode === "over") {
+      sorted = sorted.filter(p => parseFloat(p.avgL10) > parseFloat(p.line));
+    } else if (viewMode === "under") {
+      sorted = sorted.filter(p => parseFloat(p.avgL10) <= parseFloat(p.line));
+    }
+    
+    // Search filter
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       sorted = sorted.filter(p => 
@@ -155,21 +166,29 @@ export default function Scanner() {
       );
     }
     
+    // Sort
     if (sortConfig?.key) {
       sorted.sort((a, b) => {
-        const aVal = a[sortConfig.key] ?? 0;
-        const bVal = b[sortConfig.key] ?? 0;
+        const aVal = a[sortConfig.key];
+        const bVal = b[sortConfig.key];
+        if (aVal == null && bVal == null) return 0;
+        if (aVal == null) return 1;
+        if (bVal == null) return -1;
         
-        if (sortConfig.direction === "asc") {
-          return typeof aVal === "string" ? aVal.localeCompare(bVal) : parseFloat(aVal) - parseFloat(bVal);
-        } else {
-          return typeof aVal === "string" ? bVal.localeCompare(aVal) : parseFloat(bVal) - parseFloat(aVal);
+        if (typeof aVal === "string" && typeof bVal === "string") {
+          return sortConfig.direction === "asc" 
+            ? aVal.localeCompare(bVal) 
+            : bVal.localeCompare(aVal);
         }
+        
+        const aNum = parseFloat(aVal) || 0;
+        const bNum = parseFloat(bVal) || 0;
+        return sortConfig.direction === "asc" ? aNum - bNum : bNum - aNum;
       });
     }
     
     return sorted;
-  }, [players, searchQuery, sortConfig]);
+  }, [players, viewMode, searchQuery, sortConfig]);
 
   const requestSort = (key: string) => {
     setSortConfig(prev => ({
@@ -191,7 +210,7 @@ export default function Scanner() {
       <PlayerDetailView 
         playerId={playerId} 
         sport={sport} 
-        selectedProps={["points"]} 
+        selectedProps={[selectedProp]} 
         onBack={handleBack} 
       />
     );
@@ -214,6 +233,9 @@ export default function Scanner() {
     </th>
   );
 
+  // ✅ Get available props for current sport
+  const currentProps = PROP_GROUPS[sport as keyof typeof PROP_GROUPS] || PROP_GROUPS.nba;
+
   return (
     <DashboardLayout>
       <div className="p-4 max-w-7xl mx-auto">
@@ -222,7 +244,8 @@ export default function Scanner() {
           <p className="text-gray-400 text-sm">Find betting edges across all major sportsbooks</p>
         </div>
 
-        <div className="flex flex-col md:flex-row gap-3 mb-6">
+        {/* ✅ Filters Row 1: Sport, Search, Prop Type */}
+        <div className="flex flex-col md:flex-row gap-3 mb-4">
           <Select value={sport} onValueChange={setSport}>
             <SelectTrigger className="w-full md:w-[180px] bg-[#0f172a] border-gray-700 text-yellow-400">
               <SelectValue placeholder="Select sport" />
@@ -245,6 +268,36 @@ export default function Scanner() {
               className="pl-10 bg-[#0f172a] border-gray-700 text-yellow-400" 
             />
           </div>
+
+          {/* ✅ Prop Type Selector */}
+          <Select value={selectedProp} onValueChange={setSelectedProp}>
+            <SelectTrigger className="w-full md:w-[180px] bg-[#0f172a] border-gray-700 text-yellow-400">
+              <SelectValue placeholder="Select prop" />
+            </SelectTrigger>
+            <SelectContent className="bg-[#0f172a] border-gray-700">
+              <SelectItem value="all">All Props</SelectItem>
+              {currentProps.map(prop => (
+                <SelectItem key={prop.id} value={prop.id}>{prop.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* ✅ Filters Row 2: Over/Under Toggle */}
+        <div className="flex gap-2 mb-6">
+          {(["all", "over", "under"] as const).map(mode => (
+            <button
+              key={mode}
+              onClick={() => setViewMode(mode)}
+              className={`px-4 py-2 rounded-lg font-medium transition ${
+                viewMode === mode
+                  ? "bg-yellow-500 text-black"
+                  : "bg-[#0f172a] text-gray-400 border border-gray-700 hover:border-yellow-600"
+              }`}
+            >
+              {mode.charAt(0).toUpperCase() + mode.slice(1)}
+            </button>
+          ))}
         </div>
 
         {error && (
@@ -261,7 +314,7 @@ export default function Scanner() {
         ) : sortedPlayers.length === 0 ? (
           <div className="text-center py-20 text-gray-500 bg-[#020617] rounded-xl border border-gray-800">
             <p className="text-xl font-medium">No players found.</p>
-            <p className="text-sm mt-2">Try selecting a different sport or clearing your search.</p>
+            <p className="text-sm mt-2">Try selecting a different sport, prop, or clearing filters.</p>
           </div>
         ) : (
           <div className="bg-[#020617] rounded-xl border border-gray-800 overflow-hidden">
