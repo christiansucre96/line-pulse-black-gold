@@ -27,12 +27,11 @@ export default function Scanner() {
   
   const playerId = searchParams.get("playerId");
 
-  // ✅ Fetch players — PROPER POST REQUEST for your original Edge Function
+  // ✅ Fetch players — PROPER POST REQUEST
   const fetchData = async () => {
     setLoading(true);
     setError(null);
     try {
-      // ✅ CRITICAL: Must be POST with JSON body for Edge Functions
       const res = await fetch(EDGE_URL, {
         method: "POST",
         headers: { 
@@ -40,12 +39,11 @@ export default function Scanner() {
           "Accept": "application/json"
         },
         body: JSON.stringify({
-          operation: "get_players",  // ✅ Your original operation name
+          operation: "get_players",
           sport: sport,
         }),
       });
 
-      // ✅ Check response status
       if (!res.ok) {
         const errorText = await res.text().catch(() => "Unknown error");
         throw new Error(`HTTP ${res.status}: ${errorText.substring(0, 100)}`);
@@ -57,22 +55,81 @@ export default function Scanner() {
         throw new Error(data.error || "Failed to fetch players");
       }
 
-      // ✅ Map your Edge Function response to UI format
-      const mapped = (data.players || []).map((p: any) => ({
-        player_id: p.player_id,
-        full_name: p.name || p.full_name || "Unknown",
-        team: p.team_abbr || p.team || "N/A",
-        line: p.line?.toFixed(1) || "0.0",
-        avgL10: p.avg_last10?.toFixed(1) || "0.0",
-        diff: p.diff?.toFixed(1) || "0.0",
-        edgePct: `${((p.confidence || 50) - 50).toFixed(1)}%`,
-        ev: (p.edge_type === "OVER" ? 0.05 : p.edge_type === "UNDER" ? -0.05 : 0).toFixed(3),
-        recommendation: p.edge_type === "OVER" ? "OVER" : p.edge_type === "UNDER" ? "UNDER" : "NO BET",
-        prop_type: p.prop_type || "points",
-        opponent: p.opponent || "TBD",
-      }));
+      // ✅ CORRECTED MAPPING - Display actual betting lines
+      const mapped = (data.players || []).map((p: any) => {
+        // Debug first player
+        if (p.player_id === data.players[0]?.player_id) {
+          console.log("📊 Raw player data:", p);
+        }
+        
+        // ✅ Extract line - handle different field names
+        let lineValue = 0;
+        if (p.line != null && p.line !== "") {
+          lineValue = parseFloat(p.line);
+        } else if (p.baseline_line != null) {
+          lineValue = parseFloat(p.baseline_line);
+        } else if (p.projected_value != null) {
+          lineValue = parseFloat(p.projected_value);
+        }
+        
+        // ✅ Extract avg_last10
+        let avgValue = 0;
+        if (p.avg_last10 != null && p.avg_last10 !== "") {
+          avgValue = parseFloat(p.avg_last10);
+        } else if (p.avgL10 != null) {
+          avgValue = parseFloat(p.avgL10);
+        } else if (p.avg_last5 != null) {
+          avgValue = parseFloat(p.avg_last5);
+        }
+        
+        // ✅ Calculate edge from confidence or edge_type
+        const confidence = p.confidence_score || p.confidence || 50;
+        const edgeType = p.edge_type || (confidence > 55 ? "OVER" : confidence < 45 ? "UNDER" : "NONE");
+        const edgePct = ((confidence - 50)).toFixed(1);
+        
+        // ✅ Calculate EV
+        const evValue = edgeType === "OVER" ? 0.05 : edgeType === "UNDER" ? -0.05 : 0;
+        
+        return {
+          player_id: p.player_id || p.id,
+          full_name: p.name || p.full_name || p.player_name || "Unknown",
+          team: p.team_abbr || p.team || p.abbreviation || "N/A",
+          position: p.position || "N/A",
+          
+          // ✅ BETTING LINE - Display as decimal (22.5, 8.5, etc.)
+          line: lineValue.toFixed(1),
+          
+          // ✅ AVG L10
+          avgL10: avgValue.toFixed(1),
+          
+          // ✅ DIFF
+          diff: ((avgValue - lineValue)).toFixed(1),
+          
+          // ✅ EDGE %
+          edgePct: `${edgePct}%`,
+          
+          // ✅ EV
+          ev: evValue.toFixed(3),
+          
+          // ✅ RECOMMENDATION
+          recommendation: edgeType === "OVER" ? "OVER" : edgeType === "UNDER" ? "UNDER" : "NO BET",
+          
+          prop_type: p.prop_type || p.stat_type || "points",
+          opponent: p.opponent || "TBD",
+          
+          // Store raw values for sorting
+          _confidence: confidence,
+          _ev: evValue,
+        };
+      });
 
+      console.log(`✅ Mapped ${mapped.length} players`);
+      if (mapped.length > 0) {
+        console.log("📊 Sample player:", mapped[0]);
+      }
+      
       setPlayers(mapped);
+      
     } catch (err: any) {
       console.error("❌ Fetch error:", err);
       setError(err.message || "Failed to load players");
@@ -81,17 +138,15 @@ export default function Scanner() {
     }
   };
 
-  // ✅ Fetch when sport changes (not if viewing player detail)
   useEffect(() => {
     if (playerId) return;
     fetchData();
   }, [sport]);
 
-  // ✅ Sorting & Filtering Logic
+  // ✅ Sorting & Filtering
   const sortedPlayers = useMemo(() => {
     let sorted = [...players];
     
-    // Search filter
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       sorted = sorted.filter(p => 
@@ -100,24 +155,16 @@ export default function Scanner() {
       );
     }
     
-    // Sort
     if (sortConfig?.key) {
       sorted.sort((a, b) => {
-        const aVal = a[sortConfig.key];
-        const bVal = b[sortConfig.key];
-        if (aVal == null && bVal == null) return 0;
-        if (aVal == null) return 1;
-        if (bVal == null) return -1;
+        const aVal = a[sortConfig.key] ?? 0;
+        const bVal = b[sortConfig.key] ?? 0;
         
-        if (typeof aVal === "string" && typeof bVal === "string") {
-          return sortConfig.direction === "asc" 
-            ? aVal.localeCompare(bVal) 
-            : bVal.localeCompare(aVal);
+        if (sortConfig.direction === "asc") {
+          return typeof aVal === "string" ? aVal.localeCompare(bVal) : parseFloat(aVal) - parseFloat(bVal);
+        } else {
+          return typeof aVal === "string" ? bVal.localeCompare(aVal) : parseFloat(bVal) - parseFloat(aVal);
         }
-        
-        const aNum = parseFloat(aVal) || 0;
-        const bNum = parseFloat(bVal) || 0;
-        return sortConfig.direction === "asc" ? aNum - bNum : bNum - aNum;
       });
     }
     
@@ -125,15 +172,12 @@ export default function Scanner() {
   }, [players, searchQuery, sortConfig]);
 
   const requestSort = (key: string) => {
-    setSortConfig(prev => {
-      if (prev?.key === key) {
-        return { key, direction: prev.direction === "asc" ? "desc" : "asc" };
-      }
-      return { key, direction: "desc" };
-    });
+    setSortConfig(prev => ({
+      key,
+      direction: prev?.key === key && prev.direction === "asc" ? "desc" : "asc"
+    }));
   };
 
-  // ✅ Navigation handlers
   const handlePlayerClick = (id: string) => {
     navigate(`/scanner?playerId=${id}&sport=${sport}`);
   };
@@ -142,7 +186,6 @@ export default function Scanner() {
     navigate("/scanner");
   };
 
-  // ✅ Show Player Detail View if playerId in URL
   if (playerId) {
     return (
       <PlayerDetailView 
@@ -159,7 +202,6 @@ export default function Scanner() {
     return name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
   };
 
-  // ✅ Sortable Header Component
   const SortHeader = ({ label, sortKey }: { label: string; sortKey: string }) => (
     <th 
       className="p-4 text-left text-yellow-400 font-semibold cursor-pointer hover:text-yellow-300 select-none"
@@ -175,15 +217,12 @@ export default function Scanner() {
   return (
     <DashboardLayout>
       <div className="p-4 max-w-7xl mx-auto">
-        {/* Header */}
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-yellow-400 mb-2">📊 Line Pulse Scanner</h1>
           <p className="text-gray-400 text-sm">Find betting edges across all major sportsbooks</p>
         </div>
 
-        {/* Filters */}
         <div className="flex flex-col md:flex-row gap-3 mb-6">
-          {/* Sport Selector */}
           <Select value={sport} onValueChange={setSport}>
             <SelectTrigger className="w-full md:w-[180px] bg-[#0f172a] border-gray-700 text-yellow-400">
               <SelectValue placeholder="Select sport" />
@@ -197,7 +236,6 @@ export default function Scanner() {
             </SelectContent>
           </Select>
           
-          {/* Search */}
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input 
@@ -209,27 +247,23 @@ export default function Scanner() {
           </div>
         </div>
 
-        {/* Error Display */}
         {error && (
           <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 mb-6 text-red-400">
             ❌ {error}
           </div>
         )}
 
-        {/* Loading State */}
         {loading ? (
           <div className="text-center py-12">
             <div className="animate-spin h-8 w-8 border-2 border-yellow-400 border-t-transparent rounded-full mx-auto mb-4" />
             <p className="text-gray-400">Loading players...</p>
           </div>
         ) : sortedPlayers.length === 0 ? (
-          /* Empty State */
           <div className="text-center py-20 text-gray-500 bg-[#020617] rounded-xl border border-gray-800">
             <p className="text-xl font-medium">No players found.</p>
             <p className="text-sm mt-2">Try selecting a different sport or clearing your search.</p>
           </div>
         ) : (
-          /* Results Table */
           <div className="bg-[#020617] rounded-xl border border-gray-800 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -250,7 +284,6 @@ export default function Scanner() {
                       onClick={() => handlePlayerClick(p.player_id)} 
                       className="border-b border-gray-800 hover:bg-[#0f172a] cursor-pointer transition"
                     >
-                      {/* Player */}
                       <td className="p-4">
                         <div className="flex items-center gap-3">
                           <div className="h-10 w-10 rounded-full bg-gradient-to-br from-yellow-500 to-yellow-700 flex items-center justify-center text-black font-bold text-sm">
@@ -262,32 +295,22 @@ export default function Scanner() {
                           </div>
                         </div>
                       </td>
-                      
-                      {/* Line */}
                       <td className="p-4">
                         <Badge variant="outline" className="border-yellow-600 text-yellow-400 font-bold">
                           {p.line}
                         </Badge>
                       </td>
-                      
-                      {/* Avg L10 */}
                       <td className="p-4 text-green-400 font-semibold">{p.avgL10}</td>
-                      
-                      {/* Edge % */}
                       <td className="p-4">
                         <span className={p.edgePct?.includes('-') ? "text-red-400" : "text-green-400"}>
                           {p.edgePct}
                         </span>
                       </td>
-                      
-                      {/* EV */}
                       <td className="p-4">
                         <span className={parseFloat(p.ev) > 0 ? "text-green-400" : "text-red-400"}>
                           {p.ev}
                         </span>
                       </td>
-                      
-                      {/* Recommendation */}
                       <td className="p-4">
                         <span className={`text-xs font-bold ${
                           p.recommendation?.includes('OVER') ? 'text-green-400' : 
@@ -304,7 +327,6 @@ export default function Scanner() {
           </div>
         )}
 
-        {/* Submit Line Modal */}
         <SubmitLineModal 
           open={false} 
           onOpenChange={() => {}}
