@@ -81,17 +81,19 @@ export default function Scanner() {
     if (urlSport && urlSport !== sport) setSport(urlSport);
   }, [urlSport]);
 
-  const fetchPlayers = async (forceAll: boolean = false, forceNoStats: boolean = false) => {
+  // ✅ FIXED: Fetch players - NO forceNoStats by default
+  const fetchPlayers = async (forceAll: boolean = false, testMode: boolean = false) => {
     setLoading(true); setError(null);
     try {
       const res = await fetch(EDGE_URL, {
-        method: "POST", // ✅ Must be POST, not GET/HEAD
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           operation: "get_players", 
           sport,
           forceAll: forceAll || search.length > 0,
-          forceNoStats: forceNoStats // ✅ Allow testing without stats
+          // ✅ ONLY use forceNoStats when testMode is true
+          ...(testMode && { forceNoStats: true })
         }),
       });
       
@@ -110,6 +112,7 @@ export default function Scanner() {
     }
   };
 
+  // ✅ Initial load - fetch REAL data (no forceNoStats)
   useEffect(() => {
     if (!playerId) fetchPlayers();
   }, [sport]);
@@ -173,7 +176,7 @@ export default function Scanner() {
     </th>
   );
 
-  // If viewing player detail
+  // ✅ If viewing player detail - render PlayerDetailView
   if (playerId) {
     return (
       <PlayerDetailView
@@ -199,16 +202,18 @@ export default function Scanner() {
             </p>
           </div>
           <div className="flex gap-2">
+            {/* ✅ Test Mode Button - explicitly uses forceNoStats */}
             <button
-              onClick={() => fetchPlayers(true, true)} // ✅ Test Mode: force all + no stats
+              onClick={() => fetchPlayers(true, true)} // ✅ forceAll=true, testMode=true
               disabled={loading}
               className="flex items-center gap-2 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 rounded-lg text-sm text-white font-medium transition disabled:opacity-50"
             >
               <FlaskConical className="w-3.5 h-3.5" />
               Test Mode
             </button>
+            {/* ✅ Refresh Button - uses real data */}
             <button
-              onClick={() => fetchPlayers(true)}
+              onClick={() => fetchPlayers(true)} // ✅ forceAll=true, testMode=false (default)
               disabled={loading}
               className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm text-gray-300 transition disabled:opacity-50"
             >
