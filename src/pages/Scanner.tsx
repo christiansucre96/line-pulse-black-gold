@@ -58,8 +58,8 @@ export default function Scanner() {
   const navigate = useNavigate();
   
   const [sport, setSport] = useState("nba");
-  const [selectedProp, setSelectedProp] = useState("points"); // ✅ Prop selector
-  const [viewMode, setViewMode] = useState<"all" | "over" | "under">("all"); // ✅ Over/Under toggle
+  const [selectedProp, setSelectedProp] = useState("points");
+  const [viewMode, setViewMode] = useState<"all" | "over" | "under">("all");
   const [players, setPlayers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -68,7 +68,6 @@ export default function Scanner() {
   
   const playerId = searchParams.get("playerId");
 
-  // ✅ Fetch players — PROPER POST REQUEST
   const fetchData = async () => {
     setLoading(true);
     setError(null);
@@ -96,7 +95,6 @@ export default function Scanner() {
         throw new Error(data.error || "Failed to fetch players");
       }
 
-      // ✅ Filter by selected prop type
       let filteredPlayers = data.players || [];
       if (selectedProp && selectedProp !== "all") {
         filteredPlayers = filteredPlayers.filter((p: any) => 
@@ -105,7 +103,6 @@ export default function Scanner() {
         );
       }
 
-      // ✅ Map response to UI format
       const mapped = filteredPlayers.map((p: any) => {
         const lineVal = p.line ?? p.baseline_line ?? p.projected_value ?? 0;
         const avgVal = p.avg_last10 ?? p.avgL10 ?? p.avg_last5 ?? 0;
@@ -144,20 +141,17 @@ export default function Scanner() {
   useEffect(() => {
     if (playerId) return;
     fetchData();
-  }, [sport, selectedProp]); // ✅ Re-fetch when sport OR prop changes
+  }, [sport, selectedProp]);
 
-  // ✅ Sorting & Filtering with Over/Under toggle
   const sortedPlayers = useMemo(() => {
     let sorted = [...players];
     
-    // ✅ Filter by view mode (OVER/UNDER/ALL)
     if (viewMode === "over") {
       sorted = sorted.filter(p => parseFloat(p.avgL10) > parseFloat(p.line));
     } else if (viewMode === "under") {
       sorted = sorted.filter(p => parseFloat(p.avgL10) <= parseFloat(p.line));
     }
     
-    // Search filter
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       sorted = sorted.filter(p => 
@@ -166,7 +160,6 @@ export default function Scanner() {
       );
     }
     
-    // Sort
     if (sortConfig?.key) {
       sorted.sort((a, b) => {
         const aVal = a[sortConfig.key];
@@ -197,6 +190,7 @@ export default function Scanner() {
     }));
   };
 
+  // ✅ UPDATED: Navigate to player detail with sport parameter
   const handlePlayerClick = (id: string) => {
     navigate(`/scanner?playerId=${id}&sport=${sport}`);
   };
@@ -233,7 +227,6 @@ export default function Scanner() {
     </th>
   );
 
-  // ✅ Get available props for current sport
   const currentProps = PROP_GROUPS[sport as keyof typeof PROP_GROUPS] || PROP_GROUPS.nba;
 
   return (
@@ -244,7 +237,6 @@ export default function Scanner() {
           <p className="text-gray-400 text-sm">Find betting edges across all major sportsbooks</p>
         </div>
 
-        {/* ✅ Filters Row 1: Sport, Search, Prop Type */}
         <div className="flex flex-col md:flex-row gap-3 mb-4">
           <Select value={sport} onValueChange={setSport}>
             <SelectTrigger className="w-full md:w-[180px] bg-[#0f172a] border-gray-700 text-yellow-400">
@@ -269,7 +261,6 @@ export default function Scanner() {
             />
           </div>
 
-          {/* ✅ Prop Type Selector */}
           <Select value={selectedProp} onValueChange={setSelectedProp}>
             <SelectTrigger className="w-full md:w-[180px] bg-[#0f172a] border-gray-700 text-yellow-400">
               <SelectValue placeholder="Select prop" />
@@ -283,7 +274,6 @@ export default function Scanner() {
           </Select>
         </div>
 
-        {/* ✅ Filters Row 2: Over/Under Toggle */}
         <div className="flex gap-2 mb-6">
           {(["all", "over", "under"] as const).map(mode => (
             <button
