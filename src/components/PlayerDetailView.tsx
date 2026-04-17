@@ -1,235 +1,198 @@
 // src/components/PlayerDetailView.tsx
-// Matches screenshot: all prop types, L5/L10/L15/L20 hit-rate boxes,
-// user-adjustable line, grouped by category
+// 3-Block Layout:
+// Block 1: Interactive L5/L10/L15/L20 selector with props
+// Block 2: Team stats
+// Block 3: Game logs (last 15 games) with all props
 
-import { useEffect, useState, useCallback } from "react";
-import { ArrowLeft, TrendingUp, TrendingDown, Minus, ChevronDown, ChevronUp } from "lucide-react";
+import { useEffect, useState, useMemo } from "react";
+import { ArrowLeft, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
-// ── HIT RATE BOX ─────────────────────────────────────────────
-function HRBox({ label, value }: { label: string; value: number | null }) {
-  if (value === null) return (
-    <div className="flex flex-col items-center">
-      <span className="text-[9px] text-gray-600 mb-0.5">{label}</span>
-      <div className="w-8 h-7 rounded text-[10px] font-bold flex items-center justify-center bg-gray-800 text-gray-600">—</div>
-    </div>
-  );
-  const bg = value >= 80 ? "bg-green-500" : value >= 60 ? "bg-yellow-500" : "bg-red-500";
-  const text = value >= 80 ? "text-white" : value >= 60 ? "text-black" : "text-white";
+// ── HIT RATE BADGE ──────────────────────────────────────────
+function HitRateBadge({ value, size = "md" }: { value: number | null; size?: "sm" | "md" | "lg" }) {
+  if (value === null || value === undefined) {
+    return <span className="text-gray-600">—</span>;
+  }
+
+  const getColor = (v: number) => {
+    if (v >= 80) return "bg-green-500 text-white";
+    if (v >= 60) return "bg-yellow-500 text-black";
+    return "bg-red-500 text-white";
+  };
+
+  const sizeClasses = {
+    sm: "px-1.5 py-0.5 text-[10px]",
+    md: "px-2 py-1 text-xs",
+    lg: "px-3 py-1.5 text-sm",
+  };
+
   return (
-    <div className="flex flex-col items-center">
-      <span className="text-[9px] text-gray-500 mb-0.5">{label}</span>
-      <div className={`w-8 h-7 rounded text-[10px] font-bold flex items-center justify-center ${bg} ${text}`}>
-        {value}%
+    <Badge className={`${getColor(value)} ${sizeClasses[size]} font-bold`}>
+      {value}%
+    </Badge>
+  );
+}
+
+// ── BAR CHART COMPONENT ─────────────────────────────────────
+function BarChart({
+  data,
+  line,
+  height = 200,
+}: {
+  data: { label: string; value: number; date: string }[];
+  line: number;
+  height?: number;
+}) {
+  const maxValue = Math.max(...data.map((d) => d.value), line) * 1.2;
+
+  return (
+    <div className="w-full" style={{ height }}>
+      <div className="flex items-end justify-between gap-1 h-full pb-6">
+        {data.map((item, i) => {
+          const barHeight = (item.value / maxValue) * 100;
+          const isOver = item.value >= line;
+
+          return (
+            <div key={i} className="flex-1 flex flex-col items-center gap-1">
+              <div className="relative w-full flex justify-center">
+                <div
+                  className={`w-full max-w-[40px] rounded-t transition-all ${
+                    isOver ? "bg-green-500" : "bg-red-500"
+                  }`}
+                  style={{ height: `${barHeight}%` }}
+                />
+                <div
+                  className="absolute w-full border-t-2 border-dashed border-yellow-400"
+                  style={{
+                    bottom: `${(line / maxValue) * 100}%`,
+                  }}
+                />
+              </div>
+              <span className="text-[10px] text-gray-500 rotate-0">
+                {item.label}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex items-center gap-4 text-xs text-gray-500 mt-2">
+        <div className="flex items-center gap-1">
+          <div className="w-3 h-3 bg-green-500 rounded" />
+          <span>Over Line ({line})</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="w-3 h-3 bg-red-500 rounded" />
+          <span>Under Line</span>
+        </div>
       </div>
     </div>
   );
 }
 
-// ── SINGLE PROP ROW — matches screenshot ─────────────────────
+// ── PROP ROW WITH L5/L10/L15/L20 ───────────────────────────
 function PropRow({
-  label, propData, onLineChange
+  propKey,
+  propData,
+  period,
 }: {
-  label: string;
+  propKey: string;
   propData: any;
-  onLineChange: (newLine: number) => void;
+  period: 5 | 10 | 15 | 20;
 }) {
-  const [localLine, setLocalLine] = useState<number>(propData.line ?? 0);
-  const [expanded, setExpanded] = useState(false);
-
-  useEffect(() => { setLocalLine(propData.line ?? 0); }, [propData.line]);
-
-  // Recalculate hit rates when user changes the line
-  const recalcHitRates = (line: number) => {
-    const vals: number[] = propData.values || [];
-    if (!vals.length) return { l5: null, l10: null, l15: null, l20: null };
-    const hr = (n: number) => {
-      const slice = vals.slice(0, n);
-      if (!slice.length) return null;
-      return Math.round(slice.filter((v: number) => v >= line).length / slice.length * 100);
-    };
-    return { l5: hr(5), l10: hr(10), l15: hr(15), l20: hr(20) };
-  };
-
-  const [hitRates, setHitRates] = useState({
-    l5: propData.l5 ?? null, l10: propData.l10 ?? null,
-    l15: propData.l15 ?? null, l20: propData.l20 ?? null,
-  });
-
-  const handleLineChange = (delta: number) => {
-    const newLine = Math.max(0, +(localLine + delta).toFixed(1));
-    setLocalLine(newLine);
-    setHitRates(recalcHitRates(newLine) as any);
-    onLineChange(newLine);
-  };
-
-  const trendIcon = propData.trend === 'up'
-    ? <TrendingUp className="w-3 h-3 text-green-400" />
-    : propData.trend === 'down'
-    ? <TrendingDown className="w-3 h-3 text-red-400" />
-    : <Minus className="w-3 h-3 text-gray-500" />;
+  const hitRateKey = `l${period}` as keyof typeof propData;
+  const hitRate = propData[hitRateKey] ?? null;
 
   return (
-    <div className="border-b border-gray-800/50 last:border-0">
-      <div className="flex items-center gap-3 py-2.5 px-4 hover:bg-gray-800/30 transition">
-        {/* Label */}
-        <div className="w-36 shrink-0">
-          <span className="text-sm text-gray-200 font-medium">{label}</span>
+    <div className="flex items-center justify-between py-2 border-b border-gray-800 last:border-0">
+      <div className="flex items-center gap-3">
+        <span className="text-sm font-medium text-gray-300 w-32">
+          {propData.label || propKey}
+        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500">Line:</span>
+          <span className="text-yellow-400 font-bold">{propData.line?.toFixed(1)}</span>
         </div>
-
-        {/* Line adjuster */}
-        <div className="flex items-center gap-1 shrink-0">
-          <button
-            onClick={() => handleLineChange(-0.5)}
-            className="w-5 h-5 rounded bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs font-bold flex items-center justify-center transition"
-          >−</button>
-          <span className="w-10 text-center text-yellow-400 font-bold text-sm tabular-nums">
-            {localLine.toFixed(1)}
-          </span>
-          <button
-            onClick={() => handleLineChange(0.5)}
-            className="w-5 h-5 rounded bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs font-bold flex items-center justify-center transition"
-          >+</button>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500">Avg:</span>
+          <span className="text-green-400 font-bold">{propData.avg_l10?.toFixed(1)}</span>
         </div>
-
-        {/* Avg L10 */}
-        <div className="w-12 text-center shrink-0">
-          <span className="text-xs text-gray-400">{propData.avg_l10 ?? '—'}</span>
-        </div>
-
-        {/* Hit rate boxes L5 / L10 / L15 / L20 */}
-        <div className="flex items-center gap-1.5 ml-1">
-          <HRBox label="L5"  value={hitRates.l5}  />
-          <HRBox label="L10" value={hitRates.l10} />
-          <HRBox label="L15" value={hitRates.l15} />
-          <HRBox label="L20" value={hitRates.l20} />
-        </div>
-
-        {/* Trend */}
-        <div className="ml-2 shrink-0">{trendIcon}</div>
-
-        {/* Expand for game log */}
-        {(propData.values?.length ?? 0) > 0 && (
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="ml-auto text-gray-600 hover:text-gray-400 transition"
-          >
-            {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-          </button>
+      </div>
+      <div className="flex items-center gap-2">
+        <HitRateBadge value={hitRate} size="sm" />
+        {propData.trend === "up" ? (
+          <TrendingUp className="w-4 h-4 text-green-400" />
+        ) : propData.trend === "down" ? (
+          <TrendingDown className="w-4 h-4 text-red-400" />
+        ) : (
+          <Minus className="w-4 h-4 text-gray-500" />
         )}
       </div>
-
-      {/* Mini game log */}
-      {expanded && propData.values?.length > 0 && (
-        <div className="px-4 pb-3">
-          <div className="flex gap-1 flex-wrap">
-            {propData.values.slice(0, 20).map((v: number, i: number) => (
-              <div
-                key={i}
-                className={`w-7 h-7 rounded text-[10px] font-bold flex items-center justify-center
-                  ${v >= localLine ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}
-              >
-                {v}
-              </div>
-            ))}
-          </div>
-          <p className="text-[10px] text-gray-600 mt-1">Last {propData.values.length} games (newest left)</p>
-        </div>
-      )}
     </div>
   );
 }
 
-// ── PROP GROUP SECTION ────────────────────────────────────────
-function PropGroup({
-  groupName, props, allPropsData, onLineChange
-}: {
-  groupName: string;
-  props: string[];
-  allPropsData: Record<string, any>;
-  onLineChange: (key: string, line: number) => void;
-}) {
-  const available = props.filter(k => allPropsData[k]);
-  if (!available.length) return null;
-  return (
-    <div className="mb-4">
-      <div className="px-4 py-1.5 bg-gray-800/40 border-b border-gray-700">
-        <span className="text-[11px] font-semibold text-yellow-400/80 uppercase tracking-widest">{groupName}</span>
-      </div>
-      {available.map(key => (
-        <PropRow
-          key={key}
-          label={allPropsData[key].label}
-          propData={allPropsData[key]}
-          onLineChange={(newLine) => onLineChange(key, newLine)}
-        />
-      ))}
-    </div>
-  );
-}
-
-// ── PROP STRUCTURE per sport ──────────────────────────────────
-const PROP_GROUPS_BY_SPORT: Record<string, { group: string; keys: string[] }[]> = {
-  nba: [
-    { group: 'Core',     keys: ['points','rebounds','assists','steals','blocks','turnovers','three_pointers_made','personal_fouls','minutes_played'] },
-    { group: 'Shooting', keys: ['field_goals_made','field_goals_attempted','three_pointers_attempted','free_throws_made','free_throws_attempted'] },
-    { group: 'Combos',   keys: ['combo_pr','combo_pa','combo_pra','combo_bs','combo_dd','combo_td'] },
-    { group: 'Quarters', keys: ['q1_points','q1_rebounds','q1_assists'] },
-  ],
-  nfl: [
-    { group: 'Passing',   keys: ['passing_yards','passing_tds','pass_attempts','pass_completions','interceptions'] },
-    { group: 'Rushing',   keys: ['rushing_yards','rushing_tds','rush_attempts'] },
-    { group: 'Receiving', keys: ['receiving_yards','receiving_tds','receptions','targets'] },
-    { group: 'Combos',    keys: ['combo_pass_rush','combo_rush_rec'] },
-  ],
-  mlb: [
-    { group: 'Batting',  keys: ['hits','runs','rbi','home_runs','total_bases','stolen_bases','walks','strikeouts_batting'] },
-    { group: 'Pitching', keys: ['strikeouts_pitching','hits_allowed','earned_runs','walks_allowed','outs_pitched'] },
-    { group: 'Combos',   keys: ['combo_hrr'] },
-  ],
-  nhl: [
-    { group: 'Core',   keys: ['goals','assists_hockey','shots_on_goal','blocked_shots','hits_hockey','penalty_minutes','plus_minus','faceoffs_won'] },
-    { group: 'Combos', keys: ['combo_ga','combo_pts'] },
-  ],
-  soccer: [
-    { group: 'Attacking',   keys: ['goals_soccer','assists_soccer','shots_soccer','shots_on_target'] },
-    { group: 'Passing',     keys: ['key_passes','passes_soccer'] },
-    { group: 'Defending',   keys: ['tackles','interceptions','clearances'] },
-    { group: 'Discipline',  keys: ['fouls_committed','yellow_cards'] },
-    { group: 'Core',        keys: ['dribbles_success'] },
-    { group: 'Combos',      keys: ['combo_ga_soccer'] },
-  ],
-};
-
-// ── MAIN DETAIL VIEW ──────────────────────────────────────────
-interface Props {
+// ── MAIN COMPONENT ──────────────────────────────────────────
+interface PlayerDetailViewProps {
   playerId: string;
   sport: string;
   onBack: () => void;
-  playerName?: string;
 }
 
-export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props) {
-  const [player, setPlayer]     = useState<any>(null);
+export function PlayerDetailView({ playerId, sport, onBack }: PlayerDetailViewProps) {
+  const [player, setPlayer] = useState<any>(null);
   const [allProps, setAllProps] = useState<Record<string, any>>({});
-  const [loading, setLoading]   = useState(true);
-  const [error, setError]       = useState<string | null>(null);
-  const [customLines, setCustomLines] = useState<Record<string, number>>({});
+  const [gameLogs, setGameLogs] = useState<any[]>([]);
+  const [teamStats, setTeamStats] = useState<any>(null);
+  const [selectedPeriod, setSelectedPeriod] = useState<5 | 10 | 15 | 20>(10);
+  const [selectedProp, setSelectedProp] = useState<string>("points");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
-      setLoading(true); setError(null);
+      setLoading(true);
+      setError(null);
       try {
         const res = await fetch(EDGE_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ operation: 'get_player_details', sport, player_id: playerId }),
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            operation: "get_player_details",
+            sport,
+            player_id: playerId,
+          }),
         });
+
         const data = await res.json();
-        if (!data.success) throw new Error(data.error || 'Failed to load');
+        if (!data.success) throw new Error(data.error || "Failed to load");
+
         setPlayer(data.player);
         setAllProps(data.player.all_props || {});
+        setGameLogs(data.player.game_logs || []);
+
+        // Set first available prop as selected
+        const firstProp = Object.keys(data.player.all_props || {})[0] || "points";
+        setSelectedProp(firstProp);
+
+        // Calculate team stats (simplified - you can enhance this)
+        const teamStatsData = {
+          gamesPlayed: data.player.game_logs?.length || 0,
+          avgPoints: data.player.all_props?.points?.avg_l10 || 0,
+          avgRebounds: data.player.all_props?.rebounds?.avg_l10 || 0,
+          avgAssists: data.player.all_props?.assists?.avg_l10 || 0,
+        };
+        setTeamStats(teamStatsData);
       } catch (e: any) {
         setError(e.message);
       } finally {
@@ -238,104 +201,221 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
     })();
   }, [playerId, sport]);
 
-  const handleLineChange = useCallback((key: string, line: number) => {
-    setCustomLines(prev => ({ ...prev, [key]: line }));
-  }, []);
+  // Prepare chart data for selected prop and period
+  const chartData = useMemo(() => {
+    if (!gameLogs.length || !allProps[selectedProp]) return [];
 
-  const groups = PROP_GROUPS_BY_SPORT[sport] || PROP_GROUPS_BY_SPORT.nba;
+    const propKey = selectedProp;
+    const logs = gameLogs.slice(0, selectedPeriod);
 
-  // Merge custom lines back into allProps for display
-  const mergedProps = { ...allProps };
-  for (const [key, line] of Object.entries(customLines)) {
-    if (mergedProps[key]) mergedProps[key] = { ...mergedProps[key], line };
+    return logs.map((log, i) => ({
+      label: `G${selectedPeriod - i}`,
+      value: log[propKey] || 0,
+      date: log.game_date,
+    }));
+  }, [gameLogs, selectedProp, selectedPeriod, allProps]);
+
+  const line = allProps[selectedProp]?.line || 0;
+
+  // Get props grouped by category for display
+  const propsByGroup = useMemo(() => {
+    const groups: Record<string, any[]> = {};
+    Object.entries(allProps).forEach(([key, prop]: [string, any]) => {
+      if (!groups[prop.group]) groups[prop.group] = [];
+      groups[prop.group].push({ key, ...prop });
+    });
+    return groups;
+  }, [allProps]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#020617] text-white flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-yellow-400 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-gray-400">Loading player details...</p>
+        </div>
+      </div>
+    );
   }
 
-  const displayName = player?.full_name || playerName || 'Player';
-  const propCount   = Object.keys(allProps).length;
+  if (error || !player) {
+    return (
+      <div className="min-h-screen bg-[#020617] text-white p-4">
+        <Button variant="ghost" onClick={onBack} className="mb-4">
+          <ArrowLeft className="h-4 w-4 mr-2" /> Back
+        </Button>
+        <Card className="bg-[#020617] border-gray-800">
+          <CardContent className="p-6 text-center text-red-400">
+            ❌ {error || "Player not found"}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#020617] text-white">
       {/* Header */}
       <div className="sticky top-0 z-10 bg-[#020617] border-b border-gray-800 px-4 py-3 flex items-center gap-3">
-        <button
-          onClick={onBack}
-          className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-white transition"
-        >
-          <ArrowLeft className="w-4 h-4" /> Back
-        </button>
-        <div className="ml-2">
-          <h1 className="font-bold text-yellow-400 text-lg leading-tight">{displayName}</h1>
-          {player && (
-            <p className="text-xs text-gray-500">
-              {player.team} · {player.position} · {sport.toUpperCase()} · {player.games_logged} games logged
-            </p>
-          )}
+        <Button variant="ghost" onClick={onBack} className="p-2">
+          <ArrowLeft className="w-5 h-5" />
+        </Button>
+        <div className="flex-1">
+          <h1 className="font-bold text-yellow-400 text-xl">{player.full_name}</h1>
+          <p className="text-xs text-gray-500">
+            {player.team} • {player.position} • {player.games_logged} games logged
+          </p>
         </div>
-        {propCount > 0 && (
-          <span className="ml-auto text-xs text-gray-600">{propCount} prop types</span>
-        )}
+        <Select value={selectedPeriod.toString()} onValueChange={(v) => setSelectedPeriod(Number(v) as 5 | 10 | 15 | 20)}>
+          <SelectTrigger className="w-32 bg-gray-900 border-gray-700 text-yellow-400">
+            <SelectValue placeholder="Period" />
+          </SelectTrigger>
+          <SelectContent className="bg-gray-900 border-gray-700">
+            <SelectItem value="5">Last 5 Games</SelectItem>
+            <SelectItem value="10">Last 10 Games</SelectItem>
+            <SelectItem value="15">Last 15 Games</SelectItem>
+            <SelectItem value="20">Last 20 Games</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
-      {loading && (
-        <div className="flex flex-col items-center justify-center py-20">
-          <div className="w-8 h-8 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin mb-3" />
-          <p className="text-gray-500 text-sm">Loading all props...</p>
-        </div>
-      )}
+      <div className="p-4 max-w-7xl mx-auto space-y-6">
+        {/* BLOCK 1: Interactive L5/L10/L15/L20 Props Selector */}
+        <Card className="bg-[#020617] border-gray-800">
+          <CardHeader className="border-b border-gray-800">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-yellow-400">📊 Props Analysis - Last {selectedPeriod} Games</CardTitle>
+              <Select value={selectedProp} onValueChange={setSelectedProp}>
+                <SelectTrigger className="w-48 bg-gray-900 border-gray-700 text-gray-300">
+                  <SelectValue placeholder="Select Prop" />
+                </SelectTrigger>
+                <SelectContent className="bg-gray-900 border-gray-700">
+                  {Object.entries(propsByGroup).map(([group, props]) => (
+                    <div key={group}>
+                      <div className="text-xs text-gray-500 px-2 py-1 font-semibold uppercase">{group}</div>
+                      {props.map((prop) => (
+                        <SelectItem key={prop.key} value={prop.key}>
+                          {prop.label}
+                        </SelectItem>
+                      ))}
+                    </div>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Chart for selected prop */}
+            {chartData.length > 0 && (
+              <div className="mb-6">
+                <h3 className="text-sm font-semibold text-gray-400 mb-3">
+                  {allProps[selectedProp]?.label} - Last {selectedPeriod} Games
+                </h3>
+                <BarChart data={chartData} line={line} height={250} />
+              </div>
+            )}
 
-      {error && (
-        <div className="m-4 p-4 bg-red-900/20 border border-red-800 rounded-lg text-red-400 text-sm">
-          ❌ {error}
-        </div>
-      )}
-
-      {!loading && !error && (
-        <>
-          {/* Column headers */}
-          <div className="flex items-center gap-3 px-4 py-2 bg-gray-900/60 border-b border-gray-800 text-[10px] text-gray-600 font-semibold uppercase tracking-wider sticky top-[57px] z-10">
-            <div className="w-36 shrink-0">Prop</div>
-            <div className="w-20 shrink-0 text-center">Your Line</div>
-            <div className="w-12 text-center shrink-0">Avg L10</div>
-            <div className="flex gap-1.5 ml-1">
-              {['L5','L10','L15','L20'].map(l => (
-                <div key={l} className="w-8 text-center">{l}</div>
+            {/* All props with hit rates for selected period */}
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold text-gray-400 mb-3">All Props - Hit Rates (L{selectedPeriod})</h3>
+              {Object.entries(propsByGroup).map(([group, props]) => (
+                <div key={group} className="mb-4">
+                  <div className="text-xs text-yellow-400/80 font-semibold uppercase mb-2 px-2">{group}</div>
+                  {props.map((prop) => (
+                    <PropRow
+                      key={prop.key}
+                      propKey={prop.key}
+                      propData={prop}
+                      period={selectedPeriod}
+                    />
+                  ))}
+                </div>
               ))}
             </div>
-          </div>
+          </CardContent>
+        </Card>
 
-          {/* Prop groups */}
-          {groups.map(({ group, keys }) => (
-            <PropGroup
-              key={group}
-              groupName={group}
-              props={keys}
-              allPropsData={mergedProps}
-              onLineChange={handleLineChange}
-            />
-          ))}
+        {/* BLOCK 2: Team Stats */}
+        <Card className="bg-[#020617] border-gray-800">
+          <CardHeader className="border-b border-gray-800">
+            <CardTitle className="text-yellow-400">🏀 Team Stats</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="bg-gray-900/50 rounded-lg p-4 border border-gray-800">
+                <p className="text-xs text-gray-500 mb-1">Games Played</p>
+                <p className="text-2xl font-bold text-yellow-400">{teamStats?.gamesPlayed || 0}</p>
+              </div>
+              <div className="bg-gray-900/50 rounded-lg p-4 border border-gray-800">
+                <p className="text-xs text-gray-500 mb-1">Avg Points</p>
+                <p className="text-2xl font-bold text-green-400">{teamStats?.avgPoints?.toFixed(1) || 0}</p>
+              </div>
+              <div className="bg-gray-900/50 rounded-lg p-4 border border-gray-800">
+                <p className="text-xs text-gray-500 mb-1">Avg Rebounds</p>
+                <p className="text-2xl font-bold text-green-400">{teamStats?.avgRebounds?.toFixed(1) || 0}</p>
+              </div>
+              <div className="bg-gray-900/50 rounded-lg p-4 border border-gray-800">
+                <p className="text-xs text-gray-500 mb-1">Avg Assists</p>
+                <p className="text-2xl font-bold text-green-400">{teamStats?.avgAssists?.toFixed(1) || 0}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
-          {propCount === 0 && (
-            <div className="text-center py-16 text-gray-600">
-              <p>No historical data yet for this player.</p>
-              <p className="text-sm mt-1">Run the data pipeline to populate game logs.</p>
-            </div>
-          )}
+        {/* BLOCK 3: Game Logs - Last 15 Games with All Props */}
+        <Card className="bg-[#020617] border-gray-800">
+          <CardHeader className="border-b border-gray-800">
+            <CardTitle className="text-yellow-400">📋 Game Log - Last 15 Games</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-gray-800">
+                    <th className="p-3 text-left text-xs font-semibold text-gray-400 uppercase">Date</th>
+                    <th className="p-3 text-left text-xs font-semibold text-gray-400 uppercase">Opponent</th>
+                    {Object.keys(allProps).slice(0, 8).map((key) => (
+                      <th key={key} className="p-3 text-center text-xs font-semibold text-gray-400 uppercase">
+                        {allProps[key]?.label || key}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {gameLogs.slice(0, 15).map((log, i) => (
+                    <tr key={i} className="border-b border-gray-800/50 hover:bg-gray-900/30">
+                      <td className="p-3 text-sm text-gray-300">
+                        {new Date(log.game_date).toLocaleDateString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                        })}
+                      </td>
+                      <td className="p-3 text-sm text-gray-400">vs TBD</td>
+                      {Object.keys(allProps).slice(0, 8).map((key) => {
+                        const value = log[key] || 0;
+                        const line = allProps[key]?.line || 0;
+                        const isOver = value >= line;
 
-          {/* Legend */}
-          <div className="px-4 py-4 border-t border-gray-800 flex gap-4 text-xs text-gray-600">
-            <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded bg-green-500" /> ≥80% hit rate
+                        return (
+                          <td key={key} className="p-3 text-center">
+                            <Badge
+                              className={`text-xs font-bold ${
+                                isOver ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
+                              }`}
+                            >
+                              {value}
+                            </Badge>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded bg-yellow-500" /> 60–79%
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded bg-red-500" /> &lt;60%
-            </div>
-            <div className="ml-auto">Click +/− to adjust your line · tap row to see game history</div>
-          </div>
-        </>
-      )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
