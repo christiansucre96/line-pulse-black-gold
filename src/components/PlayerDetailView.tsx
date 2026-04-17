@@ -1,9 +1,4 @@
 // src/components/PlayerDetailView.tsx
-// 3-Block Layout:
-// Block 1: Interactive L5/L10/L15/L20 selector with props
-// Block 2: Team stats
-// Block 3: Game logs (last 15 games) with all props
-
 import { useEffect, useState, useMemo } from "react";
 import { ArrowLeft, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -44,41 +39,48 @@ function HitRateBadge({ value, size = "md" }: { value: number | null; size?: "sm
   );
 }
 
-// ── BAR CHART COMPONENT ─────────────────────────────────────
-function BarChart({
+// ── STACKED BAR CHART (like the screenshot) ─────────────────
+function StackedBar({
   data,
   line,
   height = 200,
 }: {
-  data: { label: string; value: number; date: string }[];
+  data: { label: string; points: number; rebounds: number; assists?: number }[];
   line: number;
   height?: number;
 }) {
   if (!data.length) return <div className="h-48 flex items-center justify-center text-gray-500">No data</div>;
-  
-  const maxValue = Math.max(...data.map((d) => d.value), line) * 1.2;
+
+  const maxValue = Math.max(...data.map((d) => d.points + d.rebounds + (d.assists || 0)), line) * 1.2;
 
   return (
     <div className="w-full" style={{ height }}>
       <div className="flex items-end justify-between gap-1 h-full pb-6">
         {data.map((item, i) => {
-          const barHeight = (item.value / maxValue) * 100;
-          const isOver = item.value >= line;
+          const ptsHeight = (item.points / maxValue) * 100;
+          const rebHeight = (item.rebounds / maxValue) * 100;
+          const total = item.points + item.rebounds + (item.assists || 0);
+          const isOver = total >= line;
 
           return (
             <div key={i} className="flex-1 flex flex-col items-center gap-1">
-              <div className="relative w-full flex justify-center">
+              <div className="relative w-full flex flex-col justify-end h-full">
+                {/* Line marker */}
                 <div
-                  className={`w-full max-w-[40px] rounded-t transition-all ${
-                    isOver ? "bg-green-500" : "bg-red-500"
-                  }`}
-                  style={{ height: `${Math.max(barHeight, 2)}%` }}
+                  className="absolute w-full border-t border-dashed border-yellow-400/50"
+                  style={{ bottom: `${(line / maxValue) * 100}%` }}
                 />
+
+                {/* Rebounds segment */}
                 <div
-                  className="absolute w-full border-t-2 border-dashed border-yellow-400/50"
-                  style={{
-                    bottom: `${(line / maxValue) * 100}%`,
-                  }}
+                  className="w-full bg-green-400/80"
+                  style={{ height: `${rebHeight}%` }}
+                />
+
+                {/* Points segment */}
+                <div
+                  className={`w-full ${isOver ? "bg-green-600" : "bg-red-500"}`}
+                  style={{ height: `${ptsHeight}%` }}
                 />
               </div>
               <span className="text-[9px] text-gray-500 truncate w-full text-center">
@@ -90,51 +92,53 @@ function BarChart({
       </div>
       <div className="flex items-center gap-4 text-[10px] text-gray-500 mt-2">
         <div className="flex items-center gap-1">
-          <div className="w-2.5 h-2.5 bg-green-500 rounded" />
-          <span>Over Line ({line})</span>
+          <div className="w-2.5 h-2.5 bg-green-600 rounded" />
+          <span>Points (over line)</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <div className="w-2.5 h-2.5 bg-green-400/80 rounded" />
+          <span>Rebounds</span>
         </div>
         <div className="flex items-center gap-1">
           <div className="w-2.5 h-2.5 bg-red-500 rounded" />
-          <span>Under Line</span>
+          <span>Points (under line)</span>
         </div>
       </div>
     </div>
   );
 }
 
-// ── PROP ROW WITH L5/L10/L15/L20 ───────────────────────────
-function PropRow({
-  propKey,
-  propData,
-  period,
-}: {
-  propKey: string;
-  propData: any;
-  period: 5 | 10 | 15 | 20;
-}) {
-  const hitRateKey = `l${period}` as keyof typeof propData;
-  const hitRate = propData[hitRateKey] ?? null;
+// ── STAT BOX (L5/L10/L15/L20) ───────────────────────────────
+function StatBox({ label, hr, avg }: { label: string; hr: number | null; avg: number }) {
+  return (
+    <div className="bg-[#0f172a] px-3 py-2 rounded-lg text-xs text-center min-w-[60px]">
+      <p className="text-gray-400">{label}</p>
+      <p className="text-green-400 font-bold">HR {hr !== null ? hr : 0}%</p>
+      <p className="text-gray-300">Avg {avg.toFixed(1)}</p>
+    </div>
+  );
+}
 
+// ── PROP ROW FOR TABLES ─────────────────────────────────────
+function PropRow({ label, line, avg, hitRate, trend }: any) {
   return (
     <div className="flex items-center justify-between py-2 border-b border-gray-800/50 last:border-0 hover:bg-gray-800/20 px-2 rounded transition">
       <div className="flex items-center gap-3 min-w-0">
-        <span className="text-sm font-medium text-gray-300 w-36 truncate" title={propData.label || propKey}>
-          {propData.label || propKey}
-        </span>
+        <span className="text-sm font-medium text-gray-300 w-32 truncate">{label}</span>
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] text-gray-500">Line:</span>
-          <span className="text-yellow-400 font-bold text-sm">{propData.line?.toFixed(1) ?? '0.0'}</span>
+          <span className="text-yellow-400 font-bold text-sm">{line?.toFixed(1) ?? '0.0'}</span>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] text-gray-500">Avg:</span>
-          <span className="text-green-400 font-bold text-sm">{propData.avg_l10?.toFixed(1) ?? '0.0'}</span>
+          <span className="text-green-400 font-bold text-sm">{avg?.toFixed(1) ?? '0.0'}</span>
         </div>
       </div>
       <div className="flex items-center gap-3">
         <HitRateBadge value={hitRate} size="sm" />
-        {propData.trend === "up" ? (
+        {trend === "up" ? (
           <TrendingUp className="w-4 h-4 text-green-400" />
-        ) : propData.trend === "down" ? (
+        ) : trend === "down" ? (
           <TrendingDown className="w-4 h-4 text-red-400" />
         ) : (
           <Minus className="w-4 h-4 text-gray-500" />
@@ -155,12 +159,12 @@ export function PlayerDetailView({ playerId, sport, onBack }: PlayerDetailViewPr
   const [player, setPlayer] = useState<any>(null);
   const [allProps, setAllProps] = useState<Record<string, any>>({});
   const [gameLogs, setGameLogs] = useState<any[]>([]);
-  const [teamStats, setTeamStats] = useState<any>(null);
-  const [selectedPeriod, setSelectedPeriod] = useState<5 | 10 | 15 | 20>(10);
   const [selectedProp, setSelectedProp] = useState<string>("points");
+  const [customLine, setCustomLine] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Fetch player details
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -182,20 +186,7 @@ export function PlayerDetailView({ playerId, sport, onBack }: PlayerDetailViewPr
         setPlayer(data.player);
         setAllProps(data.player.all_props || {});
         setGameLogs(data.player.game_logs || []);
-
-        // Set first available prop as selected
-        const firstProp = Object.keys(data.player.all_props || {})[0] || "points";
-        setSelectedProp(firstProp);
-
-        // Calculate team stats from props
-        const props = data.player.all_props || {};
-        const teamStatsData = {
-          gamesPlayed: data.player.game_logs?.length || 0,
-          avgPoints: props.points?.avg_l10 || 0,
-          avgRebounds: props.rebounds?.avg_l10 || 0,
-          avgAssists: props.assists?.avg_l10 || 0,
-        };
-        setTeamStats(teamStatsData);
+        setCustomLine(null);
       } catch (e: any) {
         console.error("❌ PlayerDetailView error:", e);
         setError(e.message);
@@ -205,32 +196,75 @@ export function PlayerDetailView({ playerId, sport, onBack }: PlayerDetailViewPr
     })();
   }, [playerId, sport]);
 
-  // Prepare chart data for selected prop and period
+  // Current prop data
+  const currentProp = allProps[selectedProp];
+  const line = customLine !== null ? customLine : currentProp?.line ?? 0;
+  const avgLast10 = currentProp?.avg_l10 ?? 0;
+  const diff = avgLast10 - line;
+
+  // Hit rates for the selected prop
+  const hitRates = useMemo(() => ({
+    l5: currentProp?.l5 ?? null,
+    l10: currentProp?.l10 ?? null,
+    l15: currentProp?.l15 ?? null,
+    l20: currentProp?.l20 ?? null,
+  }), [currentProp]);
+
+  // Averages for the selected prop
+  const averages = useMemo(() => ({
+    l5: currentProp?.avg_l5 ?? 0,
+    l10: currentProp?.avg_l10 ?? 0,
+    l20: currentProp?.avg_l20 ?? 0,
+  }), [currentProp]);
+
+  // Chart data for PRA (Points+Rebounds+Assists) – last 10 games
   const chartData = useMemo(() => {
-    if (!gameLogs.length || !allProps[selectedProp]) return [];
-
-    const propKey = selectedProp;
-    const logs = gameLogs.slice(0, selectedPeriod);
-
-    return logs.map((log, i) => ({
-      label: `G${selectedPeriod - i}`,
-      value: log[propKey] ?? 0,
-      date: log.game_date,
+    return gameLogs.slice(0, 10).map((log, i) => ({
+      label: `G${10 - i}`,
+      points: log.points || 0,
+      rebounds: log.rebounds || 0,
+      assists: log.assists || 0,
     }));
-  }, [gameLogs, selectedProp, selectedPeriod, allProps]);
+  }, [gameLogs]);
 
-  const line = allProps[selectedProp]?.line ?? 0;
+  // Compute max stats for the right panel
+  const maxStats = useMemo(() => {
+    if (!gameLogs.length) return { points: 0, rebounds: 0, assists: 0, steals: 0, blocks: 0, turnovers: 0 };
+    const max = (key: string) => Math.max(...gameLogs.map(g => g[key] || 0));
+    return {
+      points: max('points'),
+      rebounds: max('rebounds'),
+      assists: max('assists'),
+      steals: max('steals'),
+      blocks: max('blocks'),
+      turnovers: max('turnovers'),
+    };
+  }, [gameLogs]);
 
-  // Get props grouped by category for display
+  // Group props by category for the full list
   const propsByGroup = useMemo(() => {
     const groups: Record<string, any[]> = {};
     Object.entries(allProps).forEach(([key, prop]: [string, any]) => {
-      if (!prop?.group) prop.group = "Other";
-      if (!groups[prop.group]) groups[prop.group] = [];
-      groups[prop.group].push({ key, ...prop });
+      const group = prop.group || "Other";
+      if (!groups[group]) groups[group] = [];
+      groups[group].push({ key, ...prop });
     });
     return groups;
   }, [allProps]);
+
+  // Preset tab options (core props)
+  const tabOptions = [
+    { id: "points", label: "PTS" },
+    { id: "rebounds", label: "REBS" },
+    { id: "assists", label: "ASTS" },
+    { id: "combo_pr", label: "PR" },
+    { id: "combo_pra", label: "PRA" },
+  ];
+
+  const handleLineChange = (delta: number) => {
+    const newLine = Math.max(0, line + delta);
+    setCustomLine(newLine);
+  };
 
   if (loading) {
     return (
@@ -259,9 +293,9 @@ export function PlayerDetailView({ playerId, sport, onBack }: PlayerDetailViewPr
   }
 
   return (
-    <div className="min-h-screen bg-[#020617] text-white">
+    <div className="min-h-screen bg-gradient-to-br from-[#0f172a] to-[#020617] text-white">
       {/* Header */}
-      <div className="sticky top-0 z-10 bg-[#020617] border-b border-gray-800 px-4 py-3 flex items-center gap-3">
+      <div className="sticky top-0 z-10 bg-[#020617]/80 backdrop-blur-sm border-b border-gray-800 px-4 py-3 flex items-center gap-3">
         <Button variant="ghost" onClick={onBack} className="p-2 hover:bg-gray-800 rounded">
           <ArrowLeft className="w-5 h-5" />
         </Button>
@@ -271,160 +305,228 @@ export function PlayerDetailView({ playerId, sport, onBack }: PlayerDetailViewPr
             {player.team} • {player.position} • {player.games_logged} games logged
           </p>
         </div>
-        <Select value={selectedPeriod.toString()} onValueChange={(v) => setSelectedPeriod(Number(v) as 5 | 10 | 15 | 20)}>
-          <SelectTrigger className="w-36 bg-gray-900 border-gray-700 text-yellow-400">
-            <SelectValue placeholder="Period" />
-          </SelectTrigger>
-          <SelectContent className="bg-gray-900 border-gray-700">
-            <SelectItem value="5">Last 5 Games</SelectItem>
-            <SelectItem value="10">Last 10 Games</SelectItem>
-            <SelectItem value="15">Last 15 Games</SelectItem>
-            <SelectItem value="20">Last 20 Games</SelectItem>
-          </SelectContent>
-        </Select>
       </div>
 
-      <div className="p-4 max-w-7xl mx-auto space-y-6">
-        {/* BLOCK 1: Interactive L5/L10/L15/L20 Props Selector */}
-        <Card className="bg-[#020617] border-gray-800">
-          <CardHeader className="border-b border-gray-800 pb-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <CardTitle className="text-yellow-400 text-lg">📊 Props Analysis - Last {selectedPeriod} Games</CardTitle>
-              <Select value={selectedProp} onValueChange={setSelectedProp}>
-                <SelectTrigger className="w-full sm:w-56 bg-gray-900 border-gray-700 text-gray-300">
-                  <SelectValue placeholder="Select Prop" />
-                </SelectTrigger>
-                <SelectContent className="bg-gray-900 border-gray-700 max-h-64 overflow-y-auto">
+      <div className="grid lg:grid-cols-[1fr_300px] gap-6 p-4 max-w-7xl mx-auto">
+        {/* LEFT COLUMN */}
+        <div className="space-y-6">
+          {/* Tabs + Prop Selector */}
+          <Card className="bg-[#020617] border-gray-800">
+            <CardHeader className="border-b border-gray-800 pb-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex gap-2">
+                  {tabOptions.map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setSelectedProp(tab.id)}
+                      className={`px-3 py-1.5 text-sm font-medium rounded transition ${
+                        selectedProp === tab.id
+                          ? "bg-purple-600 text-white"
+                          : "bg-gray-800 text-gray-300 hover:bg-gray-700"
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+                <Select value={selectedProp} onValueChange={setSelectedProp}>
+                  <SelectTrigger className="w-48 bg-gray-900 border-gray-700 text-gray-300">
+                    <SelectValue placeholder="Other props" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-gray-900 border-gray-700 max-h-64">
+                    {Object.entries(propsByGroup).map(([group, props]) => (
+                      <div key={group}>
+                        <div className="text-[10px] text-gray-500 px-3 py-1.5 font-semibold uppercase tracking-wider">{group}</div>
+                        {props.map((prop) => (
+                          <SelectItem key={prop.key} value={prop.key} className="text-sm">
+                            {prop.label}
+                          </SelectItem>
+                        ))}
+                      </div>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-4 space-y-6">
+              {/* Line adjuster */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-400 mb-1">{currentProp?.label || selectedProp}</p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleLineChange(-0.5)}
+                      className="bg-gray-800 hover:bg-gray-700 text-white w-8 h-8 rounded flex items-center justify-center"
+                    >
+                      -
+                    </button>
+                    <span className="text-yellow-400 font-bold text-xl w-16 text-center">{line.toFixed(1)}</span>
+                    <button
+                      onClick={() => handleLineChange(0.5)}
+                      className="bg-gray-800 hover:bg-gray-700 text-white w-8 h-8 rounded flex items-center justify-center"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-gray-500">Avg L10</p>
+                  <p className="text-xl font-bold text-green-400">{avgLast10.toFixed(1)}</p>
+                  <p className={`text-xs font-semibold ${diff > 0 ? "text-green-400" : diff < 0 ? "text-red-400" : "text-gray-500"}`}>
+                    {diff > 0 ? "+" : ""}{diff.toFixed(1)} diff
+                  </p>
+                </div>
+              </div>
+
+              {/* Stat boxes (L5/L10/L15/L20) */}
+              <div className="flex flex-wrap gap-2">
+                <StatBox label="L5" hr={hitRates.l5} avg={averages.l5} />
+                <StatBox label="L10" hr={hitRates.l10} avg={averages.l10} />
+                <StatBox label="L15" hr={hitRates.l15} avg={currentProp?.avg_l15 || 0} />
+                <StatBox label="L20" hr={hitRates.l20} avg={averages.l20} />
+              </div>
+
+              {/* Stacked bar chart (PRA) */}
+              <div>
+                <h3 className="text-sm font-semibold text-gray-400 mb-2">Points + Rebounds (last 10 games)</h3>
+                <StackedBar data={chartData} line={line} height={250} />
+              </div>
+
+              {/* Full list of props for the selected prop type (hit rates) */}
+              <div>
+                <h3 className="text-sm font-semibold text-gray-400 mb-2">All Props - Hit Rates (L10)</h3>
+                <div className="space-y-1">
                   {Object.entries(propsByGroup).map(([group, props]) => (
                     <div key={group}>
-                      <div className="text-[10px] text-gray-500 px-3 py-1.5 font-semibold uppercase tracking-wider">{group}</div>
+                      <div className="text-[10px] text-yellow-400/80 font-semibold uppercase tracking-wider mb-1 px-2">{group}</div>
                       {props.map((prop) => (
-                        <SelectItem key={prop.key} value={prop.key} className="text-sm">
-                          {prop.label}
-                        </SelectItem>
+                        <PropRow
+                          key={prop.key}
+                          label={prop.label}
+                          line={prop.line}
+                          avg={prop.avg_l10}
+                          hitRate={prop.l10}
+                          trend={prop.trend}
+                        />
                       ))}
                     </div>
                   ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4 pt-4">
-            {/* Chart for selected prop */}
-            {chartData.length > 0 && (
-              <div className="mb-6">
-                <h3 className="text-sm font-semibold text-gray-400 mb-3">
-                  {allProps[selectedProp]?.label || selectedProp} - Last {selectedPeriod} Games
-                </h3>
-                <BarChart data={chartData} line={line} height={250} />
-              </div>
-            )}
-
-            {/* All props with hit rates for selected period */}
-            <div className="space-y-2">
-              <h3 className="text-sm font-semibold text-gray-400 mb-3">All Props - Hit Rates (L{selectedPeriod})</h3>
-              {Object.entries(propsByGroup).map(([group, props]) => (
-                <div key={group} className="mb-4">
-                  <div className="text-[10px] text-yellow-400/80 font-semibold uppercase tracking-wider mb-2 px-2">{group}</div>
-                  <div className="space-y-1">
-                    {props.map((prop) => (
-                      <PropRow
-                        key={prop.key}
-                        propKey={prop.key}
-                        propData={prop}
-                        period={selectedPeriod}
-                      />
-                    ))}
-                  </div>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+              </div>
+            </CardContent>
+          </Card>
 
-        {/* BLOCK 2: Team Stats */}
-        <Card className="bg-[#020617] border-gray-800">
-          <CardHeader className="border-b border-gray-800 pb-3">
-            <CardTitle className="text-yellow-400 text-lg">🏀 Team Stats</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-4">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="bg-gray-900/50 rounded-lg p-4 border border-gray-800">
-                <p className="text-[10px] text-gray-500 mb-1 uppercase tracking-wider">Games Played</p>
-                <p className="text-2xl font-bold text-yellow-400">{teamStats?.gamesPlayed ?? 0}</p>
-              </div>
-              <div className="bg-gray-900/50 rounded-lg p-4 border border-gray-800">
-                <p className="text-[10px] text-gray-500 mb-1 uppercase tracking-wider">Avg Points</p>
-                <p className="text-2xl font-bold text-green-400">{teamStats?.avgPoints?.toFixed(1) ?? '0.0'}</p>
-              </div>
-              <div className="bg-gray-900/50 rounded-lg p-4 border border-gray-800">
-                <p className="text-[10px] text-gray-500 mb-1 uppercase tracking-wider">Avg Rebounds</p>
-                <p className="text-2xl font-bold text-green-400">{teamStats?.avgRebounds?.toFixed(1) ?? '0.0'}</p>
-              </div>
-              <div className="bg-gray-900/50 rounded-lg p-4 border border-gray-800">
-                <p className="text-[10px] text-gray-500 mb-1 uppercase tracking-wider">Avg Assists</p>
-                <p className="text-2xl font-bold text-green-400">{teamStats?.avgAssists?.toFixed(1) ?? '0.0'}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* BLOCK 3: Game Logs - Last 15 Games with All Props */}
-        <Card className="bg-[#020617] border-gray-800">
-          <CardHeader className="border-b border-gray-800 pb-3">
-            <CardTitle className="text-yellow-400 text-lg">📋 Game Log - Last 15 Games</CardTitle>
-          </CardHeader>
-          <CardContent className="pt-4">
-            <div className="overflow-x-auto">
-              <table className="w-full">
+          {/* Game Logs Table */}
+          <Card className="bg-[#020617] border-gray-800">
+            <CardHeader className="border-b border-gray-800 pb-3">
+              <CardTitle className="text-yellow-400 text-lg">📋 Game Log - Last 15 Games</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-4 overflow-x-auto">
+              <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-800">
-                    <th className="p-3 text-left text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Date</th>
-                    <th className="p-3 text-left text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Opponent</th>
-                    {Object.keys(allProps).slice(0, 8).map((key) => (
-                      <th key={key} className="p-3 text-center text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
-                        {allProps[key]?.label || key}
-                      </th>
-                    ))}
+                    <th className="p-2 text-left text-[10px] font-semibold text-gray-400 uppercase">Date</th>
+                    <th className="p-2 text-left text-[10px] font-semibold text-gray-400 uppercase">Opponent</th>
+                    <th className="p-2 text-center text-[10px] font-semibold text-gray-400 uppercase">PTS</th>
+                    <th className="p-2 text-center text-[10px] font-semibold text-gray-400 uppercase">REB</th>
+                    <th className="p-2 text-center text-[10px] font-semibold text-gray-400 uppercase">AST</th>
+                    <th className="p-2 text-center text-[10px] font-semibold text-gray-400 uppercase">STL</th>
+                    <th className="p-2 text-center text-[10px] font-semibold text-gray-400 uppercase">BLK</th>
+                    <th className="p-2 text-center text-[10px] font-semibold text-gray-400 uppercase">TOV</th>
                   </tr>
                 </thead>
                 <tbody>
                   {gameLogs.slice(0, 15).map((log, i) => (
-                    <tr key={i} className="border-b border-gray-800/50 hover:bg-gray-900/30 transition">
-                      <td className="p-3 text-sm text-gray-300 whitespace-nowrap">
+                    <tr key={i} className="border-b border-gray-800/50 hover:bg-gray-900/30">
+                      <td className="p-2 text-gray-300 whitespace-nowrap">
                         {log.game_date ? new Date(log.game_date).toLocaleDateString("en-US", {
                           month: "short",
                           day: "numeric",
                         }) : '—'}
                       </td>
-                      <td className="p-3 text-sm text-gray-400">vs TBD</td>
-                      {Object.keys(allProps).slice(0, 8).map((key) => {
-                        const value = log[key] ?? 0;
-                        const propLine = allProps[key]?.line ?? 0;
-                        const isOver = value >= propLine;
-
-                        return (
-                          <td key={key} className="p-3 text-center">
-                            <Badge
-                              className={`text-[10px] font-bold px-2 py-0.5 ${
-                                isOver ? "bg-green-500/20 text-green-400 border border-green-500/30" : "bg-red-500/20 text-red-400 border border-red-500/20"
-                              }`}
-                            >
-                              {value}
-                            </Badge>
-                          </td>
-                        );
-                      })}
+                      <td className="p-2 text-gray-400">vs TBD</td>
+                      <td className="p-2 text-center">
+                        <Badge className={`text-xs font-bold px-2 py-0.5 ${log.points >= (allProps.points?.line || 0) ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}>
+                          {log.points || 0}
+                        </Badge>
+                      </td>
+                      <td className="p-2 text-center">{log.rebounds || 0}</td>
+                      <td className="p-2 text-center">{log.assists || 0}</td>
+                      <td className="p-2 text-center">{log.steals || 0}</td>
+                      <td className="p-2 text-center">{log.blocks || 0}</td>
+                      <td className="p-2 text-center">{log.turnovers || 0}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </div>
-            {gameLogs.length === 0 && (
-              <p className="text-center text-gray-500 py-8 text-sm">No game logs available</p>
-            )}
-          </CardContent>
-        </Card>
+              {gameLogs.length === 0 && (
+                <p className="text-center text-gray-500 py-8 text-sm">No game logs available</p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* RIGHT PANEL - Player Max Stats */}
+        <div className="space-y-6">
+          <Card className="bg-[#020617] border-gray-800">
+            <CardHeader className="border-b border-gray-800 pb-3">
+              <CardTitle className="text-purple-400 text-lg">📈 Player Max Stats</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-4 space-y-3">
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">Points</span>
+                  <span className="text-white font-bold">{maxStats.points}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">Rebounds</span>
+                  <span className="text-white font-bold">{maxStats.rebounds}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">Assists</span>
+                  <span className="text-white font-bold">{maxStats.assists}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">Steals</span>
+                  <span className="text-white font-bold">{maxStats.steals}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">Blocks</span>
+                  <span className="text-white font-bold">{maxStats.blocks}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">Turnovers</span>
+                  <span className="text-white font-bold">{maxStats.turnovers}</span>
+                </div>
+              </div>
+              <div className="mt-4 bg-purple-600/20 p-3 rounded-lg text-center">
+                <p className="text-sm text-gray-300">Matches Played</p>
+                <p className="text-xl font-bold text-purple-400">{player.games_logged}</p>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Optional: Team Averages */}
+          <Card className="bg-[#020617] border-gray-800">
+            <CardHeader className="border-b border-gray-800 pb-3">
+              <CardTitle className="text-green-400 text-lg">🏀 Team Averages (L10)</CardTitle>
+            </CardHeader>
+            <CardContent className="pt-4 space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Points</span>
+                <span className="text-green-400 font-bold">{allProps.points?.avg_l10?.toFixed(1) ?? 0}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Rebounds</span>
+                <span className="text-green-400 font-bold">{allProps.rebounds?.avg_l10?.toFixed(1) ?? 0}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Assists</span>
+                <span className="text-green-400 font-bold">{allProps.assists?.avg_l10?.toFixed(1) ?? 0}</span>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );
