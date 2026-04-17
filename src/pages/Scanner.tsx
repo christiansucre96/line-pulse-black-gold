@@ -1,5 +1,5 @@
 // src/pages/Scanner.tsx
-// Shows players (3-day lookahead by default, but can load all with button)
+// Shows only players with games in next 3 days (with force fallback)
 // All prop types, user-adjustable lines, hit rate boxes
 
 import { useEffect, useState, useMemo } from "react";
@@ -8,7 +8,7 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, RefreshCw, Calendar, Users } from "lucide-react";
+import { Search, RefreshCw, Calendar, FlaskConical } from "lucide-react";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
@@ -81,34 +81,37 @@ export default function Scanner() {
     if (urlSport && urlSport !== sport) setSport(urlSport);
   }, [urlSport]);
 
-  // ✅ Updated: fetchPlayers accepts a forceAll flag
-  const fetchPlayers = async (forceAll: boolean = false) => {
+  const fetchPlayers = async (forceAll: boolean = false, forceNoStats: boolean = false) => {
     setLoading(true); setError(null);
     try {
       const res = await fetch(EDGE_URL, {
-        method: "POST",
+        method: "POST", // ✅ Must be POST, not GET/HEAD
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           operation: "get_players", 
           sport,
-          forceAll, // ← send forceAll flag to edge function
+          forceAll: forceAll || search.length > 0,
+          forceNoStats: forceNoStats // ✅ Allow testing without stats
         }),
       });
+      
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Failed");
+      
+      console.log(`✅ Loaded ${data.count} players for ${sport}`);
       setPlayers(data.players || []);
       setLastRefresh(new Date().toLocaleTimeString());
     } catch (e: any) {
+      console.error("❌ Fetch error:", e);
       setError(e.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // Initial load: only upcoming games (forceAll = false)
   useEffect(() => {
-    if (!playerId) fetchPlayers(false);
+    if (!playerId) fetchPlayers();
   }, [sport]);
 
   // Sort
@@ -197,15 +200,15 @@ export default function Scanner() {
           </div>
           <div className="flex gap-2">
             <button
-              onClick={() => fetchPlayers(true)}  // ✅ Load All (forceAll = true)
+              onClick={() => fetchPlayers(true, true)} // ✅ Test Mode: force all + no stats
               disabled={loading}
-              className="flex items-center gap-2 px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700 rounded-lg text-sm text-black font-medium transition disabled:opacity-50"
+              className="flex items-center gap-2 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 rounded-lg text-sm text-white font-medium transition disabled:opacity-50"
             >
-              <Users className="w-3.5 h-3.5" />
-              Load All
+              <FlaskConical className="w-3.5 h-3.5" />
+              Test Mode
             </button>
             <button
-              onClick={() => fetchPlayers(false)} // Refresh with current filter (upcoming only)
+              onClick={() => fetchPlayers(true)}
               disabled={loading}
               className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm text-gray-300 transition disabled:opacity-50"
             >
@@ -257,7 +260,7 @@ export default function Scanner() {
         {loading && (
           <div className="text-center py-16">
             <div className="w-8 h-8 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-            <p className="text-gray-500 text-sm">Loading players...</p>
+            <p className="text-gray-500 text-sm">Loading upcoming players...</p>
           </div>
         )}
 
@@ -269,8 +272,14 @@ export default function Scanner() {
               <p className="text-sm mt-1">
                 {players.length === 0
                   ? "Run the data pipeline first: Admin → Full Ingest → select sport"
-                  : "Try adjusting your filters or use 'Load All' to see all players"}
+                  : "Try adjusting your filters or click 'Test Mode'"}
               </p>
+              <button
+                onClick={() => fetchPlayers(true, true)}
+                className="mt-4 px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg text-white text-sm font-medium"
+              >
+                🧪 Try Test Mode
+              </button>
             </div>
           ) : (
             <div className="bg-gray-900/30 border border-gray-800 rounded-xl overflow-hidden">
