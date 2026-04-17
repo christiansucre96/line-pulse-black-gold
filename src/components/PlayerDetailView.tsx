@@ -349,64 +349,255 @@ function LineAdjuster({ value, onChange }: { value: number; onChange: (v: number
   );
 }
 
-// ── STAT SECTION (player or team) ─────────────────────────────
+// ── INTERACTIVE PERIOD SELECTOR + STAT SECTION ───────────────
+// Clicking L5/L10/L15/L20 filters the bar chart to that many games
+// and recalculates hit rates live
+const PERIODS = [
+  { label: "L5",  n: 5  },
+  { label: "L10", n: 10 },
+  { label: "L15", n: 15 },
+  { label: "L20", n: 20 },
+];
+
 function StatSection({
-  title, tabs, gameLogs, sport, defaultTab
+  title, tabs, gameLogs, sport, defaultTab, teamMode = false,
 }: {
   title: string;
   tabs: { key: string; label: string; components?: string[] }[];
   gameLogs: any[];
   sport: string;
   defaultTab: string;
+  teamMode?: boolean;
 }) {
-  const [activeTab, setActiveTab] = useState(defaultTab);
-  const [customLines, setCustomLines] = useState<Record<string, number>>({});
+  const [activeTab,    setActiveTab]    = useState(defaultTab);
+  const [activePeriod, setActivePeriod] = useState(10);   // which period is selected
+  const [customLines,  setCustomLines]  = useState<Record<string, number>>({});
 
   const tab = tabs.find(t => t.key === activeTab) || tabs[0];
 
-  const vals = gameLogs.map(g => getVal(g, tab.key, tab.components));
-  const l5  = vals.slice(0, 5);
-  const l10 = vals.slice(0, 10);
-  const l15 = vals.slice(0, 15);
-  const l20 = vals.slice(0, 20);
+  // ALL values for this stat (newest first)
+  const allVals = gameLogs.map(g => getVal(g, tab.key, tab.components));
 
-  const avg5  = avg(l5);
-  const avg10 = avg(l10);
-  const avg20 = avg(l20);
-  const proj  = l5.length >= 3 ? avg5 * 0.5 + avg10 * 0.3 + avg20 * 0.2 : avg10;
+  // Slices for each period
+  const slices = {
+    5:  allVals.slice(0, 5),
+    10: allVals.slice(0, 10),
+    15: allVals.slice(0, 15),
+    20: allVals.slice(0, 20),
+  } as Record<number, number[]>;
+
+  // Default line from weighted projection across all data
+  const a5  = avg(slices[5]);
+  const a10 = avg(slices[10]);
+  const a20 = avg(slices[20]);
+  const proj = slices[5].length >= 3 ? a5 * 0.5 + a10 * 0.3 + a20 * 0.2 : a10;
   const defaultLine = roundHalf(proj);
   const line = customLines[tab.key] ?? defaultLine;
 
+  // The active period's slice drives the chart
+  const activeSlice    = slices[activePeriod] || slices[10];
+  const activeAvg      = avg(activeSlice);
+  const activeHitRate  = hitRate(activeSlice, line);
+
   return (
     <div className="rounded-xl overflow-hidden border" style={{ background: BG_CARD, borderColor: BORDER }}>
-      {/* Section header */}
+      {/* Header */}
       <div className="px-4 py-2.5 border-b flex items-center gap-2" style={{ borderColor: BORDER }}>
         <span className="font-bold text-sm" style={{ color: GOLD }}>{title}</span>
       </div>
 
-      {/* Tab bar */}
-      <TabBar tabs={tabs} active={activeTab} onSelect={setActiveTab} />
+      {/* Scrollable tab bar */}
+      <TabBar tabs={tabs} active={activeTab} onSelect={key => {
+        setActiveTab(key);
+        // Reset period to L10 when switching stat
+        setActivePeriod(10);
+      }} />
 
-      {/* Content */}
       <div className="p-4 space-y-4">
-        {/* Hit rate boxes + line adjuster */}
+        {/* ── ROW: line adjuster LEFT, period boxes RIGHT ── */}
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          {/* Line + label */}
+          <div>
+            <p className="text-[10px] text-gray-500 mb-1.5 uppercase tracking-wider font-semibold">
+              {tab.label} &nbsp;·&nbsp; Line
+            </p>
+            <LineAdjuster
+              value={line}
+              onChange={v => setCustomLines(prev => ({ ...prev, [tab.key]: v }))}
+            />
+          </div>
+
+          {/* Interactive period boxes — clicking one selects it */}
+          <div className="flex gap-1.5 flex-wrap">
+            {PERIODS.map(({ label, n }) => {
+              const sl   = slices[n] || [];
+              const hr   = hitRate(sl, line);
+              const av   = avg(sl);
+              const isActive = activePeriod === n;
+
+              // Color coding
+              const bg = hr >= 80 ? GREEN_DARK  : hr >= 60 ? "#92400e" : "#7f1d1d";
+              const fg = hr >= 80 ? "#bbf7d0"   : hr >= 60 ? "#fde68a" : "#fecaca";
+              const activeBorder = hr >= 80 ? "#22c55e" : hr >= 60 ? GOLD_BRIGHT : RED;
+
+              return (
+                <button
+                  key={n}
+                  onClick={() => setActivePeriod(n)}
+                  className="px-2.5 py-1.5 rounded-lg text-center transition-all"
+                  style={{
+                    background:  bg,
+                    border:      `2px solid ${isActive ? activeBorder : "transparent"}`,
+                    outline:     isActive ? `1px solid ${activeBorder}44` : "none",
+                    minWidth:    64,
+                    boxShadow:   isActive ? `0 0 8px ${activeBorder}55` : "none",
+                    transform:   isActive ? "scale(1.05)" : "scale(1)",
+                  }}
+                >
+                  <p style={{ color: fg }} className="text-[10px] font-bold">{label}</p>
+                  <p style={{ color: fg }} className="text-[11px] font-bold">HR {sl.length ? hr : 0}%</p>
+                  <p style={{ color: fg }} className="text-[10px] opacity-80">
+                    Avg {sl.length ? av.toFixed(1) : "—"}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Active period summary pill */}
+        <div className="flex items-center gap-2 text-[11px]">
+          <span className="px-2 py-0.5 rounded-full font-bold"
+            style={{ background: `${GOLD_DIM}30`, color: GOLD, border: `1px solid ${GOLD_DIM}` }}>
+            Showing {activePeriod === 5 ? "Last 5" : activePeriod === 10 ? "Last 10" : activePeriod === 15 ? "Last 15" : "Last 20"} games
+          </span>
+          <span className="text-gray-500">
+            Avg <span className="font-bold" style={{ color: GOLD_BRIGHT }}>{activeAvg.toFixed(1)}</span>
+            &nbsp;· HR <span className="font-bold"
+              style={{ color: activeHitRate >= 80 ? GREEN : activeHitRate >= 60 ? GOLD : RED }}>
+              {activeHitRate}%
+            </span>
+          </span>
+        </div>
+
+        {/* Bar chart — only shows activePeriod games */}
+        <BarChart
+          gameLogs={gameLogs.slice(0, activePeriod)}
+          tab={tab}
+          line={line}
+          sport={sport}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ── TEAM STATS SECTION ────────────────────────────────────────
+// Uses team-level aggregated data per game (total team points, etc.)
+// Since we store player_game_stats not team_game_stats, we approximate
+// team totals by summing all players for that game.
+// For simplicity and accuracy we just show the team's game score history
+// from games_data, which the edge function already returns.
+function TeamStatsSection({
+  tabs, teamGameLogs, sport,
+}: {
+  tabs: { key: string; label: string; components?: string[] }[];
+  teamGameLogs: any[];  // each entry: { game_date, opponent, score, opp_score }
+  sport: string;
+}) {
+  const [activeTab,   setActiveTab]   = useState(tabs[0]?.key || "score");
+  const [customLines, setCustomLines] = useState<Record<string, number>>({});
+
+  // For team stats the only reliable data we have is the game score
+  // Represent as a synthetic tab list: Score (team pts), Opp Score, Margin
+  const TEAM_TABS = [
+    { key: "score",     label: "PTS",    components: undefined },
+    { key: "opp_score", label: "OPP",    components: undefined },
+    { key: "margin",    label: "MARGIN", components: undefined },
+    { key: "total",     label: "TOTAL",  components: undefined },
+  ];
+
+  const tab = TEAM_TABS.find(t => t.key === activeTab) || TEAM_TABS[0];
+
+  const vals = teamGameLogs.map(g => {
+    if (tab.key === "score")     return Number(g.team_score   || g.home_score || 0);
+    if (tab.key === "opp_score") return Number(g.opp_score    || g.away_score || 0);
+    if (tab.key === "margin")    return Number(g.team_score||g.home_score||0) - Number(g.opp_score||g.away_score||0);
+    if (tab.key === "total")     return Number(g.team_score||g.home_score||0) + Number(g.opp_score||g.away_score||0);
+    return 0;
+  });
+
+  const l10 = vals.slice(0, 10);
+  const a10 = avg(l10);
+  const defaultLine = roundHalf(a10);
+  const line = customLines[tab.key] ?? defaultLine;
+  const hr10 = hitRate(l10, line);
+
+  if (!teamGameLogs.length) return null;
+
+  // Build synthetic game logs for BarChart (needs opponent + game_date + the value)
+  const chartLogs = teamGameLogs.slice(0, 10).map(g => ({
+    opponent:   g.opponent || g.opp_abbr || "—",
+    game_date:  g.game_date || "",
+    [tab.key]:  tab.key === "score"     ? Number(g.team_score||g.home_score||0)
+              : tab.key === "opp_score" ? Number(g.opp_score||g.away_score||0)
+              : tab.key === "margin"    ? Number(g.team_score||g.home_score||0)-Number(g.opp_score||g.away_score||0)
+              :                          Number(g.team_score||g.home_score||0)+Number(g.opp_score||g.away_score||0),
+  }));
+
+  return (
+    <div className="rounded-xl overflow-hidden border" style={{ background: BG_CARD, borderColor: BORDER }}>
+      {/* Header */}
+      <div className="px-4 py-2.5 border-b flex items-center gap-2" style={{ borderColor: BORDER }}>
+        <span className="font-bold text-sm" style={{ color: GOLD }}>🏟 Team Stats</span>
+        <span className="text-[10px] text-gray-600 ml-auto">L10 only</span>
+      </div>
+
+      {/* Team-specific tab bar */}
+      <TabBar tabs={TEAM_TABS} active={activeTab} onSelect={setActiveTab} />
+
+      <div className="p-4 space-y-4">
+        {/* Line adjuster + L10 hit rate box */}
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-[10px] text-gray-500 mb-1 uppercase tracking-wider">
-              {tab.label} · Line
+            <p className="text-[10px] text-gray-500 mb-1.5 uppercase tracking-wider font-semibold">
+              {tab.label} &nbsp;·&nbsp; Line
             </p>
-            <LineAdjuster value={line} onChange={v => setCustomLines(prev => ({ ...prev, [tab.key]: v }))} />
+            <LineAdjuster
+              value={line}
+              onChange={v => setCustomLines(prev => ({ ...prev, [tab.key]: v }))}
+            />
           </div>
-          <div className="flex gap-1.5 flex-wrap">
-            <HRBox label="L5"  hr={hitRate(l5, line)}  av={avg5}  />
-            <HRBox label="L10" hr={hitRate(l10, line)} av={avg10} />
-            <HRBox label="L15" hr={hitRate(l15, line)} av={avg(l15)} />
-            <HRBox label="L20" hr={hitRate(l20, line)} av={avg20} />
+          {/* L10 only — as per requirement */}
+          <div className="flex gap-1.5">
+            {[
+              { label: "L5",  sl: vals.slice(0,5)  },
+              { label: "L10", sl: vals.slice(0,10) },
+              { label: "L15", sl: vals.slice(0,15) },
+              { label: "L20", sl: vals.slice(0,20) },
+            ].map(({ label, sl }) => {
+              const hr = hitRate(sl, line);
+              const av = avg(sl);
+              const bg = hr >= 80 ? GREEN_DARK : hr >= 60 ? "#92400e" : "#7f1d1d";
+              const fg = hr >= 80 ? "#bbf7d0"  : hr >= 60 ? "#fde68a" : "#fecaca";
+              return (
+                <div key={label} className="px-2.5 py-1.5 rounded-lg text-center" style={{ background: bg, minWidth: 58 }}>
+                  <p style={{ color: fg }} className="text-[10px] font-bold">{label}</p>
+                  <p style={{ color: fg }} className="text-[11px] font-bold">HR {sl.length ? hr : 0}%</p>
+                  <p style={{ color: fg }} className="text-[10px] opacity-80">Avg {sl.length ? av.toFixed(1) : "—"}</p>
+                </div>
+              );
+            })}
           </div>
         </div>
 
         {/* Bar chart */}
-        <BarChart gameLogs={gameLogs} tab={tab} line={line} sport={sport} />
+        <BarChart
+          gameLogs={chartLogs}
+          tab={{ key: tab.key, label: tab.label }}
+          line={line}
+          sport={sport}
+        />
       </div>
     </div>
   );
@@ -421,10 +612,11 @@ interface Props {
 }
 
 export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props) {
-  const [player,   setPlayer]   = useState<any>(null);
-  const [gameLogs, setGameLogs] = useState<any[]>([]);
-  const [loading,  setLoading]  = useState(true);
-  const [error,    setError]    = useState<string | null>(null);
+  const [player,       setPlayer]       = useState<any>(null);
+  const [gameLogs,     setGameLogs]     = useState<any[]>([]);
+  const [teamGameLogs, setTeamGameLogs] = useState<any[]>([]);
+  const [loading,      setLoading]      = useState(true);
+  const [error,        setError]        = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -439,6 +631,34 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
         if (!data.success) throw new Error(data.error || "Failed to load");
         setPlayer(data.player);
         setGameLogs(data.player.game_logs || []);
+
+        // ── Fetch team game scores for Team Stats section ──────
+        // We use the player's team_id to get their recent game results
+        if (data.player.team_id) {
+          const teamRes = await fetch(EDGE_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              operation: "get_team_games",
+              sport,
+              team_id: data.player.team_id,
+            }),
+          });
+          const teamData = await teamRes.json();
+          if (teamData.success && teamData.games?.length) {
+            setTeamGameLogs(teamData.games);
+          } else {
+            // Fallback: build approximate team scores from game_logs opponent field
+            // Each log has game_date + opponent — build score history from games_data
+            const fallbackGames = (data.player.game_logs || []).map((g: any) => ({
+              game_date:  g.game_date,
+              opponent:   g.opponent || "—",
+              team_score: g.team_score || null,
+              opp_score:  g.opp_score  || null,
+            }));
+            setTeamGameLogs(fallbackGames.filter((g: any) => g.team_score !== null));
+          }
+        }
       } catch (e: any) {
         setError(e.message);
       } finally {
@@ -537,6 +757,13 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
             gameLogs={gameLogs}
             sport={sport}
             defaultTab={tabs[1]?.key || tabs[0]?.key}
+          />
+
+          {/* TEAM STATS SECTION — right below player stats */}
+          <TeamStatsSection
+            tabs={tabs}
+            teamGameLogs={teamGameLogs}
+            sport={sport}
           />
 
           {/* GAMELOG TABLE */}
