@@ -1,385 +1,346 @@
 // src/pages/Scanner.tsx
+// Shows only players with games in next 3 days
+// All prop types, user-adjustable lines, hit rate boxes
+
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
-import { SubmitLineModal } from "@/components/SubmitLineModal";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
-import { Search, ArrowUpDown } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Search, RefreshCw, Calendar } from "lucide-react";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
-// ✅ Prop type groups by sport
-const PROP_GROUPS: Record<string, { id: string; label: string }[]> = {
+// Hit rate box (same color logic as detail view)
+function HRBox({ value }: { value: number | null }) {
+  if (value === null || value === undefined)
+    return <div className="w-9 h-6 rounded bg-gray-800 text-gray-600 text-[10px] font-bold flex items-center justify-center">—</div>;
+  const bg = value >= 80 ? "bg-green-500 text-white" : value >= 60 ? "bg-yellow-500 text-black" : "bg-red-500 text-white";
+  return <div className={`w-9 h-6 rounded text-[10px] font-bold flex items-center justify-center ${bg}`}>{value}%</div>;
+}
+
+const SPORTS = [
+  { value: "nba", label: "🏀 NBA" },
+  { value: "nfl", label: "🏈 NFL" },
+  { value: "mlb", label: "⚾ MLB" },
+  { value: "nhl", label: "🏒 NHL" },
+  { value: "soccer", label: "⚽ Soccer" },
+];
+
+// Sport-specific primary prop types for the scanner filter
+const SPORT_PROPS: Record<string, { id: string; label: string }[]> = {
   nba: [
-    { id: "points", label: "PTS" },
-    { id: "rebounds", label: "REB" },
-    { id: "assists", label: "AST" },
-    { id: "threes", label: "3PM" },
-    { id: "steals", label: "STL" },
-    { id: "blocks", label: "BLK" },
-    { id: "Pts+Reb", label: "P+R" },
-    { id: "Pts+Ast", label: "P+A" },
-    { id: "Reb+Ast", label: "R+A" },
-    { id: "Pts+Reb+Ast", label: "PRA" }
+    { id: "points", label: "Points" }, { id: "rebounds", label: "Rebounds" },
+    { id: "assists", label: "Assists" }, { id: "three_pointers_made", label: "3PM" },
+    { id: "steals", label: "Steals" }, { id: "blocks", label: "Blocks" },
+    { id: "combo_pra", label: "PRA" }, { id: "combo_pr", label: "P+R" },
+    { id: "combo_pa", label: "P+A" }, { id: "turnovers", label: "TOV" },
   ],
   nfl: [
-    { id: "passing_yards", label: "Pass Yds" },
-    { id: "rushing_yards", label: "Rush Yds" },
-    { id: "receiving_yards", label: "Rec Yds" },
-    { id: "passing_tds", label: "Pass TD" },
-    { id: "receptions", label: "Rec" }
+    { id: "passing_yards", label: "Pass Yds" }, { id: "rushing_yards", label: "Rush Yds" },
+    { id: "receiving_yards", label: "Rec Yds" }, { id: "passing_tds", label: "Pass TDs" },
+    { id: "receptions", label: "Receptions" },
   ],
   mlb: [
-    { id: "hits", label: "H" },
-    { id: "runs", label: "R" },
-    { id: "rbi", label: "RBI" },
-    { id: "home_runs", label: "HR" }
+    { id: "hits", label: "Hits" }, { id: "runs", label: "Runs" }, { id: "rbi", label: "RBI" },
+    { id: "home_runs", label: "HR" }, { id: "strikeouts_pitching", label: "K (P)" },
   ],
   nhl: [
-    { id: "goals", label: "G" },
-    { id: "assists_hockey", label: "A" },
-    { id: "shots_on_goal", label: "SOG" }
+    { id: "goals", label: "Goals" }, { id: "assists_hockey", label: "Assists" },
+    { id: "shots_on_goal", label: "SOG" }, { id: "combo_ga", label: "G+A" },
   ],
   soccer: [
-    { id: "goals_soccer", label: "G" },
-    { id: "assists_soccer", label: "A" },
-    { id: "shots_soccer", label: "Shots" }
-  ]
+    { id: "goals_soccer", label: "Goals" }, { id: "assists_soccer", label: "Assists" },
+    { id: "shots_soccer", label: "Shots" }, { id: "shots_on_target", label: "SOT" },
+  ],
 };
+
+function getInitials(name: string) {
+  return (name || "??").split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
+}
 
 export default function Scanner() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  
-  const [sport, setSport] = useState("nba");
-  const [selectedProp, setSelectedProp] = useState("points");
-  const [viewMode, setViewMode] = useState<"all" | "over" | "under">("all");
-  const [players, setPlayers] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [sortConfig, setSortConfig] = useState<{ key: string; direction: "asc" | "desc" } | null>(null);
-  
-  const playerId = searchParams.get("playerId");
 
-  const fetchData = async () => {
-    setLoading(true);
-    setError(null);
+  const [sport, setSport]           = useState("nba");
+  const [filterProp, setFilterProp] = useState("points");
+  const [search, setSearch]         = useState("");
+  const [players, setPlayers]       = useState<any[]>([]);
+  const [loading, setLoading]       = useState(false);
+  const [error, setError]           = useState<string | null>(null);
+  const [lastRefresh, setLastRefresh] = useState<string>("");
+  const [sortKey, setSortKey]       = useState<string>("l10");
+  const [sortDir, setSortDir]       = useState<1 | -1>(-1);
+
+  const playerId = searchParams.get("playerId");
+  const urlSport = searchParams.get("sport");
+
+  useEffect(() => {
+    if (urlSport && urlSport !== sport) setSport(urlSport);
+  }, [urlSport]);
+
+  const fetchPlayers = async () => {
+    setLoading(true); setError(null);
     try {
       const res = await fetch(EDGE_URL, {
         method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "Accept": "application/json"
-        },
-        body: JSON.stringify({
-          operation: "get_players",
-          sport: sport,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operation: "get_players", sport }),
       });
-
-      if (!res.ok) {
-        const errorText = await res.text().catch(() => "Unknown error");
-        throw new Error(`HTTP ${res.status}: ${errorText.substring(0, 100)}`);
-      }
-
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      
-      if (!data.success) {
-        throw new Error(data.error || "Failed to fetch players");
-      }
-
-      let filteredPlayers = data.players || [];
-      if (selectedProp && selectedProp !== "all") {
-        filteredPlayers = filteredPlayers.filter((p: any) => 
-          p.prop_type?.toLowerCase() === selectedProp.toLowerCase() ||
-          p.stat_type?.toLowerCase() === selectedProp.toLowerCase()
-        );
-      }
-
-      // ✅ CORRECTED MAPPING for EV & Recommendation
-      const mapped = filteredPlayers.map((p: any) => {
-        const lineVal = p.line ?? p.baseline_line ?? p.projected_value ?? 0;
-        const avgVal = p.avg_last10 ?? p.avgL10 ?? p.avg_last5 ?? 0;
-        const conf = p.confidence_score ?? p.confidence ?? 50;
-        const edgeType = p.edge_type ?? (conf > 55 ? "OVER" : conf < 45 ? "UNDER" : "NONE");
-        
-        return {
-          player_id: p.player_id,
-          full_name: p.name || p.full_name || "Unknown",
-          team: p.team_abbr || p.team || "N/A",
-          position: p.position || "N/A",
-          line: parseFloat(lineVal).toFixed(1),
-          avgL10: parseFloat(avgVal).toFixed(1),
-          diff: (parseFloat(avgVal) - parseFloat(lineVal)).toFixed(1),
-          
-          // ✅ Edge % from confidence
-          edgePct: `${(conf - 50).toFixed(1)}%`,
-          
-          // ✅ EV calculation: +0.050 for OVER, -0.050 for UNDER
-          ev: edgeType === "OVER" ? "0.050" : edgeType === "UNDER" ? "-0.050" : "0.000",
-          
-          // ✅ Recommendation text
-          recommendation: edgeType === "OVER" ? "OVER" : edgeType === "UNDER" ? "UNDER" : "NO BET",
-          
-          prop_type: p.prop_type || p.stat_type || selectedProp,
-          opponent: p.opponent || "TBD",
-        };
-      });
-
-      console.log(`✅ Mapped ${mapped.length} players (filtered by ${selectedProp})`);
-      setPlayers(mapped);
-      
-    } catch (err: any) {
-      console.error("❌ Fetch error:", err);
-      setError(err.message || "Failed to load players");
+      if (!data.success) throw new Error(data.error || "Failed");
+      setPlayers(data.players || []);
+      setLastRefresh(new Date().toLocaleTimeString());
+    } catch (e: any) {
+      setError(e.message);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (playerId) return;
-    fetchData();
-  }, [sport, selectedProp]);
+    if (!playerId) fetchPlayers();
+  }, [sport]);
 
-  const sortedPlayers = useMemo(() => {
-    let sorted = [...players];
-    
-    if (viewMode === "over") {
-      sorted = sorted.filter(p => parseFloat(p.avgL10) > parseFloat(p.line));
-    } else if (viewMode === "under") {
-      sorted = sorted.filter(p => parseFloat(p.avgL10) <= parseFloat(p.line));
+  // Sort
+  const handleSort = (key: string) => {
+    if (sortKey === key) setSortDir(d => d === 1 ? -1 : 1);
+    else { setSortKey(key); setSortDir(-1); }
+  };
+
+  // Filter + sort players
+  const displayPlayers = useMemo(() => {
+    let list = [...players];
+
+    // Filter by prop type
+    if (filterProp && filterProp !== "all") {
+      list = list.filter(p => p.all_props?.[filterProp]);
     }
-    
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      sorted = sorted.filter(p => 
-        p.full_name?.toLowerCase().includes(q) || 
-        p.team?.toLowerCase().includes(q)
+
+    // Search
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(p =>
+        (p.name || "").toLowerCase().includes(q) ||
+        (p.team_abbr || "").toLowerCase().includes(q) ||
+        (p.opponent || "").toLowerCase().includes(q)
       );
     }
-    
-    if (sortConfig?.key) {
-      sorted.sort((a, b) => {
-        const aVal = a[sortConfig.key];
-        const bVal = b[sortConfig.key];
-        if (aVal == null && bVal == null) return 0;
-        if (aVal == null) return 1;
-        if (bVal == null) return -1;
-        
-        if (typeof aVal === "string" && typeof bVal === "string") {
-          return sortConfig.direction === "asc" 
-            ? aVal.localeCompare(bVal) 
-            : bVal.localeCompare(aVal);
+
+    // Sort — use the prop data for the selected filter
+    list.sort((a, b) => {
+      const getVal = (p: any) => {
+        const pd = p.all_props?.[filterProp];
+        if (!pd) return -Infinity;
+        if (sortKey === "line")    return pd.line ?? 0;
+        if (sortKey === "avg")     return pd.avg_l10 ?? 0;
+        if (sortKey === "l5")      return pd.l5 ?? 0;
+        if (sortKey === "l10")     return pd.l10 ?? 0;
+        if (sortKey === "l15")     return pd.l15 ?? 0;
+        if (sortKey === "l20")     return pd.l20 ?? 0;
+        if (sortKey === "name")    return 0; // handled separately
+        if (sortKey === "diff") {
+          const diff = (pd.avg_l10 ?? 0) - (pd.line ?? 0);
+          return diff;
         }
-        
-        const aNum = parseFloat(aVal) || 0;
-        const bNum = parseFloat(bVal) || 0;
-        return sortConfig.direction === "asc" ? aNum - bNum : bNum - aNum;
-      });
-    }
-    
-    return sorted;
-  }, [players, viewMode, searchQuery, sortConfig]);
+        return 0;
+      };
+      if (sortKey === "name") return sortDir * a.name.localeCompare(b.name);
+      return sortDir * (getVal(a) - getVal(b));
+    });
 
-  const requestSort = (key: string) => {
-    setSortConfig(prev => ({
-      key,
-      direction: prev?.key === key && prev.direction === "asc" ? "desc" : "asc"
-    }));
-  };
+    return list;
+  }, [players, filterProp, search, sortKey, sortDir]);
 
-  const handlePlayerClick = (id: string) => {
-    navigate(`/scanner?playerId=${id}&sport=${sport}`);
-  };
-  
-  const handleBack = () => {
-    navigate("/scanner");
-  };
+  const SortTh = ({ label, sk }: { label: string; sk: string }) => (
+    <th
+      onClick={() => handleSort(sk)}
+      className="p-3 text-left text-[11px] font-semibold text-yellow-400/70 uppercase tracking-wider cursor-pointer select-none hover:text-yellow-400 whitespace-nowrap"
+    >
+      {label} {sortKey === sk ? (sortDir === -1 ? "↓" : "↑") : ""}
+    </th>
+  );
 
+  // If viewing player detail
   if (playerId) {
     return (
-      <PlayerDetailView 
-        playerId={playerId} 
-        sport={sport} 
-        selectedProps={[selectedProp]} 
-        onBack={handleBack} 
+      <PlayerDetailView
+        playerId={playerId}
+        sport={sport}
+        onBack={() => navigate("/scanner")}
       />
     );
   }
 
-  const getInitials = (name: string) => {
-    if (!name) return "??";
-    return name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
-  };
-
-  const SortHeader = ({ label, sortKey }: { label: string; sortKey: string }) => (
-    <th 
-      className="p-4 text-left text-yellow-400 font-semibold cursor-pointer hover:text-yellow-300 select-none"
-      onClick={() => requestSort(sortKey)}
-    >
-      <div className="flex items-center gap-1">
-        {label}
-        <ArrowUpDown className={`h-3 w-3 ${sortConfig?.key === sortKey ? "text-yellow-400" : "text-gray-600"}`} />
-      </div>
-    </th>
-  );
-
-  const currentProps = PROP_GROUPS[sport as keyof typeof PROP_GROUPS] || PROP_GROUPS.nba;
+  const currentProps = SPORT_PROPS[sport] || SPORT_PROPS.nba;
 
   return (
     <DashboardLayout>
       <div className="p-4 max-w-7xl mx-auto">
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold text-yellow-400 mb-2">📊 Line Pulse Scanner</h1>
-          <p className="text-gray-400 text-sm">Find betting edges across all major sportsbooks</p>
+        {/* Header */}
+        <div className="mb-5 flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-yellow-400">⚡ LinePulse Scanner</h1>
+            <p className="text-gray-500 text-sm mt-0.5 flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5" />
+              Players with games in the next 3 days · Set your own lines
+            </p>
+          </div>
+          <button
+            onClick={fetchPlayers}
+            disabled={loading}
+            className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm text-gray-300 transition disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+            {lastRefresh ? `Updated ${lastRefresh}` : "Refresh"}
+          </button>
         </div>
 
-        <div className="flex flex-col md:flex-row gap-3 mb-4">
-          <Select value={sport} onValueChange={setSport}>
-            <SelectTrigger className="w-full md:w-[180px] bg-[#0f172a] border-gray-700 text-yellow-400">
-              <SelectValue placeholder="Select sport" />
+        {/* Controls */}
+        <div className="flex flex-wrap gap-2 mb-4">
+          <Select value={sport} onValueChange={(v) => { setSport(v); setFilterProp("points"); }}>
+            <SelectTrigger className="w-36 bg-gray-900 border-gray-700 text-yellow-400 text-sm">
+              <SelectValue />
             </SelectTrigger>
-            <SelectContent className="bg-[#0f172a] border-gray-700">
-              <SelectItem value="nba">🏀 NBA</SelectItem>
-              <SelectItem value="nfl">🏈 NFL</SelectItem>
-              <SelectItem value="mlb">⚾ MLB</SelectItem>
-              <SelectItem value="nhl">🏒 NHL</SelectItem>
-              <SelectItem value="soccer">⚽ Soccer</SelectItem>
+            <SelectContent className="bg-gray-900 border-gray-700">
+              {SPORTS.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
             </SelectContent>
           </Select>
-          
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input 
-              placeholder="Search players..." 
-              value={searchQuery} 
-              onChange={e => setSearchQuery(e.target.value)} 
-              className="pl-10 bg-[#0f172a] border-gray-700 text-yellow-400" 
+
+          <Select value={filterProp} onValueChange={setFilterProp}>
+            <SelectTrigger className="w-36 bg-gray-900 border-gray-700 text-gray-300 text-sm">
+              <SelectValue placeholder="All Props" />
+            </SelectTrigger>
+            <SelectContent className="bg-gray-900 border-gray-700">
+              <SelectItem value="all">All Props</SelectItem>
+              {currentProps.map(p => <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+
+          <div className="relative flex-1 min-w-[180px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
+            <Input
+              value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Search players, teams..."
+              className="pl-9 bg-gray-900 border-gray-700 text-gray-300 text-sm h-9"
             />
           </div>
-
-          <Select value={selectedProp} onValueChange={setSelectedProp}>
-            <SelectTrigger className="w-full md:w-[180px] bg-[#0f172a] border-gray-700 text-yellow-400">
-              <SelectValue placeholder="Select prop" />
-            </SelectTrigger>
-            <SelectContent className="bg-[#0f172a] border-gray-700">
-              <SelectItem value="all">All Props</SelectItem>
-              {currentProps.map(prop => (
-                <SelectItem key={prop.id} value={prop.id}>{prop.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
         </div>
 
-        <div className="flex gap-2 mb-6">
-          {(["all", "over", "under"] as const).map(mode => (
-            <button
-              key={mode}
-              onClick={() => setViewMode(mode)}
-              className={`px-4 py-2 rounded-lg font-medium transition ${
-                viewMode === mode
-                  ? "bg-yellow-500 text-black"
-                  : "bg-[#0f172a] text-gray-400 border border-gray-700 hover:border-yellow-600"
-              }`}
-            >
-              {mode.charAt(0).toUpperCase() + mode.slice(1)}
-            </button>
-          ))}
-        </div>
-
+        {/* Error */}
         {error && (
-          <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 mb-6 text-red-400">
+          <div className="mb-4 p-3 bg-red-900/20 border border-red-800 rounded-lg text-red-400 text-sm">
             ❌ {error}
           </div>
         )}
 
-        {loading ? (
-          <div className="text-center py-12">
-            <div className="animate-spin h-8 w-8 border-2 border-yellow-400 border-t-transparent rounded-full mx-auto mb-4" />
-            <p className="text-gray-400">Loading players...</p>
-          </div>
-        ) : sortedPlayers.length === 0 ? (
-          <div className="text-center py-20 text-gray-500 bg-[#020617] rounded-xl border border-gray-800">
-            <p className="text-xl font-medium">No players found.</p>
-            <p className="text-sm mt-2">Try selecting a different sport, prop, or clearing filters.</p>
-          </div>
-        ) : (
-          <div className="bg-[#020617] rounded-xl border border-gray-800 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-[#0f172a] border-b border-gray-800">
-                  <tr>
-                    <SortHeader label="Player" sortKey="full_name" />
-                    <SortHeader label="BETTING LINE" sortKey="line" />
-                    <SortHeader label="Avg L10" sortKey="avgL10" />
-                    <SortHeader label="Edge %" sortKey="edgePct" />
-                    <SortHeader label="EV" sortKey="ev" />
-                    <SortHeader label="Rec" sortKey="recommendation" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedPlayers.map((p, i) => (
-                    <tr 
-                      key={`${p.player_id}-${i}`} 
-                      onClick={() => handlePlayerClick(p.player_id)} 
-                      className="border-b border-gray-800 hover:bg-[#0f172a] cursor-pointer transition"
-                    >
-                      <td className="p-4">
-                        <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-full bg-gradient-to-br from-yellow-500 to-yellow-700 flex items-center justify-center text-black font-bold text-sm">
-                            {getInitials(p.full_name)}
-                          </div>
-                          <div>
-                            <p className="font-semibold text-yellow-400">{p.full_name}</p>
-                            <p className="text-xs text-gray-400">{p.team} • {p.prop_type?.toUpperCase()}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <Badge variant="outline" className="border-yellow-600 text-yellow-400 font-bold">
-                          {p.line}
-                        </Badge>
-                      </td>
-                      <td className="p-4 text-green-400 font-semibold">{p.avgL10}</td>
-                      <td className="p-4">
-                        <span className={p.edgePct?.includes('-') ? "text-red-400" : "text-green-400"}>
-                          {p.edgePct}
-                        </span>
-                      </td>
-                      <td className="p-4">
-                        <span className={parseFloat(p.ev) > 0 ? "text-green-400" : "text-red-400"}>
-                          {p.ev}
-                        </span>
-                      </td>
-                      <td className="p-4">
-                        <span className={`text-xs font-bold ${
-                          p.recommendation?.includes('OVER') ? 'text-green-400' : 
-                          p.recommendation?.includes('UNDER') ? 'text-red-400' : 'text-gray-500'
-                        }`}>
-                          {p.recommendation}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+        {/* Loading */}
+        {loading && (
+          <div className="text-center py-16">
+            <div className="w-8 h-8 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+            <p className="text-gray-500 text-sm">Loading upcoming players...</p>
           </div>
         )}
 
-        <SubmitLineModal 
-          open={false} 
-          onOpenChange={() => {}}
-          sport={sport}
-        />
+        {/* Table */}
+        {!loading && (
+          displayPlayers.length === 0 ? (
+            <div className="text-center py-20 text-gray-600 border border-gray-800 rounded-xl bg-gray-900/20">
+              <p className="text-lg">No players found</p>
+              <p className="text-sm mt-1">
+                {players.length === 0
+                  ? "Run the data pipeline first: Admin → Full Ingest → select sport"
+                  : "Try adjusting your filters"}
+              </p>
+            </div>
+          ) : (
+            <div className="bg-gray-900/30 border border-gray-800 rounded-xl overflow-hidden">
+              <div className="px-4 py-2 border-b border-gray-800 text-xs text-gray-600">
+                {displayPlayers.length} players · click any row for all prop details
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="border-b border-gray-800">
+                    <tr>
+                      <SortTh label="Player"  sk="name" />
+                      <th className="p-3 text-left text-[11px] font-semibold text-yellow-400/70 uppercase tracking-wider">Game</th>
+                      <SortTh label="Line"    sk="line" />
+                      <SortTh label="Avg L10" sk="avg"  />
+                      <SortTh label="Diff"    sk="diff" />
+                      <SortTh label="L5"      sk="l5"   />
+                      <SortTh label="L10"     sk="l10"  />
+                      <SortTh label="L15"     sk="l15"  />
+                      <SortTh label="L20"     sk="l20"  />
+                      <th className="p-3 text-left text-[11px] font-semibold text-yellow-400/70 uppercase">Trend</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {displayPlayers.map((p, i) => {
+                      const pd = p.all_props?.[filterProp] || p.all_props?.[Object.keys(p.all_props || {})[0]];
+                      if (!pd) return null;
+                      const diff = ((pd.avg_l10 ?? 0) - (pd.line ?? 0));
+                      return (
+                        <tr
+                          key={`${p.player_id}-${i}`}
+                          onClick={() => navigate(`/scanner?playerId=${p.player_id}&sport=${sport}`)}
+                          className="border-b border-gray-800/50 hover:bg-gray-800/40 cursor-pointer transition"
+                        >
+                          {/* Player */}
+                          <td className="p-3">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-yellow-500 to-yellow-700 flex items-center justify-center text-black text-xs font-bold shrink-0">
+                                {getInitials(p.name)}
+                              </div>
+                              <div>
+                                <p className="font-semibold text-white text-sm leading-tight">{p.name}</p>
+                                <p className="text-[10px] text-gray-500">
+                                  {p.team_abbr} · {p.position} · {pd.label}
+                                </p>
+                              </div>
+                            </div>
+                          </td>
+                          {/* Game */}
+                          <td className="p-3">
+                            <div>
+                              <p className="text-xs text-gray-400">vs {p.opponent}</p>
+                              <p className="text-[10px] text-gray-600">{p.game_date}</p>
+                            </div>
+                          </td>
+                          {/* Line */}
+                          <td className="p-3">
+                            <span className="text-yellow-400 font-bold text-sm">{pd.line?.toFixed(1)}</span>
+                          </td>
+                          {/* Avg */}
+                          <td className="p-3 text-gray-300 text-sm">{pd.avg_l10}</td>
+                          {/* Diff */}
+                          <td className="p-3">
+                            <span className={`text-sm font-semibold ${diff > 0 ? "text-green-400" : diff < 0 ? "text-red-400" : "text-gray-500"}`}>
+                              {diff > 0 ? "+" : ""}{diff.toFixed(1)}
+                            </span>
+                          </td>
+                          {/* Hit rate boxes */}
+                          <td className="p-3"><HRBox value={pd.l5} /></td>
+                          <td className="p-3"><HRBox value={pd.l10} /></td>
+                          <td className="p-3"><HRBox value={pd.l15} /></td>
+                          <td className="p-3"><HRBox value={pd.l20} /></td>
+                          {/* Trend */}
+                          <td className="p-3">
+                            <span className={`text-xs font-bold ${pd.trend === 'up' ? 'text-green-400' : pd.trend === 'down' ? 'text-red-400' : 'text-gray-600'}`}>
+                              {pd.trend === 'up' ? '↑ HOT' : pd.trend === 'down' ? '↓ COLD' : '→ FLAT'}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )
+        )}
       </div>
     </DashboardLayout>
   );
