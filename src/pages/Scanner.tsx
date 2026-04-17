@@ -1,5 +1,5 @@
 // src/pages/Scanner.tsx
-// Shows only players with games in next 3 days
+// Shows players (with 3-day lookahead, but can force all when searching)
 // All prop types, user-adjustable lines, hit rate boxes
 
 import { useEffect, useState, useMemo } from "react";
@@ -81,13 +81,21 @@ export default function Scanner() {
     if (urlSport && urlSport !== sport) setSport(urlSport);
   }, [urlSport]);
 
-  const fetchPlayers = async () => {
+  // ✅ UPDATED: fetchPlayers accepts forceAll flag
+  const fetchPlayers = async (forceAll: boolean = false) => {
     setLoading(true); setError(null);
     try {
+      // When searching, we want to fetch ALL players (ignore 3-day filter)
+      // so that search can find players even if they have no upcoming games.
+      const shouldForceAll = forceAll || search.length > 0;
       const res = await fetch(EDGE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ operation: "get_players", sport }),
+        body: JSON.stringify({ 
+          operation: "get_players", 
+          sport,
+          forceAll: shouldForceAll,
+        }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -101,8 +109,9 @@ export default function Scanner() {
     }
   };
 
+  // Initial load: fetch with forceAll=false (only upcoming games)
   useEffect(() => {
-    if (!playerId) fetchPlayers();
+    if (!playerId) fetchPlayers(false);
   }, [sport]);
 
   // Sort
@@ -130,7 +139,7 @@ export default function Scanner() {
       );
     }
 
-    // Sort — use the prop data for the selected filter
+    // Sort
     list.sort((a, b) => {
       const getVal = (p: any) => {
         const pd = p.all_props?.[filterProp];
@@ -141,7 +150,6 @@ export default function Scanner() {
         if (sortKey === "l10")     return pd.l10 ?? 0;
         if (sortKey === "l15")     return pd.l15 ?? 0;
         if (sortKey === "l20")     return pd.l20 ?? 0;
-        if (sortKey === "name")    return 0; // handled separately
         if (sortKey === "diff") {
           const diff = (pd.avg_l10 ?? 0) - (pd.line ?? 0);
           return diff;
@@ -186,11 +194,11 @@ export default function Scanner() {
             <h1 className="text-2xl font-bold text-yellow-400">⚡ LinePulse Scanner</h1>
             <p className="text-gray-500 text-sm mt-0.5 flex items-center gap-1.5">
               <Calendar className="w-3.5 h-3.5" />
-              Players with games in the next 3 days · Set your own lines
+              {search ? "Search includes all players" : "Players with games in the next 3 days"} · Set your own lines
             </p>
           </div>
           <button
-            onClick={fetchPlayers}
+            onClick={() => fetchPlayers(false)}
             disabled={loading}
             className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm text-gray-300 transition disabled:opacity-50"
           >
@@ -241,7 +249,7 @@ export default function Scanner() {
         {loading && (
           <div className="text-center py-16">
             <div className="w-8 h-8 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-            <p className="text-gray-500 text-sm">Loading upcoming players...</p>
+            <p className="text-gray-500 text-sm">Loading players...</p>
           </div>
         )}
 
@@ -253,7 +261,7 @@ export default function Scanner() {
               <p className="text-sm mt-1">
                 {players.length === 0
                   ? "Run the data pipeline first: Admin → Full Ingest → select sport"
-                  : "Try adjusting your filters"}
+                  : "Try adjusting your filters or search for a specific player"}
               </p>
             </div>
           ) : (
