@@ -1,5 +1,5 @@
 // src/pages/Scanner.tsx
-// Shows players (with 3-day lookahead, but can force all when searching)
+// Shows players (3-day lookahead by default, but can load all with button)
 // All prop types, user-adjustable lines, hit rate boxes
 
 import { useEffect, useState, useMemo } from "react";
@@ -8,7 +8,7 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, RefreshCw, Calendar } from "lucide-react";
+import { Search, RefreshCw, Calendar, Users } from "lucide-react";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
@@ -81,20 +81,17 @@ export default function Scanner() {
     if (urlSport && urlSport !== sport) setSport(urlSport);
   }, [urlSport]);
 
-  // ✅ UPDATED: fetchPlayers accepts forceAll flag
+  // ✅ Updated: fetchPlayers accepts a forceAll flag
   const fetchPlayers = async (forceAll: boolean = false) => {
     setLoading(true); setError(null);
     try {
-      // When searching, we want to fetch ALL players (ignore 3-day filter)
-      // so that search can find players even if they have no upcoming games.
-      const shouldForceAll = forceAll || search.length > 0;
       const res = await fetch(EDGE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           operation: "get_players", 
           sport,
-          forceAll: shouldForceAll,
+          forceAll, // ← send forceAll flag to edge function
         }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -109,7 +106,7 @@ export default function Scanner() {
     }
   };
 
-  // Initial load: fetch with forceAll=false (only upcoming games)
+  // Initial load: only upcoming games (forceAll = false)
   useEffect(() => {
     if (!playerId) fetchPlayers(false);
   }, [sport]);
@@ -139,7 +136,7 @@ export default function Scanner() {
       );
     }
 
-    // Sort
+    // Sort — use the prop data for the selected filter
     list.sort((a, b) => {
       const getVal = (p: any) => {
         const pd = p.all_props?.[filterProp];
@@ -150,6 +147,7 @@ export default function Scanner() {
         if (sortKey === "l10")     return pd.l10 ?? 0;
         if (sortKey === "l15")     return pd.l15 ?? 0;
         if (sortKey === "l20")     return pd.l20 ?? 0;
+        if (sortKey === "name")    return 0; // handled separately
         if (sortKey === "diff") {
           const diff = (pd.avg_l10 ?? 0) - (pd.line ?? 0);
           return diff;
@@ -194,17 +192,27 @@ export default function Scanner() {
             <h1 className="text-2xl font-bold text-yellow-400">⚡ LinePulse Scanner</h1>
             <p className="text-gray-500 text-sm mt-0.5 flex items-center gap-1.5">
               <Calendar className="w-3.5 h-3.5" />
-              {search ? "Search includes all players" : "Players with games in the next 3 days"} · Set your own lines
+              Players with games in the next 3 days · Set your own lines
             </p>
           </div>
-          <button
-            onClick={() => fetchPlayers(false)}
-            disabled={loading}
-            className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm text-gray-300 transition disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-            {lastRefresh ? `Updated ${lastRefresh}` : "Refresh"}
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => fetchPlayers(true)}  // ✅ Load All (forceAll = true)
+              disabled={loading}
+              className="flex items-center gap-2 px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700 rounded-lg text-sm text-black font-medium transition disabled:opacity-50"
+            >
+              <Users className="w-3.5 h-3.5" />
+              Load All
+            </button>
+            <button
+              onClick={() => fetchPlayers(false)} // Refresh with current filter (upcoming only)
+              disabled={loading}
+              className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm text-gray-300 transition disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+              {lastRefresh ? `Updated ${lastRefresh}` : "Refresh"}
+            </button>
+          </div>
         </div>
 
         {/* Controls */}
@@ -261,7 +269,7 @@ export default function Scanner() {
               <p className="text-sm mt-1">
                 {players.length === 0
                   ? "Run the data pipeline first: Admin → Full Ingest → select sport"
-                  : "Try adjusting your filters or search for a specific player"}
+                  : "Try adjusting your filters or use 'Load All' to see all players"}
               </p>
             </div>
           ) : (
