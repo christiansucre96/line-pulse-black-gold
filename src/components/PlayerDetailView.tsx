@@ -214,8 +214,6 @@ function BarChart({ gameLogs, tab, line, sport }: {
   line: number;
   sport: string;
 }) {
-  // Use ALL gameLogs passed (already limited to selected period in parent)
-  // Reverse to show oldest first (left to right chronological)
   const logs = [...gameLogs].reverse();
   if (!logs.length) return (
     <div className="h-52 flex items-center justify-center text-gray-600 text-sm">
@@ -472,7 +470,9 @@ function StatSection({
   );
 }
 
-// ── TEAM STATS SECTION ────────────────────────────────────────
+// ── TEAM STATS SECTION (mirrors player stats UI) ─────────────
+// Uses the team's game scores (points, opponent points, margin, total)
+// More stats (rebounds, assists, etc.) require backend team aggregates.
 function TeamStatsSection({
   teamGameLogs, sport,
 }: {
@@ -480,6 +480,7 @@ function TeamStatsSection({
   sport: string;
 }) {
   const [activeTab,   setActiveTab]   = useState("score");
+  const [activePeriod, setActivePeriod] = useState(10);
   const [customLines, setCustomLines] = useState<Record<string, number>>({});
 
   const TEAM_TABS = [
@@ -491,6 +492,7 @@ function TeamStatsSection({
 
   const tab = TEAM_TABS.find(t => t.key === activeTab) || TEAM_TABS[0];
 
+  // Build values for the selected metric
   const vals = teamGameLogs.map(g => {
     if (tab.key === "score")     return Number(g.team_score   || g.home_score || 0);
     if (tab.key === "opp_score") return Number(g.opp_score    || g.away_score || 0);
@@ -499,15 +501,25 @@ function TeamStatsSection({
     return 0;
   });
 
-  const l10 = vals.slice(0, 10);
-  const a10 = avg(l10);
+  // Slices for periods
+  const slices = {
+    5:  vals.slice(0, 5),
+    10: vals.slice(0, 10),
+    15: vals.slice(0, 15),
+    20: vals.slice(0, 20),
+  } as Record<number, number[]>;
+
+  const a10 = avg(slices[10]);
   const defaultLine = roundHalf(a10);
   const line = customLines[tab.key] ?? defaultLine;
-  const hr10 = hitRate(l10, line);
 
-  if (!teamGameLogs.length) return null;
+  const activeSlice    = slices[activePeriod] || slices[10];
+  const activeAvg      = avg(activeSlice);
+  const activeHitRate  = hitRate(activeSlice, line);
+  const actualGames    = activeSlice.length;
 
-  const chartLogs = teamGameLogs.slice(0, 10).map(g => ({
+  // Prepare data for the bar chart
+  const chartLogs = teamGameLogs.slice(0, activePeriod).map(g => ({
     opponent:   g.opponent || g.opp_abbr || "—",
     game_date:  g.game_date || "",
     [tab.key]:  tab.key === "score"     ? Number(g.team_score||g.home_score||0)
@@ -516,11 +528,15 @@ function TeamStatsSection({
               :                          Number(g.team_score||g.home_score||0)+Number(g.opp_score||g.away_score||0),
   }));
 
+  const chartKey = `${tab.key}-${activePeriod}-${line}-${actualGames}`;
+
+  if (!teamGameLogs.length) return null;
+
   return (
     <div className="rounded-xl overflow-hidden border" style={{ background: BG_CARD, borderColor: BORDER }}>
-      <div className="px-4 py-2.5 border-b flex items-center gap-2" style={{ borderColor: BORDER }}>
+      <div className="px-4 py-2.5 border-b flex items-center justify-between" style={{ borderColor: BORDER }}>
         <span className="font-bold text-sm" style={{ color: GOLD }}>🏟 Team Stats</span>
-        <span className="text-[10px] text-gray-600 ml-auto">L10 only</span>
+        <span className="text-[10px] text-gray-600">More team stats (rebounds, assists) coming soon</span>
       </div>
 
       <TabBar tabs={TEAM_TABS} active={activeTab} onSelect={setActiveTab} />
@@ -536,29 +552,61 @@ function TeamStatsSection({
               onChange={v => setCustomLines(prev => ({ ...prev, [tab.key]: v }))}
             />
           </div>
-          <div className="flex gap-1.5">
-            {[
-              { label: "L5",  sl: vals.slice(0,5)  },
-              { label: "L10", sl: vals.slice(0,10) },
-              { label: "L15", sl: vals.slice(0,15) },
-              { label: "L20", sl: vals.slice(0,20) },
-            ].map(({ label, sl }) => {
-              const hr = hitRate(sl, line);
-              const av = avg(sl);
-              const bg = hr >= 80 ? GREEN_DARK : hr >= 60 ? "#92400e" : "#7f1d1d";
-              const fg = hr >= 80 ? "#bbf7d0"  : hr >= 60 ? "#fde68a" : "#fecaca";
+
+          <div className="flex gap-1.5 flex-wrap">
+            {PERIODS.map(({ label, n }) => {
+              const sl   = slices[n] || [];
+              const hr   = hitRate(sl, line);
+              const av   = avg(sl);
+              const isActive = activePeriod === n;
+
+              const bg = hr >= 80 ? GREEN_DARK  : hr >= 60 ? "#92400e" : "#7f1d1d";
+              const fg = hr >= 80 ? "#bbf7d0"   : hr >= 60 ? "#fde68a" : "#fecaca";
+              const activeBorder = hr >= 80 ? "#22c55e" : hr >= 60 ? GOLD_BRIGHT : RED;
+
               return (
-                <div key={label} className="px-2.5 py-1.5 rounded-lg text-center" style={{ background: bg, minWidth: 58 }}>
+                <button
+                  key={n}
+                  onClick={() => setActivePeriod(n)}
+                  className="px-2.5 py-1.5 rounded-lg text-center transition-all"
+                  style={{
+                    background:  bg,
+                    border:      `2px solid ${isActive ? activeBorder : "transparent"}`,
+                    outline:     isActive ? `1px solid ${activeBorder}44` : "none",
+                    minWidth:    64,
+                    boxShadow:   isActive ? `0 0 8px ${activeBorder}55` : "none",
+                    transform:   isActive ? "scale(1.05)" : "scale(1)",
+                  }}
+                >
                   <p style={{ color: fg }} className="text-[10px] font-bold">{label}</p>
                   <p style={{ color: fg }} className="text-[11px] font-bold">HR {sl.length ? hr : 0}%</p>
-                  <p style={{ color: fg }} className="text-[10px] opacity-80">Avg {sl.length ? av.toFixed(1) : "—"}</p>
-                </div>
+                  <p style={{ color: fg }} className="text-[10px] opacity-80">
+                    Avg {sl.length ? av.toFixed(1) : "—"}
+                  </p>
+                </button>
               );
             })}
           </div>
         </div>
 
+        <div className="flex items-center gap-2 text-[11px]">
+          <span className="px-2 py-0.5 rounded-full font-bold"
+            style={{ background: `${GOLD_DIM}30`, color: GOLD, border: `1px solid ${GOLD_DIM}` }}>
+            Showing {actualGames === activePeriod 
+              ? `Last ${activePeriod} games` 
+              : `Last ${activePeriod} (${actualGames} available)`}
+          </span>
+          <span className="text-gray-500">
+            Avg <span className="font-bold" style={{ color: GOLD_BRIGHT }}>{activeAvg.toFixed(1)}</span>
+            &nbsp;· HR <span className="font-bold"
+              style={{ color: activeHitRate >= 80 ? GREEN : activeHitRate >= 60 ? GOLD : RED }}>
+              {activeHitRate}%
+            </span>
+          </span>
+        </div>
+
         <BarChart
+          key={chartKey}
           gameLogs={chartLogs}
           tab={{ key: tab.key, label: tab.label }}
           line={line}
