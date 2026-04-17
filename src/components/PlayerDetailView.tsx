@@ -1,13 +1,13 @@
 // src/components/PlayerDetailView.tsx
 // LinePulse — Black & Gold brand
-// All features: scrollable stat tabs, stacked bar chart, team stats section, gamelog table
+// All features: player stats, team stats, gamelog table, bar charts
 
-import { useEffect, useState, useMemo, useRef } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { ArrowLeft, ChevronRight } from "lucide-react";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
-// ── BRAND TOKENS ──────────────────────────────────────────────
+// Brand tokens
 const GOLD = "#c9a84c";
 const GOLD_BRIGHT = "#f0b429";
 const GOLD_DIM = "#7a5c1e";
@@ -20,7 +20,7 @@ const GREEN_DARK = "#16a34a";
 const GREEN_LIGHT = "#4ade80";
 const RED = "#ef4444";
 
-// ── STAT TAB DEFINITION ───────────────────────────────────────
+// ── STAT TAB DEFINITIONS ──────────────────────────────────────
 const STAT_TABS: Record<string, { key: string; label: string; components?: string[] }[]> = {
   nba: [
     { key: "minutes_played", label: "MIN" },
@@ -77,7 +77,7 @@ const STAT_TABS: Record<string, { key: string; label: string; components?: strin
   ],
 };
 
-// ── GAMELOG TABLE COLUMNS per sport ──────────────────────────
+// ── GAMELOG TABLE COLUMNS ─────────────────────────────────────
 const GAMELOG_COLS: Record<string, { key: string; label: string; combo?: string[] }[]> = {
   nba: [
     { key: "points", label: "Pts" },
@@ -301,7 +301,7 @@ function LineAdjuster({ value, onChange }: { value: number; onChange: (v: number
   );
 }
 
-// ── PERIOD SELECTOR ───────────────────────────────────────────
+// ── PERIODS ───────────────────────────────────────────────────
 const PERIODS = [
   { label: "L5", n: 5 },
   { label: "L10", n: 10 },
@@ -622,7 +622,7 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
                       <th className="p-2.5 text-left text-[10px] font-semibold uppercase tracking-wider whitespace-nowrap" style={{ color: GOLD_DIM }}>Opponent</th>
                       <th className="p-2.5 text-left text-[10px] font-semibold uppercase tracking-wider whitespace-nowrap" style={{ color: GOLD_DIM }}>Date</th>
                       {glCols.map(c => <th key={c.key} className="p-2.5 text-center text-[10px] font-semibold uppercase tracking-wider whitespace-nowrap" style={{ color: GOLD_DIM }}>{c.label}</th>)}
-                    </table>
+                    </tr>
                   </thead>
                   <tbody>
                     {gameLogs.slice(0, 15).map((g, i) => (
