@@ -1,194 +1,445 @@
 // src/components/PlayerDetailView.tsx
-import { useEffect, useState, useMemo } from "react";
-import { ArrowLeft, TrendingUp, TrendingDown, Minus } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+// LinePulse — Black & Gold brand
+// Matches screenshot exactly: scrollable stat tabs, stacked bar chart,
+// team stats section, full gamelog table with computed combos
+
+import { useEffect, useState, useMemo, useRef } from "react";
+import { ArrowLeft, ChevronRight, TrendingUp, TrendingDown, Minus } from "lucide-react";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
-// ── HIT RATE BADGE ──────────────────────────────────────────
-function HitRateBadge({ value, size = "md" }: { value: number | null; size?: "sm" | "md" | "lg" }) {
-  if (value === null || value === undefined) {
-    return <span className="text-gray-600">—</span>;
-  }
+// ── BRAND TOKENS ──────────────────────────────────────────────
+const GOLD      = "#c9a84c";
+const GOLD_BRIGHT = "#f0b429";
+const GOLD_DIM  = "#7a5c1e";
+const BG_DEEP   = "#020617";
+const BG_CARD   = "#0b1120";
+const BG_ROW    = "#0f172a";
+const BORDER    = "#1e293b";
+const GREEN     = "#22c55e";
+const GREEN_DARK= "#16a34a";
+const GREEN_LIGHT="#4ade80";
+const RED       = "#ef4444";
 
-  const getColor = (v: number) => {
-    if (v >= 80) return "bg-green-500 text-white";
-    if (v >= 60) return "bg-yellow-500 text-black";
-    return "bg-red-500 text-white";
-  };
+// ── STAT TAB DEFINITION ───────────────────────────────────────
+const STAT_TABS: Record<string, { key: string; label: string; components?: string[] }[]> = {
+  nba: [
+    { key: "minutes_played",         label: "MIN" },
+    { key: "points",                 label: "PTS" },
+    { key: "rebounds",               label: "REBS" },
+    { key: "assists",                label: "ASTS" },
+    { key: "steals",                 label: "STL" },
+    { key: "blocks",                 label: "BLKS" },
+    { key: "turnovers",              label: "TOV" },
+    { key: "three_pointers_made",    label: "3PM" },
+    { key: "free_throws_made",       label: "FTM" },
+    { key: "field_goals_made",       label: "FGM" },
+    { key: "combo_pa",  label: "PA",  components: ["points","assists"] },
+    { key: "combo_pr",  label: "PR",  components: ["points","rebounds"] },
+    { key: "combo_ra",  label: "RA",  components: ["rebounds","assists"] },
+    { key: "combo_pra", label: "PRA", components: ["points","rebounds","assists"] },
+    { key: "combo_bs",  label: "BLKS+STL", components: ["blocks","steals"] },
+  ],
+  nfl: [
+    { key: "passing_yards",   label: "PASS YDS" },
+    { key: "rushing_yards",   label: "RUSH YDS" },
+    { key: "receiving_yards", label: "REC YDS" },
+    { key: "passing_tds",     label: "PASS TD" },
+    { key: "receptions",      label: "REC" },
+    { key: "combo_pass_rush", label: "PASS+RUSH", components: ["passing_yards","rushing_yards"] },
+    { key: "combo_rush_rec",  label: "RUSH+REC",  components: ["rushing_yards","receiving_yards"] },
+  ],
+  mlb: [
+    { key: "hits",       label: "H" },
+    { key: "runs",       label: "R" },
+    { key: "rbi",        label: "RBI" },
+    { key: "home_runs",  label: "HR" },
+    { key: "total_bases",label: "TB" },
+    { key: "strikeouts_pitching", label: "K" },
+    { key: "hits_allowed",        label: "HA" },
+    { key: "combo_hrr", label: "H+R+RBI", components: ["hits","runs","rbi"] },
+  ],
+  nhl: [
+    { key: "goals",          label: "G" },
+    { key: "assists_hockey", label: "A" },
+    { key: "shots_on_goal",  label: "SOG" },
+    { key: "blocked_shots",  label: "BLK" },
+    { key: "plus_minus",     label: "+/-" },
+    { key: "combo_ga",       label: "G+A", components: ["goals","assists_hockey"] },
+  ],
+  soccer: [
+    { key: "goals_soccer",    label: "G" },
+    { key: "assists_soccer",  label: "A" },
+    { key: "shots_soccer",    label: "SH" },
+    { key: "shots_on_target", label: "SOT" },
+    { key: "tackles",         label: "TKL" },
+    { key: "key_passes",      label: "KP" },
+    { key: "combo_ga_soccer", label: "G+A", components: ["goals_soccer","assists_soccer"] },
+  ],
+};
 
-  const sizeClasses = {
-    sm: "px-1.5 py-0.5 text-[10px]",
-    md: "px-2 py-1 text-xs",
-    lg: "px-3 py-1.5 text-sm",
-  };
+// ── GAMELOG TABLE COLUMNS per sport ──────────────────────────
+const GAMELOG_COLS: Record<string, { key: string; label: string; combo?: string[] }[]> = {
+  nba: [
+    { key: "points",   label: "Pts" },
+    { key: "rebounds", label: "Rebs" },
+    { key: "assists",  label: "Asts" },
+    { key: "pa",       label: "PA",  combo: ["points","assists"] },
+    { key: "pr",       label: "PR",  combo: ["points","rebounds"] },
+    { key: "ra",       label: "RA",  combo: ["rebounds","assists"] },
+    { key: "pra",      label: "PRA", combo: ["points","rebounds","assists"] },
+    { key: "blocks",   label: "Blks" },
+    { key: "steals",   label: "St" },
+    { key: "turnovers",label: "Tov" },
+    { key: "three_pointers_made", label: "3PM" },
+  ],
+  nfl: [
+    { key: "passing_yards",   label: "Pass" },
+    { key: "rushing_yards",   label: "Rush" },
+    { key: "receiving_yards", label: "Rec" },
+    { key: "passing_tds",     label: "TD" },
+    { key: "receptions",      label: "Rec#" },
+  ],
+  mlb: [
+    { key: "hits",      label: "H" },
+    { key: "runs",      label: "R" },
+    { key: "rbi",       label: "RBI" },
+    { key: "home_runs", label: "HR" },
+    { key: "total_bases",label: "TB" },
+    { key: "hrr",       label: "H+R+RBI", combo: ["hits","runs","rbi"] },
+  ],
+  nhl: [
+    { key: "goals",          label: "G" },
+    { key: "assists_hockey", label: "A" },
+    { key: "ga",             label: "G+A", combo: ["goals","assists_hockey"] },
+    { key: "shots_on_goal",  label: "SOG" },
+    { key: "blocked_shots",  label: "BLK" },
+    { key: "plus_minus",     label: "+/-" },
+  ],
+  soccer: [
+    { key: "goals_soccer",   label: "G" },
+    { key: "assists_soccer", label: "A" },
+    { key: "ga",             label: "G+A", combo: ["goals_soccer","assists_soccer"] },
+    { key: "shots_soccer",   label: "SH" },
+    { key: "shots_on_target",label: "SOT" },
+    { key: "tackles",        label: "TKL" },
+  ],
+};
 
+// ── HELPERS ───────────────────────────────────────────────────
+function getVal(log: any, key: string, combo?: string[]): number {
+  if (combo) return combo.reduce((s, k) => s + (Number(log[k]) || 0), 0);
+  return Number(log[key]) || 0;
+}
+
+function hitRate(vals: number[], line: number): number {
+  if (!vals.length) return 0;
+  return Math.round(vals.filter(v => v >= line).length / vals.length * 100);
+}
+
+function avg(vals: number[]): number {
+  if (!vals.length) return 0;
+  return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+
+function roundHalf(n: number) { return Math.round(n / 0.5) * 0.5; }
+
+function getInitials(name: string) {
+  return (name || "??").split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
+}
+
+function fmtDate(d: string) {
+  if (!d) return "—";
+  try {
+    const [, m, day] = d.split("-");
+    return `${m}-${day}`;
+  } catch { return d; }
+}
+
+// ── HIT RATE BOX ─────────────────────────────────────────────
+function HRBox({ label, hr, av }: { label: string; hr: number | null; av?: number }) {
+  if (hr === null || hr === undefined)
+    return (
+      <div style={{ background: "#111827", border: `1px solid ${BORDER}` }}
+        className="px-2.5 py-1.5 rounded-lg text-center min-w-[62px]">
+        <p className="text-[10px] text-gray-500">{label}</p>
+        <p className="text-xs font-bold text-gray-600">— %</p>
+        {av !== undefined && <p className="text-[10px] text-gray-600">Avg —</p>}
+      </div>
+    );
+  const bg = hr >= 80 ? GREEN_DARK : hr >= 60 ? "#92400e" : "#7f1d1d";
+  const fg = hr >= 80 ? "#bbf7d0" : hr >= 60 ? "#fde68a" : "#fecaca";
   return (
-    <Badge className={`${getColor(value)} ${sizeClasses[size]} font-bold`}>
-      {value}%
-    </Badge>
+    <div style={{ background: bg, border: `1px solid ${hr >= 80 ? "#166534" : hr >= 60 ? "#78350f" : "#991b1b"}` }}
+      className="px-2.5 py-1.5 rounded-lg text-center min-w-[62px]">
+      <p style={{ color: fg }} className="text-[10px] font-semibold">{label}</p>
+      <p style={{ color: fg }} className="text-xs font-bold">HR {hr}%</p>
+      {av !== undefined && <p style={{ color: fg }} className="text-[10px] opacity-80">Avg {av.toFixed(1)}</p>}
+    </div>
   );
 }
 
-// ── STACKED BAR CHART (like the screenshot) ─────────────────
-function StackedBar({
-  data,
-  line,
-  height = 200,
-}: {
-  data: { label: string; points: number; rebounds: number; assists?: number }[];
-  line: number;
-  height?: number;
+// ── SCROLLABLE TAB BAR ────────────────────────────────────────
+function TabBar({ tabs, active, onSelect }: {
+  tabs: { key: string; label: string }[];
+  active: string;
+  onSelect: (k: string) => void;
 }) {
-  if (!data.length) return <div className="h-48 flex items-center justify-center text-gray-500">No data</div>;
+  const ref = useRef<HTMLDivElement>(null);
+  return (
+    <div ref={ref} className="flex gap-0 overflow-x-auto scrollbar-none border-b"
+      style={{ borderColor: BORDER }}>
+      {tabs.map(t => (
+        <button key={t.key} onClick={() => onSelect(t.key)}
+          className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider whitespace-nowrap transition-all flex-shrink-0"
+          style={{
+            color:       active === t.key ? GOLD_BRIGHT : "#6b7280",
+            borderBottom: active === t.key ? `2px solid ${GOLD_BRIGHT}` : "2px solid transparent",
+            background:  "transparent",
+          }}>
+          {t.label}
+        </button>
+      ))}
+      <div className="flex items-center px-2 text-gray-600 flex-shrink-0">
+        <ChevronRight className="w-3.5 h-3.5" />
+      </div>
+    </div>
+  );
+}
 
-  const maxValue = Math.max(...data.map((d) => d.points + d.rebounds + (d.assists || 0)), line) * 1.2;
+// ── STACKED BAR CHART ─────────────────────────────────────────
+// Matches screenshot: numbers above bars, opponent+date below, dashed line
+function BarChart({ gameLogs, tab, line, sport }: {
+  gameLogs: any[];
+  tab: { key: string; label: string; components?: string[] };
+  line: number;
+  sport: string;
+}) {
+  const last10 = gameLogs.slice(0, 10).reverse();
+  if (!last10.length) return (
+    <div className="h-52 flex items-center justify-center text-gray-600 text-sm">
+      No game data available — run data pipeline first
+    </div>
+  );
+
+  const isCombo = !!tab.components?.length;
+  const components = tab.components || [];
+
+  // Get values
+  const vals = last10.map(g => getVal(g, tab.key, tab.components));
+  const maxVal = Math.max(...vals, line, 1) * 1.25;
+  const chartH = 180;
 
   return (
-    <div className="w-full" style={{ height }}>
-      <div className="flex items-end justify-between gap-1 h-full pb-6">
-        {data.map((item, i) => {
-          const ptsHeight = (item.points / maxValue) * 100;
-          const rebHeight = (item.rebounds / maxValue) * 100;
-          const total = item.points + item.rebounds + (item.assists || 0);
+    <div>
+      <div className="flex items-end justify-between gap-1" style={{ height: chartH }}>
+        {last10.map((g, i) => {
+          const total = vals[i];
           const isOver = total >= line;
+          const barH   = Math.max(4, Math.round((total / maxVal) * chartH));
+          const lineY  = Math.round((line / maxVal) * chartH);
+
+          // For combos split into segments
+          let segments: { val: number; col: string }[] = [];
+          if (isCombo && components.length > 1) {
+            const [k1, k2, k3] = components;
+            const v1 = Number(g[k1]) || 0;
+            const v2 = Number(g[k2]) || 0;
+            const v3 = k3 ? Number(g[k3]) || 0 : 0;
+            const h1 = Math.round((v1 / maxVal) * chartH);
+            const h2 = Math.round((v2 / maxVal) * chartH);
+            const h3 = k3 ? Math.round((v3 / maxVal) * chartH) : 0;
+            segments = [
+              { val: v3, col: GREEN_LIGHT },   // top segment (3rd component)
+              { val: v2, col: "#86efac" },     // mid segment
+              { val: v1, col: isOver ? GREEN_DARK : RED }, // base
+            ].filter(s => s.val > 0);
+          }
 
           return (
-            <div key={i} className="flex-1 flex flex-col items-center gap-1">
-              <div className="relative w-full flex flex-col justify-end h-full">
-                {/* Line marker */}
-                <div
-                  className="absolute w-full border-t border-dashed border-yellow-400/50"
-                  style={{ bottom: `${(line / maxValue) * 100}%` }}
-                />
-
-                {/* Rebounds segment */}
-                <div
-                  className="w-full bg-green-400/80"
-                  style={{ height: `${rebHeight}%` }}
-                />
-
-                {/* Points segment */}
-                <div
-                  className={`w-full ${isOver ? "bg-green-600" : "bg-red-500"}`}
-                  style={{ height: `${ptsHeight}%` }}
-                />
-              </div>
-              <span className="text-[9px] text-gray-500 truncate w-full text-center">
-                {item.label}
+            <div key={i} className="flex-1 flex flex-col items-center" style={{ minWidth: 0 }}>
+              {/* Value above bar */}
+              <span className="text-[9px] font-bold mb-0.5"
+                style={{ color: isOver ? GREEN : RED }}>
+                {total > 0 ? total : ""}
               </span>
+
+              {/* Bar */}
+              <div className="relative w-full flex flex-col justify-end"
+                style={{ height: chartH - 16 }}>
+                {/* Dashed line */}
+                <div className="absolute left-0 right-0 border-t border-dashed"
+                  style={{ bottom: lineY, borderColor: `${GOLD}80` }} />
+
+                {/* Segments */}
+                {isCombo && segments.length > 1 ? (
+                  <div className="w-full flex flex-col" style={{ height: barH }}>
+                    {segments.map((seg, si) => (
+                      <div key={si} className="w-full rounded-sm"
+                        style={{
+                          flex: seg.val,
+                          background: seg.col,
+                          marginBottom: si < segments.length - 1 ? 1 : 0,
+                        }} />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="w-full rounded-sm"
+                    style={{ height: barH, background: isOver ? GREEN_DARK : RED }} />
+                )}
+              </div>
+
+              {/* Opponent + date below */}
+              <div className="text-center mt-0.5" style={{ minWidth: 0 }}>
+                <p className="text-[8px] text-gray-500 truncate w-full">
+                  {g.opponent || g.team_abbreviation || "—"}
+                </p>
+                <p className="text-[8px] text-gray-600 truncate w-full">
+                  {fmtDate(g.game_date)}
+                </p>
+              </div>
             </div>
           );
         })}
       </div>
-      <div className="flex items-center gap-4 text-[10px] text-gray-500 mt-2">
-        <div className="flex items-center gap-1">
-          <div className="w-2.5 h-2.5 bg-green-600 rounded" />
-          <span>Points (over line)</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <div className="w-2.5 h-2.5 bg-green-400/80 rounded" />
-          <span>Rebounds</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <div className="w-2.5 h-2.5 bg-red-500 rounded" />
-          <span>Points (under line)</span>
-        </div>
-      </div>
-    </div>
-  );
-}
 
-// ── STAT BOX (L5/L10/L15/L20) ───────────────────────────────
-function StatBox({ label, hr, avg }: { label: string; hr: number | null; avg: number }) {
-  return (
-    <div className="bg-[#0f172a] px-3 py-2 rounded-lg text-xs text-center min-w-[60px]">
-      <p className="text-gray-400">{label}</p>
-      <p className="text-green-400 font-bold">HR {hr !== null ? hr : 0}%</p>
-      <p className="text-gray-300">Avg {avg.toFixed(1)}</p>
-    </div>
-  );
-}
-
-// ── PROP ROW FOR TABLES ─────────────────────────────────────
-function PropRow({ label, line, avg, hitRate, trend }: any) {
-  return (
-    <div className="flex items-center justify-between py-2 border-b border-gray-800/50 last:border-0 hover:bg-gray-800/20 px-2 rounded transition">
-      <div className="flex items-center gap-3 min-w-0">
-        <span className="text-sm font-medium text-gray-300 w-32 truncate">{label}</span>
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-gray-500">Line:</span>
-          <span className="text-yellow-400 font-bold text-sm">{line?.toFixed(1) ?? '0.0'}</span>
+      {/* Legend */}
+      <div className="flex gap-3 mt-3 flex-wrap">
+        <div className="flex items-center gap-1">
+          <div className="w-2.5 h-2.5 rounded-sm" style={{ background: GREEN_DARK }} />
+          <span className="text-[10px] text-gray-500">Over line</span>
         </div>
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-gray-500">Avg:</span>
-          <span className="text-green-400 font-bold text-sm">{avg?.toFixed(1) ?? '0.0'}</span>
+        <div className="flex items-center gap-1">
+          <div className="w-2.5 h-2.5 rounded-sm" style={{ background: RED }} />
+          <span className="text-[10px] text-gray-500">Under line</span>
         </div>
-      </div>
-      <div className="flex items-center gap-3">
-        <HitRateBadge value={hitRate} size="sm" />
-        {trend === "up" ? (
-          <TrendingUp className="w-4 h-4 text-green-400" />
-        ) : trend === "down" ? (
-          <TrendingDown className="w-4 h-4 text-red-400" />
-        ) : (
-          <Minus className="w-4 h-4 text-gray-500" />
+        {isCombo && (
+          <div className="flex items-center gap-1">
+            <div className="w-2.5 h-2.5 rounded-sm" style={{ background: GREEN_LIGHT }} />
+            <span className="text-[10px] text-gray-500">Components</span>
+          </div>
         )}
+        <div className="flex items-center gap-1 ml-auto">
+          <div className="w-5 h-0 border-t border-dashed" style={{ borderColor: GOLD }} />
+          <span className="text-[10px] text-gray-500">Line {line.toFixed(1)}</span>
+        </div>
       </div>
     </div>
   );
 }
 
-// ── MAIN COMPONENT ──────────────────────────────────────────
-interface PlayerDetailViewProps {
+// ── LINE ADJUSTER ─────────────────────────────────────────────
+function LineAdjuster({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  return (
+    <div className="flex items-center gap-2">
+      <button onClick={() => onChange(Math.max(0, +(value - 0.5).toFixed(1)))}
+        className="w-8 h-8 rounded flex items-center justify-center text-white font-bold text-lg transition hover:opacity-80"
+        style={{ background: "#1e293b", border: `1px solid ${BORDER}` }}>
+        −
+      </button>
+      <span className="w-14 text-center font-bold text-xl tabular-nums" style={{ color: GOLD_BRIGHT }}>
+        {value.toFixed(1)}
+      </span>
+      <button onClick={() => onChange(+(value + 0.5).toFixed(1))}
+        className="w-8 h-8 rounded flex items-center justify-center text-white font-bold text-lg transition hover:opacity-80"
+        style={{ background: "#1e293b", border: `1px solid ${BORDER}` }}>
+        +
+      </button>
+    </div>
+  );
+}
+
+// ── STAT SECTION (player or team) ─────────────────────────────
+function StatSection({
+  title, tabs, gameLogs, sport, defaultTab
+}: {
+  title: string;
+  tabs: { key: string; label: string; components?: string[] }[];
+  gameLogs: any[];
+  sport: string;
+  defaultTab: string;
+}) {
+  const [activeTab, setActiveTab] = useState(defaultTab);
+  const [customLines, setCustomLines] = useState<Record<string, number>>({});
+
+  const tab = tabs.find(t => t.key === activeTab) || tabs[0];
+
+  const vals = gameLogs.map(g => getVal(g, tab.key, tab.components));
+  const l5  = vals.slice(0, 5);
+  const l10 = vals.slice(0, 10);
+  const l15 = vals.slice(0, 15);
+  const l20 = vals.slice(0, 20);
+
+  const avg5  = avg(l5);
+  const avg10 = avg(l10);
+  const avg20 = avg(l20);
+  const proj  = l5.length >= 3 ? avg5 * 0.5 + avg10 * 0.3 + avg20 * 0.2 : avg10;
+  const defaultLine = roundHalf(proj);
+  const line = customLines[tab.key] ?? defaultLine;
+
+  return (
+    <div className="rounded-xl overflow-hidden border" style={{ background: BG_CARD, borderColor: BORDER }}>
+      {/* Section header */}
+      <div className="px-4 py-2.5 border-b flex items-center gap-2" style={{ borderColor: BORDER }}>
+        <span className="font-bold text-sm" style={{ color: GOLD }}>{title}</span>
+      </div>
+
+      {/* Tab bar */}
+      <TabBar tabs={tabs} active={activeTab} onSelect={setActiveTab} />
+
+      {/* Content */}
+      <div className="p-4 space-y-4">
+        {/* Hit rate boxes + line adjuster */}
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-[10px] text-gray-500 mb-1 uppercase tracking-wider">
+              {tab.label} · Line
+            </p>
+            <LineAdjuster value={line} onChange={v => setCustomLines(prev => ({ ...prev, [tab.key]: v }))} />
+          </div>
+          <div className="flex gap-1.5 flex-wrap">
+            <HRBox label="L5"  hr={hitRate(l5, line)}  av={avg5}  />
+            <HRBox label="L10" hr={hitRate(l10, line)} av={avg10} />
+            <HRBox label="L15" hr={hitRate(l15, line)} av={avg(l15)} />
+            <HRBox label="L20" hr={hitRate(l20, line)} av={avg20} />
+          </div>
+        </div>
+
+        {/* Bar chart */}
+        <BarChart gameLogs={gameLogs} tab={tab} line={line} sport={sport} />
+      </div>
+    </div>
+  );
+}
+
+// ── MAIN COMPONENT ─────────────────────────────────────────────
+interface Props {
   playerId: string;
   sport: string;
   onBack: () => void;
+  playerName?: string;
 }
 
-export function PlayerDetailView({ playerId, sport, onBack }: PlayerDetailViewProps) {
-  const [player, setPlayer] = useState<any>(null);
-  const [allProps, setAllProps] = useState<Record<string, any>>({});
+export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props) {
+  const [player,   setPlayer]   = useState<any>(null);
   const [gameLogs, setGameLogs] = useState<any[]>([]);
-  const [selectedProp, setSelectedProp] = useState<string>("points");
-  const [customLine, setCustomLine] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loading,  setLoading]  = useState(true);
+  const [error,    setError]    = useState<string | null>(null);
 
-  // Fetch player details
   useEffect(() => {
     (async () => {
-      setLoading(true);
-      setError(null);
+      setLoading(true); setError(null);
       try {
         const res = await fetch(EDGE_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            operation: "get_player_details",
-            sport,
-            player_id: playerId,
-          }),
+          body: JSON.stringify({ operation: "get_player_details", sport, player_id: playerId }),
         });
-
         const data = await res.json();
         if (!data.success) throw new Error(data.error || "Failed to load");
-
         setPlayer(data.player);
-        setAllProps(data.player.all_props || {});
         setGameLogs(data.player.game_logs || []);
-        setCustomLine(null);
       } catch (e: any) {
-        console.error("❌ PlayerDetailView error:", e);
         setError(e.message);
       } finally {
         setLoading(false);
@@ -196,336 +447,241 @@ export function PlayerDetailView({ playerId, sport, onBack }: PlayerDetailViewPr
     })();
   }, [playerId, sport]);
 
-  // Current prop data
-  const currentProp = allProps[selectedProp];
-  const line = customLine !== null ? customLine : currentProp?.line ?? 0;
-  const avgLast10 = currentProp?.avg_l10 ?? 0;
-  const diff = avgLast10 - line;
+  const tabs = STAT_TABS[sport] || STAT_TABS.nba;
+  const glCols = GAMELOG_COLS[sport] || GAMELOG_COLS.nba;
 
-  // Hit rates for the selected prop
-  const hitRates = useMemo(() => ({
-    l5: currentProp?.l5 ?? null,
-    l10: currentProp?.l10 ?? null,
-    l15: currentProp?.l15 ?? null,
-    l20: currentProp?.l20 ?? null,
-  }), [currentProp]);
-
-  // Averages for the selected prop
-  const averages = useMemo(() => ({
-    l5: currentProp?.avg_l5 ?? 0,
-    l10: currentProp?.avg_l10 ?? 0,
-    l20: currentProp?.avg_l20 ?? 0,
-  }), [currentProp]);
-
-  // Chart data for PRA (Points+Rebounds+Assists) – last 10 games
-  const chartData = useMemo(() => {
-    return gameLogs.slice(0, 10).map((log, i) => ({
-      label: `G${10 - i}`,
-      points: log.points || 0,
-      rebounds: log.rebounds || 0,
-      assists: log.assists || 0,
-    }));
-  }, [gameLogs]);
-
-  // Compute max stats for the right panel
+  // Max stats
   const maxStats = useMemo(() => {
-    if (!gameLogs.length) return { points: 0, rebounds: 0, assists: 0, steals: 0, blocks: 0, turnovers: 0 };
-    const max = (key: string) => Math.max(...gameLogs.map(g => g[key] || 0));
-    return {
-      points: max('points'),
-      rebounds: max('rebounds'),
-      assists: max('assists'),
-      steals: max('steals'),
-      blocks: max('blocks'),
-      turnovers: max('turnovers'),
+    if (!gameLogs.length) return {};
+    const maxOf = (k: string) => Math.max(...gameLogs.map(g => Number(g[k]) || 0));
+    return sport === "nba" ? {
+      Points: maxOf("points"), Rebounds: maxOf("rebounds"), Assists: maxOf("assists"),
+      Steals: maxOf("steals"), Blocks: maxOf("blocks"), Turnovers: maxOf("turnovers"),
+      "3 Pointer Made": maxOf("three_pointers_made"),
+    } : sport === "nfl" ? {
+      "Pass Yards": maxOf("passing_yards"), "Rush Yards": maxOf("rushing_yards"),
+      "Rec Yards": maxOf("receiving_yards"), "Pass TDs": maxOf("passing_tds"),
+    } : sport === "mlb" ? {
+      Hits: maxOf("hits"), Runs: maxOf("runs"), RBI: maxOf("rbi"),
+      "Home Runs": maxOf("home_runs"), "Total Bases": maxOf("total_bases"),
+    } : sport === "nhl" ? {
+      Goals: maxOf("goals"), Assists: maxOf("assists_hockey"),
+      "Shots on Goal": maxOf("shots_on_goal"), "Blocked": maxOf("blocked_shots"),
+    } : {
+      Goals: maxOf("goals_soccer"), Assists: maxOf("assists_soccer"),
+      Shots: maxOf("shots_soccer"), SOT: maxOf("shots_on_target"),
     };
-  }, [gameLogs]);
+  }, [gameLogs, sport]);
 
-  // Group props by category for the full list
-  const propsByGroup = useMemo(() => {
-    const groups: Record<string, any[]> = {};
-    Object.entries(allProps).forEach(([key, prop]: [string, any]) => {
-      const group = prop.group || "Other";
-      if (!groups[group]) groups[group] = [];
-      groups[group].push({ key, ...prop });
-    });
-    return groups;
-  }, [allProps]);
+  const name = player?.full_name || playerName || "Player";
+  const initials = getInitials(name);
+  const avail = gameLogs.length;
 
-  // Preset tab options (core props)
-  const tabOptions = [
-    { id: "points", label: "PTS" },
-    { id: "rebounds", label: "REBS" },
-    { id: "assists", label: "ASTS" },
-    { id: "combo_pr", label: "PR" },
-    { id: "combo_pra", label: "PRA" },
-  ];
-
-  const handleLineChange = (delta: number) => {
-    const newLine = Math.max(0, line + delta);
-    setCustomLine(newLine);
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-[#020617] text-white flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-yellow-400 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-gray-400">Loading player details...</p>
-        </div>
+  // Loading
+  if (loading) return (
+    <div className="min-h-screen flex items-center justify-center" style={{ background: BG_DEEP }}>
+      <div className="text-center">
+        <div className="w-12 h-12 rounded-full border-4 border-t-transparent animate-spin mx-auto mb-3"
+          style={{ borderColor: `${GOLD} transparent transparent transparent` }} />
+        <p className="text-gray-400 text-sm">Loading player data…</p>
       </div>
-    );
-  }
+    </div>
+  );
 
-  if (error || !player) {
-    return (
-      <div className="min-h-screen bg-[#020617] text-white p-4">
-        <Button variant="ghost" onClick={onBack} className="mb-4">
-          <ArrowLeft className="h-4 w-4 mr-2" /> Back
-        </Button>
-        <Card className="bg-[#020617] border-gray-800">
-          <CardContent className="p-6 text-center text-red-400">
-            ❌ {error || "Player not found"}
-          </CardContent>
-        </Card>
+  // Error
+  if (error) return (
+    <div className="min-h-screen p-4" style={{ background: BG_DEEP }}>
+      <button onClick={onBack} className="flex items-center gap-2 text-gray-400 hover:text-white mb-4">
+        <ArrowLeft className="w-4 h-4" /> Back
+      </button>
+      <div className="p-4 rounded-xl border border-red-800/40 bg-red-900/10 text-red-400 text-sm">
+        ❌ {error}
       </div>
-    );
-  }
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#0f172a] to-[#020617] text-white">
-      {/* Header */}
-      <div className="sticky top-0 z-10 bg-[#020617]/80 backdrop-blur-sm border-b border-gray-800 px-4 py-3 flex items-center gap-3">
-        <Button variant="ghost" onClick={onBack} className="p-2 hover:bg-gray-800 rounded">
-          <ArrowLeft className="w-5 h-5" />
-        </Button>
-        <div className="flex-1 min-w-0">
-          <h1 className="font-bold text-yellow-400 text-xl truncate">{player.full_name}</h1>
-          <p className="text-xs text-gray-500 truncate">
-            {player.team} • {player.position} • {player.games_logged} games logged
+    <div className="min-h-screen text-white" style={{ background: BG_DEEP }}>
+
+      {/* ── TOP HEADER ── */}
+      <div className="sticky top-0 z-20 border-b px-4 py-3 flex items-center gap-3"
+        style={{ background: `${BG_DEEP}e8`, backdropFilter: "blur(8px)", borderColor: BORDER }}>
+        <button onClick={onBack}
+          className="flex items-center gap-1.5 text-sm transition hover:opacity-80"
+          style={{ color: GOLD }}>
+          <ArrowLeft className="w-4 h-4" /> Back
+        </button>
+        <div className="w-px h-5 mx-1" style={{ background: BORDER }} />
+        <div className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0"
+          style={{ background: `${GOLD_DIM}55`, border: `1.5px solid ${GOLD_DIM}`, color: GOLD_BRIGHT }}>
+          {initials}
+        </div>
+        <div className="min-w-0 flex-1">
+          <h1 className="font-bold text-base leading-tight truncate" style={{ color: GOLD_BRIGHT }}>{name}</h1>
+          <p className="text-[11px] text-gray-500 truncate">
+            {player?.team} · {player?.position} · {sport.toUpperCase()} · {avail} games
           </p>
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-[1fr_300px] gap-6 p-4 max-w-7xl mx-auto">
-        {/* LEFT COLUMN */}
-        <div className="space-y-6">
-          {/* Tabs + Prop Selector */}
-          <Card className="bg-[#020617] border-gray-800">
-            <CardHeader className="border-b border-gray-800 pb-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex gap-2">
-                  {tabOptions.map((tab) => (
-                    <button
-                      key={tab.id}
-                      onClick={() => setSelectedProp(tab.id)}
-                      className={`px-3 py-1.5 text-sm font-medium rounded transition ${
-                        selectedProp === tab.id
-                          ? "bg-purple-600 text-white"
-                          : "bg-gray-800 text-gray-300 hover:bg-gray-700"
-                      }`}
-                    >
-                      {tab.label}
-                    </button>
-                  ))}
-                </div>
-                <Select value={selectedProp} onValueChange={setSelectedProp}>
-                  <SelectTrigger className="w-48 bg-gray-900 border-gray-700 text-gray-300">
-                    <SelectValue placeholder="Other props" />
-                  </SelectTrigger>
-                  <SelectContent className="bg-gray-900 border-gray-700 max-h-64">
-                    {Object.entries(propsByGroup).map(([group, props]) => (
-                      <div key={group}>
-                        <div className="text-[10px] text-gray-500 px-3 py-1.5 font-semibold uppercase tracking-wider">{group}</div>
-                        {props.map((prop) => (
-                          <SelectItem key={prop.key} value={prop.key} className="text-sm">
-                            {prop.label}
-                          </SelectItem>
-                        ))}
-                      </div>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </CardHeader>
-            <CardContent className="pt-4 space-y-6">
-              {/* Line adjuster */}
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-gray-400 mb-1">{currentProp?.label || selectedProp}</p>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => handleLineChange(-0.5)}
-                      className="bg-gray-800 hover:bg-gray-700 text-white w-8 h-8 rounded flex items-center justify-center"
-                    >
-                      -
-                    </button>
-                    <span className="text-yellow-400 font-bold text-xl w-16 text-center">{line.toFixed(1)}</span>
-                    <button
-                      onClick={() => handleLineChange(0.5)}
-                      className="bg-gray-800 hover:bg-gray-700 text-white w-8 h-8 rounded flex items-center justify-center"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="text-xs text-gray-500">Avg L10</p>
-                  <p className="text-xl font-bold text-green-400">{avgLast10.toFixed(1)}</p>
-                  <p className={`text-xs font-semibold ${diff > 0 ? "text-green-400" : diff < 0 ? "text-red-400" : "text-gray-500"}`}>
-                    {diff > 0 ? "+" : ""}{diff.toFixed(1)} diff
-                  </p>
-                </div>
-              </div>
+      {/* ── LAYOUT ── */}
+      <div className="flex flex-col lg:flex-row gap-4 p-4 max-w-6xl mx-auto">
 
-              {/* Stat boxes (L5/L10/L15/L20) */}
-              <div className="flex flex-wrap gap-2">
-                <StatBox label="L5" hr={hitRates.l5} avg={averages.l5} />
-                <StatBox label="L10" hr={hitRates.l10} avg={averages.l10} />
-                <StatBox label="L15" hr={hitRates.l15} avg={currentProp?.avg_l15 || 0} />
-                <StatBox label="L20" hr={hitRates.l20} avg={averages.l20} />
-              </div>
+        {/* ── LEFT COLUMN ── */}
+        <div className="flex-1 space-y-4 min-w-0">
 
-              {/* Stacked bar chart (PRA) */}
-              <div>
-                <h3 className="text-sm font-semibold text-gray-400 mb-2">Points + Rebounds (last 10 games)</h3>
-                <StackedBar data={chartData} line={line} height={250} />
-              </div>
+          {/* PLAYER STATS SECTION */}
+          <StatSection
+            title="⚡ Player Stats"
+            tabs={tabs}
+            gameLogs={gameLogs}
+            sport={sport}
+            defaultTab={tabs[1]?.key || tabs[0]?.key}
+          />
 
-              {/* Full list of props for the selected prop type (hit rates) */}
-              <div>
-                <h3 className="text-sm font-semibold text-gray-400 mb-2">All Props - Hit Rates (L10)</h3>
-                <div className="space-y-1">
-                  {Object.entries(propsByGroup).map(([group, props]) => (
-                    <div key={group}>
-                      <div className="text-[10px] text-yellow-400/80 font-semibold uppercase tracking-wider mb-1 px-2">{group}</div>
-                      {props.map((prop) => (
-                        <PropRow
-                          key={prop.key}
-                          label={prop.label}
-                          line={prop.line}
-                          avg={prop.avg_l10}
-                          hitRate={prop.l10}
-                          trend={prop.trend}
-                        />
+          {/* GAMELOG TABLE */}
+          <div className="rounded-xl border overflow-hidden" style={{ background: BG_CARD, borderColor: BORDER }}>
+            <div className="px-4 py-2.5 border-b flex items-center gap-2" style={{ borderColor: BORDER }}>
+              <span className="font-bold text-sm" style={{ color: GOLD }}>Gamelog — Last {Math.min(15, avail)} Games</span>
+            </div>
+
+            {gameLogs.length === 0 ? (
+              <div className="p-8 text-center text-gray-600 text-sm">
+                No game logs — run the data pipeline for this sport
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr style={{ background: BG_ROW, borderBottom: `1px solid ${BORDER}` }}>
+                      <th className="p-2.5 text-left text-[10px] font-semibold uppercase tracking-wider whitespace-nowrap"
+                        style={{ color: GOLD_DIM }}>Opponent</th>
+                      <th className="p-2.5 text-left text-[10px] font-semibold uppercase tracking-wider whitespace-nowrap"
+                        style={{ color: GOLD_DIM }}>Date</th>
+                      {glCols.map(c => (
+                        <th key={c.key} className="p-2.5 text-center text-[10px] font-semibold uppercase tracking-wider whitespace-nowrap"
+                          style={{ color: GOLD_DIM }}>{c.label}</th>
                       ))}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Game Logs Table */}
-          <Card className="bg-[#020617] border-gray-800">
-            <CardHeader className="border-b border-gray-800 pb-3">
-              <CardTitle className="text-yellow-400 text-lg">📋 Game Log - Last 15 Games</CardTitle>
-            </CardHeader>
-            <CardContent className="pt-4 overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-800">
-                    <th className="p-2 text-left text-[10px] font-semibold text-gray-400 uppercase">Date</th>
-                    <th className="p-2 text-left text-[10px] font-semibold text-gray-400 uppercase">Opponent</th>
-                    <th className="p-2 text-center text-[10px] font-semibold text-gray-400 uppercase">PTS</th>
-                    <th className="p-2 text-center text-[10px] font-semibold text-gray-400 uppercase">REB</th>
-                    <th className="p-2 text-center text-[10px] font-semibold text-gray-400 uppercase">AST</th>
-                    <th className="p-2 text-center text-[10px] font-semibold text-gray-400 uppercase">STL</th>
-                    <th className="p-2 text-center text-[10px] font-semibold text-gray-400 uppercase">BLK</th>
-                    <th className="p-2 text-center text-[10px] font-semibold text-gray-400 uppercase">TOV</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {gameLogs.slice(0, 15).map((log, i) => (
-                    <tr key={i} className="border-b border-gray-800/50 hover:bg-gray-900/30">
-                      <td className="p-2 text-gray-300 whitespace-nowrap">
-                        {log.game_date ? new Date(log.game_date).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                        }) : '—'}
-                      </td>
-                      <td className="p-2 text-gray-400">vs TBD</td>
-                      <td className="p-2 text-center">
-                        <Badge className={`text-xs font-bold px-2 py-0.5 ${log.points >= (allProps.points?.line || 0) ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}>
-                          {log.points || 0}
-                        </Badge>
-                      </td>
-                      <td className="p-2 text-center">{log.rebounds || 0}</td>
-                      <td className="p-2 text-center">{log.assists || 0}</td>
-                      <td className="p-2 text-center">{log.steals || 0}</td>
-                      <td className="p-2 text-center">{log.blocks || 0}</td>
-                      <td className="p-2 text-center">{log.turnovers || 0}</td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-              {gameLogs.length === 0 && (
-                <p className="text-center text-gray-500 py-8 text-sm">No game logs available</p>
-              )}
-            </CardContent>
-          </Card>
+                  </thead>
+                  <tbody>
+                    {gameLogs.slice(0, 15).map((g, i) => (
+                      <tr key={i} className="transition-colors hover:bg-white/5"
+                        style={{ borderBottom: `1px solid ${BORDER}33` }}>
+                        <td className="p-2.5 font-medium text-gray-300 whitespace-nowrap text-xs">
+                          {g.opponent || g.team_abbreviation || "—"}
+                        </td>
+                        <td className="p-2.5 text-gray-500 whitespace-nowrap text-xs">
+                          {g.game_date ? g.game_date.slice(5).replace("-","-") : "—"}
+                        </td>
+                        {glCols.map(c => {
+                          const val = getVal(g, c.key, c.combo);
+                          return (
+                            <td key={c.key} className="p-2.5 text-center text-xs font-medium">
+                              <span style={{ color: val > 0 ? "#e5e7eb" : "#374151" }}>{val}</span>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* RIGHT PANEL - Player Max Stats */}
-        <div className="space-y-6">
-          <Card className="bg-[#020617] border-gray-800">
-            <CardHeader className="border-b border-gray-800 pb-3">
-              <CardTitle className="text-purple-400 text-lg">📈 Player Max Stats</CardTitle>
-            </CardHeader>
-            <CardContent className="pt-4 space-y-3">
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">Points</span>
-                  <span className="text-white font-bold">{maxStats.points}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">Rebounds</span>
-                  <span className="text-white font-bold">{maxStats.rebounds}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">Assists</span>
-                  <span className="text-white font-bold">{maxStats.assists}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">Steals</span>
-                  <span className="text-white font-bold">{maxStats.steals}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">Blocks</span>
-                  <span className="text-white font-bold">{maxStats.blocks}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">Turnovers</span>
-                  <span className="text-white font-bold">{maxStats.turnovers}</span>
-                </div>
-              </div>
-              <div className="mt-4 bg-purple-600/20 p-3 rounded-lg text-center">
-                <p className="text-sm text-gray-300">Matches Played</p>
-                <p className="text-xl font-bold text-purple-400">{player.games_logged}</p>
-              </div>
-            </CardContent>
-          </Card>
+        {/* ── RIGHT SIDEBAR ── */}
+        <div className="lg:w-64 space-y-4 flex-shrink-0">
 
-          {/* Optional: Team Averages */}
-          <Card className="bg-[#020617] border-gray-800">
-            <CardHeader className="border-b border-gray-800 pb-3">
-              <CardTitle className="text-green-400 text-lg">🏀 Team Averages (L10)</CardTitle>
-            </CardHeader>
-            <CardContent className="pt-4 space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-400">Points</span>
-                <span className="text-green-400 font-bold">{allProps.points?.avg_l10?.toFixed(1) ?? 0}</span>
+          {/* Player card */}
+          <div className="rounded-xl border p-4" style={{ background: BG_CARD, borderColor: BORDER }}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg flex-shrink-0"
+                style={{ background: `${GOLD_DIM}40`, border: `2px solid ${GOLD_DIM}`, color: GOLD_BRIGHT }}>
+                {initials}
               </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-400">Rebounds</span>
-                <span className="text-green-400 font-bold">{allProps.rebounds?.avg_l10?.toFixed(1) ?? 0}</span>
+              <div className="min-w-0">
+                <p className="font-bold text-sm leading-tight truncate" style={{ color: GOLD_BRIGHT }}>{name}</p>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  <span className="text-[10px] px-1.5 py-0.5 rounded font-bold"
+                    style={{ background: `${GOLD_DIM}30`, color: GOLD, border: `1px solid ${GOLD_DIM}` }}>
+                    {player?.team || "—"}
+                  </span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded font-bold"
+                    style={{ background: "#1e293b", color: "#94a3b8", border: `1px solid ${BORDER}` }}>
+                    {sport.toUpperCase()}
+                  </span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded font-bold"
+                    style={{ background: "#1e293b", color: "#94a3b8", border: `1px solid ${BORDER}` }}>
+                    {player?.position || "—"}
+                  </span>
+                </div>
               </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-400">Assists</span>
-                <span className="text-green-400 font-bold">{allProps.assists?.avg_l10?.toFixed(1) ?? 0}</span>
+            </div>
+
+            {/* Player Max Stats */}
+            <div className="border-t pt-3" style={{ borderColor: BORDER }}>
+              <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: GOLD_DIM }}>
+                Player Max Stats
+              </p>
+              <div className="space-y-1.5">
+                {Object.entries(maxStats).map(([label, val]) => (
+                  <div key={label} className="flex items-center justify-between">
+                    <span className="text-[11px] text-gray-400">{label}</span>
+                    <span className="text-[11px] font-bold text-white">{val as number}</span>
+                  </div>
+                ))}
               </div>
-            </CardContent>
-          </Card>
+            </div>
+
+            {/* Match Played */}
+            <div className="mt-4 rounded-lg p-3 text-center"
+              style={{ background: `${GOLD_DIM}20`, border: `1px solid ${GOLD_DIM}40` }}>
+              <div className="flex items-center justify-center gap-2 mb-1">
+                <div className="w-7 h-7 rounded-full flex items-center justify-center"
+                  style={{ background: `${GOLD_DIM}40`, border: `1px solid ${GOLD_DIM}` }}>
+                  <span className="text-[10px]">🎯</span>
+                </div>
+                <p className="text-[10px] text-gray-400 font-medium">Match Played</p>
+              </div>
+              <p className="text-2xl font-bold" style={{ color: GOLD_BRIGHT }}>{avail}</p>
+            </div>
+          </div>
+
+          {/* Quick hit rates for all core stats */}
+          {gameLogs.length > 0 && (
+            <div className="rounded-xl border p-4 space-y-2" style={{ background: BG_CARD, borderColor: BORDER }}>
+              <p className="text-[10px] font-bold uppercase tracking-widest mb-3" style={{ color: GOLD_DIM }}>
+                Quick Hit Rates (L10)
+              </p>
+              {tabs.slice(0, 8).map(t => {
+                const vals = gameLogs.map(g => getVal(g, t.key, t.components));
+                const l10 = vals.slice(0, 10);
+                const a10 = avg(l10);
+                const line = roundHalf(a10);
+                const hr = hitRate(l10, line);
+                const bg = hr >= 80 ? "#052e16" : hr >= 60 ? "#1c1000" : "#1c0505";
+                const fg = hr >= 80 ? GREEN : hr >= 60 ? GOLD : RED;
+                return (
+                  <div key={t.key} className="flex items-center justify-between py-1 border-b last:border-0"
+                    style={{ borderColor: `${BORDER}66` }}>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-gray-400 w-16 truncate">{t.label}</span>
+                      <span className="text-[10px] text-gray-600">{line.toFixed(1)}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px]" style={{ color: "#6b7280" }}>{a10.toFixed(1)}</span>
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                        style={{ background: bg, color: fg }}>
+                        {hr}%
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>
