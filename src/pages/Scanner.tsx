@@ -103,6 +103,7 @@ export default function Scanner() {
         );
       }
 
+      // ✅ CORRECTED MAPPING for EV & Recommendation
       const mapped = filteredPlayers.map((p: any) => {
         const lineVal = p.line ?? p.baseline_line ?? p.projected_value ?? 0;
         const avgVal = p.avg_last10 ?? p.avgL10 ?? p.avg_last5 ?? 0;
@@ -117,13 +118,18 @@ export default function Scanner() {
           line: parseFloat(lineVal).toFixed(1),
           avgL10: parseFloat(avgVal).toFixed(1),
           diff: (parseFloat(avgVal) - parseFloat(lineVal)).toFixed(1),
+          
+          // ✅ Edge % from confidence
           edgePct: `${(conf - 50).toFixed(1)}%`,
+          
+          // ✅ EV calculation: +0.050 for OVER, -0.050 for UNDER
           ev: edgeType === "OVER" ? "0.050" : edgeType === "UNDER" ? "-0.050" : "0.000",
+          
+          // ✅ Recommendation text
           recommendation: edgeType === "OVER" ? "OVER" : edgeType === "UNDER" ? "UNDER" : "NO BET",
+          
           prop_type: p.prop_type || p.stat_type || selectedProp,
           opponent: p.opponent || "TBD",
-          _confidence: conf,
-          _ev: edgeType === "OVER" ? 0.05 : edgeType === "UNDER" ? -0.05 : 0,
         };
       });
 
@@ -190,7 +196,6 @@ export default function Scanner() {
     }));
   };
 
-  // ✅ UPDATED: Navigate to player detail with sport parameter
   const handlePlayerClick = (id: string) => {
     navigate(`/scanner?playerId=${id}&sport=${sport}`);
   };
