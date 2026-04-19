@@ -2,6 +2,7 @@
 // Shows only players with games in next 3 days (with force fallback)
 // All prop types, user-adjustable lines, hit rate boxes
 // ✅ ADDITIONS: Pagination support for Supabase free tier
+// ✅ ADDITION: Game filter dropdown (next 24h games)
 
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -9,7 +10,7 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, RefreshCw, Calendar, FlaskConical, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, RefreshCw, Calendar, ChevronLeft, ChevronRight } from "lucide-react";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
@@ -78,6 +79,10 @@ export default function Scanner() {
   const [totalPlayers, setTotalPlayers] = useState(0);
   const PLAYERS_PER_PAGE = 100;
 
+  // Game filter state
+  const [selectedGame, setSelectedGame] = useState<string>("");
+  const [availableGames, setAvailableGames] = useState<any[]>([]);
+
   const playerId = searchParams.get("playerId");
   const urlSport = searchParams.get("sport");
 
@@ -85,25 +90,49 @@ export default function Scanner() {
     if (urlSport && urlSport !== sport) setSport(urlSport);
   }, [urlSport]);
 
-  const fetchPlayers = async (page: number = 1, limit: number = PLAYERS_PER_PAGE) => {
-    setLoading(true); setError(null);
+  // Fetch available games for the selected sport
+  const fetchGames = async () => {
     try {
       const res = await fetch(EDGE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          operation: "get_players", 
-          sport,
-          page,
-          limit,
-        }),
+        body: JSON.stringify({ operation: "get_games", sport }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAvailableGames(data.games || []);
+      } else {
+        console.error("Failed to fetch games:", data.error);
+      }
+    } catch (err) {
+      console.error("❌ Error fetching games:", err);
+    }
+  };
+
+  const fetchPlayers = async (page: number = 1, gameId?: string) => {
+    setLoading(true); setError(null);
+    try {
+      const body: any = { 
+        operation: "get_players", 
+        sport,
+        page,
+        limit: PLAYERS_PER_PAGE,
+      };
+      if (gameId && gameId !== "all") {
+        body.game_id = gameId;
+      }
+      
+      const res = await fetch(EDGE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       });
       
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (!data.success) throw new Error(data.error || "Failed");
       
-      console.log(`✅ Loaded ${data.players.length}/${data.total} players for ${sport} (page ${page})`);
+      console.log(`✅ Loaded ${data.players?.length || 0}/${data.total || 0} players for ${sport} (page ${page})${gameId ? `, game: ${gameId}` : ''}`);
       setPlayers(data.players || []);
       setTotalPlayers(data.total || 0);
       setCurrentPage(page);
@@ -116,9 +145,25 @@ export default function Scanner() {
     }
   };
 
+  // Initial load and sport / game changes
   useEffect(() => {
-    if (!playerId) fetchPlayers(1);
+    if (!playerId) {
+      fetchGames();
+      fetchPlayers(1, selectedGame === "all" ? undefined : selectedGame);
+    }
   }, [sport]);
+
+  const handleSportChange = (newSport: string) => {
+    setSport(newSport);
+    setFilterProp("points");
+    setSelectedGame("");  // reset game filter
+    // fetchGames will be triggered by the useEffect above
+  };
+
+  const handleGameChange = (gameId: string) => {
+    setSelectedGame(gameId);
+    fetchPlayers(1, gameId === "all" ? undefined : gameId);
+  };
 
   // Sort
   const handleSort = (key: string) => {
@@ -207,7 +252,7 @@ export default function Scanner() {
           </div>
           <div className="flex gap-2">
             <button
-              onClick={() => fetchPlayers(currentPage, PLAYERS_PER_PAGE)}
+              onClick={() => fetchPlayers(currentPage, selectedGame === "all" ? undefined : selectedGame)}
               disabled={loading}
               className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm text-gray-300 transition disabled:opacity-50"
             >
@@ -219,12 +264,27 @@ export default function Scanner() {
 
         {/* Controls */}
         <div className="flex flex-wrap gap-2 mb-4">
-          <Select value={sport} onValueChange={(v) => { setSport(v); setFilterProp("points"); fetchPlayers(1); }}>
+          <Select value={sport} onValueChange={handleSportChange}>
             <SelectTrigger className="w-36 bg-gray-900 border-gray-700 text-yellow-400 text-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="bg-gray-900 border-gray-700">
               {SPORTS.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+
+          {/* ✅ Game Filter Dropdown */}
+          <Select value={selectedGame} onValueChange={handleGameChange}>
+            <SelectTrigger className="w-64 bg-gray-900 border-gray-700 text-gray-300 text-sm">
+              <SelectValue placeholder="All Games (Next 24h)" />
+            </SelectTrigger>
+            <SelectContent className="bg-gray-900 border-gray-700 max-h-64 overflow-y-auto">
+              <SelectItem value="all">All Games (Next 24h)</SelectItem>
+              {availableGames.map((game: any) => (
+                <SelectItem key={game.external_id} value={game.external_id}>
+                  {game.home_team?.abbreviation} vs {game.away_team?.abbreviation} - {new Date(game.game_date).toLocaleDateString()} {game.start_time ? `(${game.start_time})` : ''}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
 
@@ -244,7 +304,7 @@ export default function Scanner() {
               value={search} onChange={e => setSearch(e.target.value)}
               placeholder="Search players, teams..."
               className="pl-9 bg-gray-900 border-gray-700 text-gray-300 text-sm h-9"
-              onKeyDown={(e) => e.key === 'Enter' && fetchPlayers(1)}
+              onKeyDown={(e) => e.key === 'Enter' && fetchPlayers(currentPage, selectedGame === "all" ? undefined : selectedGame)}
             />
           </div>
         </div>
@@ -363,7 +423,7 @@ export default function Scanner() {
               {totalPages > 1 && (
                 <div className="flex justify-between items-center px-4 py-3 border-t border-gray-800 bg-gray-900/30">
                   <button
-                    onClick={() => fetchPlayers(Math.max(1, currentPage - 1))}
+                    onClick={() => fetchPlayers(Math.max(1, currentPage - 1), selectedGame === "all" ? undefined : selectedGame)}
                     disabled={currentPage === 1 || loading}
                     className="flex items-center gap-1 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed transition"
                   >
@@ -373,7 +433,7 @@ export default function Scanner() {
                     Page {currentPage} of {totalPages} ({totalPlayers} total)
                   </span>
                   <button
-                    onClick={() => fetchPlayers(Math.min(totalPages, currentPage + 1))}
+                    onClick={() => fetchPlayers(Math.min(totalPages, currentPage + 1), selectedGame === "all" ? undefined : selectedGame)}
                     disabled={currentPage >= totalPages || loading}
                     className="flex items-center gap-1 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed transition"
                   >
