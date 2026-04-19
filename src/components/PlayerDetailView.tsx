@@ -1,6 +1,6 @@
 // src/components/PlayerDetailView.tsx
 // LinePulse — Black & Gold brand
-// All features: player stats, team stats, gamelog table, bar charts
+// Fixed: L15, L20 buttons always visible + clear feedback for insufficient data
 
 import { useEffect, useState, useMemo } from "react";
 import { ArrowLeft, ChevronRight } from "lucide-react";
@@ -301,7 +301,7 @@ function LineAdjuster({ value, onChange }: { value: number; onChange: (v: number
   );
 }
 
-// ── PERIODS ───────────────────────────────────────────────────
+// ── PERIODS (including L15, L20) ─────────────────────────────
 const PERIODS = [
   { label: "L5", n: 5 },
   { label: "L10", n: 10 },
@@ -341,6 +341,9 @@ function PlayerStatSection({ title, tabs, gameLogs, sport, defaultTab }: {
   const actualGames = activeSlice.length;
   const chartKey = `${tab.key}-${activePeriod}-${line}-${actualGames}`;
 
+  // If the selected period asks for more games than available, show a warning
+  const insufficientData = activePeriod > gameLogs.length;
+
   return (
     <div className="rounded-xl overflow-hidden border" style={{ background: BG_CARD, borderColor: BORDER }}>
       <div className="px-4 py-2.5 border-b flex items-center gap-2" style={{ borderColor: BORDER }}>
@@ -359,11 +362,28 @@ function PlayerStatSection({ title, tabs, gameLogs, sport, defaultTab }: {
               const hr = hitRate(sl, line);
               const av = avg(sl);
               const isActive = activePeriod === n;
+              const hasEnoughGames = sl.length > 0;
               const bg = hr >= 80 ? GREEN_DARK : hr >= 60 ? "#92400e" : "#7f1d1d";
               const fg = hr >= 80 ? "#bbf7d0" : hr >= 60 ? "#fde68a" : "#fecaca";
               const activeBorder = hr >= 80 ? "#22c55e" : hr >= 60 ? GOLD_BRIGHT : RED;
+              // Dim button if not enough games
+              const opacity = hasEnoughGames ? 1 : 0.5;
               return (
-                <button key={n} onClick={() => setActivePeriod(n)} className="px-2.5 py-1.5 rounded-lg text-center transition-all" style={{ background: bg, border: `2px solid ${isActive ? activeBorder : "transparent"}`, outline: isActive ? `1px solid ${activeBorder}44` : "none", minWidth: 64, boxShadow: isActive ? `0 0 8px ${activeBorder}55` : "none", transform: isActive ? "scale(1.05)" : "scale(1)" }}>
+                <button
+                  key={n}
+                  onClick={() => hasEnoughGames && setActivePeriod(n)}
+                  className="px-2.5 py-1.5 rounded-lg text-center transition-all"
+                  style={{
+                    background: bg,
+                    border: `2px solid ${isActive ? activeBorder : "transparent"}`,
+                    outline: isActive ? `1px solid ${activeBorder}44` : "none",
+                    minWidth: 64,
+                    boxShadow: isActive ? `0 0 8px ${activeBorder}55` : "none",
+                    transform: isActive ? "scale(1.05)" : "scale(1)",
+                    opacity,
+                    cursor: hasEnoughGames ? "pointer" : "not-allowed",
+                  }}
+                >
                   <p className="text-[10px] font-bold" style={{ color: fg }}>{label}</p>
                   <p className="text-[11px] font-bold" style={{ color: fg }}>HR {sl.length ? hr : 0}%</p>
                   <p className="text-[10px] opacity-80" style={{ color: fg }}>Avg {sl.length ? av.toFixed(1) : "—"}</p>
@@ -381,7 +401,13 @@ function PlayerStatSection({ title, tabs, gameLogs, sport, defaultTab }: {
             &nbsp;· HR <span className="font-bold" style={{ color: activeHitRate >= 80 ? GREEN : activeHitRate >= 60 ? GOLD : RED }}>{activeHitRate}%</span>
           </span>
         </div>
-        <BarChart key={chartKey} gameLogs={gameLogs.slice(0, activePeriod)} tab={tab} line={line} />
+        {insufficientData ? (
+          <div className="h-52 flex items-center justify-center text-gray-500 text-sm border rounded-lg" style={{ borderColor: BORDER }}>
+            Not enough games for L{activePeriod} (only {gameLogs.length} available)
+          </div>
+        ) : (
+          <BarChart key={chartKey} gameLogs={gameLogs.slice(0, activePeriod)} tab={tab} line={line} />
+        )}
       </div>
     </div>
   );
@@ -429,6 +455,7 @@ function TeamStatsSection({ teamGameLogs, sport, playerTeamName }: { teamGameLog
             : (Number(g.team_score || g.home_score || 0) + Number(g.opp_score || g.away_score || 0)),
   }));
   const chartKey = `${tab.key}-${activePeriod}-${line}-${actualGames}`;
+  const insufficientData = activePeriod > teamGameLogs.length;
 
   if (!teamGameLogs.length) {
     return (
@@ -464,11 +491,27 @@ function TeamStatsSection({ teamGameLogs, sport, playerTeamName }: { teamGameLog
               const hr = hitRate(sl, line);
               const av = avg(sl);
               const isActive = activePeriod === n;
+              const hasEnoughGames = sl.length > 0;
               const bg = hr >= 80 ? GREEN_DARK : hr >= 60 ? "#92400e" : "#7f1d1d";
               const fg = hr >= 80 ? "#bbf7d0" : hr >= 60 ? "#fde68a" : "#fecaca";
               const activeBorder = hr >= 80 ? "#22c55e" : hr >= 60 ? GOLD_BRIGHT : RED;
+              const opacity = hasEnoughGames ? 1 : 0.5;
               return (
-                <button key={n} onClick={() => setActivePeriod(n)} className="px-2.5 py-1.5 rounded-lg text-center transition-all" style={{ background: bg, border: `2px solid ${isActive ? activeBorder : "transparent"}`, outline: isActive ? `1px solid ${activeBorder}44` : "none", minWidth: 64, boxShadow: isActive ? `0 0 8px ${activeBorder}55` : "none", transform: isActive ? "scale(1.05)" : "scale(1)" }}>
+                <button
+                  key={n}
+                  onClick={() => hasEnoughGames && setActivePeriod(n)}
+                  className="px-2.5 py-1.5 rounded-lg text-center transition-all"
+                  style={{
+                    background: bg,
+                    border: `2px solid ${isActive ? activeBorder : "transparent"}`,
+                    outline: isActive ? `1px solid ${activeBorder}44` : "none",
+                    minWidth: 64,
+                    boxShadow: isActive ? `0 0 8px ${activeBorder}55` : "none",
+                    transform: isActive ? "scale(1.05)" : "scale(1)",
+                    opacity,
+                    cursor: hasEnoughGames ? "pointer" : "not-allowed",
+                  }}
+                >
                   <p className="text-[10px] font-bold" style={{ color: fg }}>{label}</p>
                   <p className="text-[11px] font-bold" style={{ color: fg }}>HR {sl.length ? hr : 0}%</p>
                   <p className="text-[10px] opacity-80" style={{ color: fg }}>Avg {sl.length ? av.toFixed(1) : "—"}</p>
@@ -486,7 +529,13 @@ function TeamStatsSection({ teamGameLogs, sport, playerTeamName }: { teamGameLog
             &nbsp;· HR <span className="font-bold" style={{ color: activeHitRate >= 80 ? GREEN : activeHitRate >= 60 ? GOLD : RED }}>{activeHitRate}%</span>
           </span>
         </div>
-        <BarChart key={chartKey} gameLogs={chartLogs} tab={{ key: tab.key, label: tab.label }} line={line} />
+        {insufficientData ? (
+          <div className="h-52 flex items-center justify-center text-gray-500 text-sm border rounded-lg" style={{ borderColor: BORDER }}>
+            Not enough team games for L{activePeriod} (only {teamGameLogs.length} available)
+          </div>
+        ) : (
+          <BarChart key={chartKey} gameLogs={chartLogs} tab={{ key: tab.key, label: tab.label }} line={line} />
+        )}
       </div>
     </div>
   );
@@ -520,7 +569,9 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
         const data = await res.json();
         if (!data.success) throw new Error(data.error || "Failed to load");
         setPlayer(data.player);
-        setGameLogs(data.player.game_logs || []);
+        const logs = data.player.game_logs || [];
+        setGameLogs(logs);
+        console.log(`[PlayerDetail] Loaded ${logs.length} game logs for ${data.player.full_name}`); // Debug
 
         if (data.player.team_id) {
           const teamRes = await fetch(EDGE_URL, {
@@ -532,7 +583,7 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
           if (teamData.success && teamData.games?.length) {
             setTeamGameLogs(teamData.games);
           } else {
-            const fallbackGames = (data.player.game_logs || [])
+            const fallbackGames = logs
               .filter((g: any) => g.team_score !== undefined || g.opp_score !== undefined)
               .map((g: any) => ({ game_date: g.game_date, opponent: g.opponent || "—", team_score: g.team_score ?? null, opp_score: g.opp_score ?? null }));
             setTeamGameLogs(fallbackGames);
