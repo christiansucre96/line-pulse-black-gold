@@ -3,6 +3,7 @@
 // All prop types, user-adjustable lines, hit rate boxes
 // ✅ ADDITIONS: Pagination support for Supabase free tier
 // ✅ ADDITION: Game filter dropdown (next 24h games)
+// ✅ FIXED: Game time formatted nicely (e.g., "7:00 PM")
 
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -273,16 +274,27 @@ export default function Scanner() {
             </SelectContent>
           </Select>
 
-          {/* ✅ Game Filter Dropdown */}
+          {/* ✅ Game Filter Dropdown with formatted time */}
           <Select value={selectedGame} onValueChange={handleGameChange}>
-            <SelectTrigger className="w-64 bg-gray-900 border-gray-700 text-gray-300 text-sm">
+            <SelectTrigger className="w-72 bg-gray-900 border-gray-700 text-gray-300 text-sm">
               <SelectValue placeholder="All Games (Next 24h)" />
             </SelectTrigger>
             <SelectContent className="bg-gray-900 border-gray-700 max-h-64 overflow-y-auto">
               <SelectItem value="all">All Games (Next 24h)</SelectItem>
               {availableGames.map((game: any) => (
                 <SelectItem key={game.external_id} value={game.external_id}>
-                  {game.home_team?.abbreviation} vs {game.away_team?.abbreviation} - {new Date(game.game_date).toLocaleDateString()} {game.start_time ? `(${game.start_time})` : ''}
+                  {game.home_team?.abbreviation} vs {game.away_team?.abbreviation} -{" "}
+                  {game.game_date 
+                    ? `${new Date(game.game_date).toLocaleDateString()} ${
+                        game.start_time 
+                          ? new Date(game.start_time).toLocaleTimeString('en-US', { 
+                              hour: 'numeric', 
+                              minute: '2-digit'
+                            })
+                          : ''
+                      }`
+                    : 'TBD'
+                  }
                 </SelectItem>
               ))}
             </SelectContent>
