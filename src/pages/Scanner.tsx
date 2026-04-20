@@ -4,6 +4,7 @@
 // ✅ ADDITIONS: Pagination support for Supabase free tier
 // ✅ ADDITION: Game filter dropdown (next 24h games)
 // ✅ FIXED: Game time formatted nicely (e.g., "7:00 PM")
+// ✅ ADDED: Rolling stats integration via playerService
 
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -12,6 +13,8 @@ import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Search, RefreshCw, Calendar, ChevronLeft, ChevronRight } from "lucide-react";
+// ✅ NEW: Import rolling stats service
+import { fetchPlayerWithRollingStats } from '@/services/playerService';
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
@@ -86,6 +89,21 @@ export default function Scanner() {
 
   const playerId = searchParams.get("playerId");
   const urlSport = searchParams.get("sport");
+
+  // ✅ NEW: Fetch rolling stats when viewing a player detail
+  const [rollingStats, setRollingStats] = useState<any>(null);
+  useEffect(() => {
+    if (playerId) {
+      fetchPlayerWithRollingStats(playerId, sport)
+        .then(data => {
+          console.log("[RollingStats] Loaded:", data);
+          setRollingStats(data);
+        })
+        .catch(err => console.error("[RollingStats] Failed to fetch:", err));
+    } else {
+      setRollingStats(null);
+    }
+  }, [playerId, sport]);
 
   useEffect(() => {
     if (urlSport && urlSport !== sport) setSport(urlSport);
@@ -227,11 +245,13 @@ export default function Scanner() {
 
   // If viewing player detail
   if (playerId) {
+    // You can pass the rollingStats to PlayerDetailView if needed
     return (
       <PlayerDetailView
         playerId={playerId}
         sport={sport}
         onBack={() => navigate("/scanner")}
+        // rollingStats={rollingStats} // optional: pass as prop
       />
     );
   }
