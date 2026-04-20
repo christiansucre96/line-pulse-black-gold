@@ -1,6 +1,5 @@
 {
   "rewrites": [
-    { "source": "/api/:path*", "destination": "/api/:path*" },
-    { "source": "/((?!api|_next).*)", "destination": "/" }
+    { "source": "/((?!api|_next/static|favicon.ico).*)", "destination": "/" }
   ]
 }
