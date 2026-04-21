@@ -1,11 +1,12 @@
+# .github/workflows/hourly-stats.yml
 name: Hourly NBA Stats Update
 
 on:
   schedule:
-    # Runs every hour at minute 0 (e.g., 1:00, 2:00, 3:00)
+    # Runs every hour at minute 0 (e.g., 1:00, 2:00, 3:00 UTC)
     - cron: '0 * * * *'
   
-  # Allows you to run it manually from the Actions tab
+  # Allows manual trigger from GitHub Actions tab
   workflow_dispatch:
 
 jobs:
@@ -13,8 +14,13 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Trigger Supabase Scraper
+      - name: Trigger Supabase ESPN Scraper
         run: |
           curl -X POST https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/espn-scraper \
             -H "Content-Type: application/json" \
-            -d '{"operation": "scrape_finished", "sport": "nba"}'
+            -d '{"operation": "scrape_finished", "sport": "nba"}' \
+            -w "\nHTTP Status: %{http_code}\n" \
+            -o /tmp/response.json
+        
+      - name: Log Response
+        run: cat /tmp/response.json
