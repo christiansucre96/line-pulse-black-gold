@@ -1,7 +1,6 @@
 // src/components/PlayerCard.tsx
 import React from 'react';
 
-// ✅ TypeScript Interfaces
 export interface RollingStats {
   avg_points: number | null;
   hit_rate: number | null;
@@ -26,12 +25,9 @@ export interface PlayerCardProps {
   className?: string;
 }
 
-// ✅ Main Component
 export function PlayerCard({ player, onClick, className = '' }: PlayerCardProps) {
   const stats = player.rolling_stats;
   const isClickable = !!onClick;
-
-  // Fallback values for display
   const avgPoints = stats?.avg_points ?? '—';
   const hitRate = stats?.hit_rate ?? '—';
   const gamesAnalyzed = stats?.games_analyzed ?? 0;
@@ -58,7 +54,6 @@ export function PlayerCard({ player, onClick, className = '' }: PlayerCardProps)
         }
       }}
     >
-      {/* Header: Name + Position + Team */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <h3 className="font-bold text-white text-lg truncate" title={player.full_name}>
@@ -80,8 +75,6 @@ export function PlayerCard({ player, onClick, className = '' }: PlayerCardProps)
             )}
           </div>
         </div>
-
-        {/* ✅ Rolling Stats Badge */}
         <div className="flex-shrink-0">
           {isComplete ? (
             <span 
@@ -101,9 +94,7 @@ export function PlayerCard({ player, onClick, className = '' }: PlayerCardProps)
         </div>
       </div>
 
-      {/* Stats Grid */}
       <div className="mt-4 grid grid-cols-2 gap-3">
-        {/* Avg Points */}
         <div className="p-3 bg-gray-900/50 rounded-lg">
           <p className="text-xs text-gray-400 mb-1">Avg Points</p>
           <p className="text-xl font-bold text-white">
@@ -111,8 +102,6 @@ export function PlayerCard({ player, onClick, className = '' }: PlayerCardProps)
             <span className="text-sm text-gray-500 ml-1">PPG</span>
           </p>
         </div>
-
-        {/* Hit Rate */}
         <div className="p-3 bg-gray-900/50 rounded-lg">
           <p className="text-xs text-gray-400 mb-1">Hit Rate</p>
           <p className="text-xl font-bold text-white">
@@ -122,14 +111,12 @@ export function PlayerCard({ player, onClick, className = '' }: PlayerCardProps)
         </div>
       </div>
 
-      {/* Helper Message */}
       {stats && !isComplete && gamesAnalyzed > 0 && (
         <p className="text-xs text-gray-500 mt-3 pt-3 border-t border-gray-700/50">
           Stats update hourly • {targetGames - gamesAnalyzed} more games needed for full L{targetGames}
         </p>
       )}
 
-      {/* No Data State */}
       {!stats || gamesAnalyzed === 0 ? (
         <p className="text-xs text-gray-500 mt-3 pt-3 border-t border-gray-700/50 text-center">
           Waiting for game data...
@@ -139,5 +126,4 @@ export function PlayerCard({ player, onClick, className = '' }: PlayerCardProps)
   );
 }
 
-// ✅ Optional: Export a memoized version for performance
 export const MemoizedPlayerCard = React.memo(PlayerCard);
