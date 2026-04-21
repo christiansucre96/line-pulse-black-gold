@@ -6,7 +6,7 @@ on:
   schedule:
     - cron: '0 * * * *'
   
-  # 🎯 Manual trigger with inputs (for backfill/testing)
+  # 🎯 Manual trigger with inputs
   workflow_dispatch:
     inputs:
       operation:
@@ -16,59 +16,86 @@ on:
         type: choice
         options:
           - scrape_today
-          - backfill_historical
+          - backfill_espn_history
       sport:
-        description: 'Sport to process'
+        description: 'Sport'
         required: true
         default: 'nba'
         type: choice
         options:
           - nba
-          - nfl
-          - mlb
-          - nhl
-          - soccer
-      daysBack:
-        description: 'Days to backfill (only for backfill_historical)'
+      startDate:
+        description: 'Start Date (YYYY-MM-DD) - For backfill only'
         required: false
-        default: '30'
-        type: string
+        default: '2026-01-01'
+      endDate:
+        description: 'End Date (YYYY-MM-DD) - For backfill only'
+        required: false
+        default: '2026-04-21'
 
 jobs:
   run-scraper:
     runs-on: ubuntu-latest
     steps:
-      # ✅ Option 1: Scrape TODAY'S finished games via ESPN (default hourly)
+      # ✅ Option 1: Scrape TODAY'S finished games via ESPN (default)
       - name: Scrape Today (ESPN)
         if: github.event_name == 'schedule' || github.event.inputs.operation == 'scrape_today'
         run: |
           echo "🎯 Running: scrape_finished via ESPN"
           RESPONSE=$(curl -s -X POST https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/espn-scraper \
             -H "Content-Type: application/json" \
-            -d "{\"operation\": \"scrape_finished\", \"sport\": \"${{ github.event.inputs.sport || 'nba' }}\"}")
+            -d "{\"operation\": \"scrape_finished\", \"sport\": \"nba\"}")
           echo "✅ Response: $RESPONSE"
-          echo "$RESPONSE" | jq -r '.message // .error // "Done"'
 
-      # ✅ Option 2: Backfill historical data via BallDontLie (manual trigger only)
-      - name: Backfill Historical (BallDontLie)
-        if: github.event.inputs.operation == 'backfill_historical'
+      # ✅ Option 2: Backfill Historical Dates via ESPN (Jan 2026 -> Now)
+      - name: Backfill History (ESPN)
+        if: github.event.inputs.operation == 'backfill_espn_history'
         run: |
-          echo "🎯 Running: backfill_historical via BallDontLie"
-          echo "   Sport: ${{ github.event.inputs.sport || 'nba' }}"
-          echo "   Days: ${{ github.event.inputs.daysBack || '30' }}"
+          echo "🎯 Running: backfill_espn_history"
+          echo "   Start: ${{ github.event.inputs.startDate || '2026-01-01' }}"
+          echo "   End: ${{ github.event.inputs.endDate || '2026-04-21' }}"
           
-          RESPONSE=$(curl -s -X POST https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/balldontlie-scraper \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"operation\": \"backfill_historical\",
-              \"sport\": \"${{ github.event.inputs.sport || 'nba' }}\",
-              \"daysBack\": ${{ github.event.inputs.daysBack || 30 }}
-            }")
+          START="${{ github.event.inputs.startDate || '2026-01-01' }}"
+          END="${{ github.event.inputs.endDate || '2026-04-21' }}"
+          START_TS=$(date -d "$START" +%s)
+          END_TS=$(date -d "$END" +%s)
           
-          echo "✅ Response: $RESPONSE"
-          echo "$RESPONSE" | jq -r '.message // .error // "Done"'
+          # Loop through each day
+          for (( i=START_TS; i<=END_TS; i+=86400 )); do
+            DATE=$(date -d @$i +%Y%m%d)
+            echo "--------------------------------------------------"
+            echo "📅 Processing Date: $DATE"
+            
+            # 1. Get Games List from ESPN
+            GAMES_RESPONSE=$(curl -s "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=$DATE")
+            
+            # Extract game IDs that are finished (simple grep/sed approach for shell)
+            # Note: This requires jq for robustness, but we can try basic extraction if jq fails
+            # Installing jq to make this reliable
+            sudo apt-get update && sudo apt-get install -y jq > /dev/null
+            
+            GAME_IDS=$(echo "$GAMES_RESPONSE" | jq -r '.events[] | select(.status.type.name == "STATUS_FINAL" or .status.type.name == "final") | .id')
+            
+            if [ -z "$GAME_IDS" ]; then
+              echo "   ⚪ No finished games found for $DATE"
+              continue
+            fi
+            
+            echo "   🏀 Found Games: $GAME_IDS"
+            
+            # 2. Scrape each game
+            for GAME_ID in $GAME_IDS; do
+              echo "   📦 Scraping Game: $GAME_ID"
+              SCRAPE_RES=$(curl -s -X POST https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/espn-scraper \
+                -H "Content-Type: application/json" \
+                -d "{\"operation\": \"box_score\", \"game_id\": \"$GAME_ID\", \"sport\": \"nba\"}")
+              
+              echo "      Result: $(echo $SCRAPE_RES | jq -r '.inserted // 0') stats inserted"
+              
+              # Rate limit
+              sleep 1
+            done
+          done
           
-          # Log summary
-          echo ""
-          echo "📊 Summary:"
-          echo "$RESPONSE" | jq -r '"   Games: \(.games_processed // 0) | Stats: \(.stats_inserted // 0) | Players: \(.players_updated // 0)"'
+          echo "--------------------------------------------------"
+          echo "✅ Backfill Complete! Refresh your app to see L20 data."
