@@ -1,26 +1,26 @@
-# .github/workflows/hourly-stats.yml
 name: Hourly NBA Stats Update
 
 on:
   schedule:
-    # Runs every hour at minute 0 (e.g., 1:00, 2:00, 3:00 UTC)
-    - cron: '0 * * * *'
-  
-  # Allows manual trigger from GitHub Actions tab
+    - cron: '0 * * * *'  # Every hour
   workflow_dispatch:
 
 jobs:
   update-stats:
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Trigger Supabase ESPN Scraper
+      # ✅ Step 1: Scrape TODAY'S finished games via ESPN (live data)
+      - name: Scrape Today's Games (ESPN)
         run: |
           curl -X POST https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/espn-scraper \
             -H "Content-Type: application/json" \
-            -d '{"operation": "scrape_finished", "sport": "nba"}' \
-            -w "\nHTTP Status: %{http_code}\n" \
-            -o /tmp/response.json
-        
-      - name: Log Response
-        run: cat /tmp/response.json
+            -d '{"operation": "scrape_finished", "sport": "nba"}'
+
+      # ✅ Step 2: Backfill missing historical data via BallDontLie (only if needed)
+      # Runs weekly to fill gaps, not every hour
+      - name: Backfill Historical Gaps (BallDontLie)
+        if: github.event.schedule == '0 0 * * 0'  # Only run on Sundays at midnight
+        run: |
+          curl -X POST https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/balldontlie-scraper \
+            -H "Content-Type: application/json" \
+            -d '{"operation": "backfill_historical", "sport": "nba", "daysBack": 7}'
