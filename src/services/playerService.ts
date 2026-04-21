@@ -1,5 +1,14 @@
 // src/services/playerService.ts
-import { supabase } from './supabase'; // Your existing Supabase client
+import { supabase } from '../lib/supabase'  // ✅ Correct path: up one folder, then into lib
+
+// ✅ TypeScript Interfaces
+export interface RollingStats {
+  avg_points: number | null;
+  hit_rate: number | null;
+  games_analyzed: number | null;
+  target_games: number | null;
+  is_complete: boolean | null;
+}
 
 export interface PlayerWithRollingStats {
   id: string;
@@ -8,20 +17,15 @@ export interface PlayerWithRollingStats {
   team_abbreviation?: string | null;
   status?: string | null;
   sport?: string;
-  rolling_stats?: {
-    avg_points: number | null;
-    hit_rate: number | null;
-    games_analyzed: number | null;
-    target_games: number | null;
-    is_complete: boolean | null;
-  } | null;
+  rolling_stats?: RollingStats | null;
 }
 
+// ✅ Fetch single player with rolling stats
 export async function fetchPlayerWithRollingStats(
   playerId: string, 
   sport: string = 'nba'
 ): Promise<PlayerWithRollingStats> {
-  const {  data: playerWithStats, error } = await supabase
+  const {  playerWithStats, error } = await supabase
     .from('players')
     .select(`
       *,
@@ -41,11 +45,12 @@ export async function fetchPlayerWithRollingStats(
   return playerWithStats;
 }
 
+// ✅ Fetch multiple players with rolling stats
 export async function fetchPlayersWithRollingStats(
   sport: string = 'nba',
-  limit: number = 50
+  limit: number = 100
 ): Promise<PlayerWithRollingStats[]> {
-  const {  data: players, error } = await supabase
+  const {  players, error } = await supabase
     .from('players')
     .select(`
       *,
