@@ -1,26 +1,74 @@
+# .github/workflows/hourly-stats.yml
 name: Hourly NBA Stats Update
 
 on:
+  # 🕐 Hourly: Scrape today's finished games via ESPN
   schedule:
-    - cron: '0 * * * *'  # Every hour
+    - cron: '0 * * * *'
+  
+  # 🎯 Manual trigger with inputs (for backfill/testing)
   workflow_dispatch:
+    inputs:
+      operation:
+        description: 'Operation to run'
+        required: true
+        default: 'scrape_today'
+        type: choice
+        options:
+          - scrape_today
+          - backfill_historical
+      sport:
+        description: 'Sport to process'
+        required: true
+        default: 'nba'
+        type: choice
+        options:
+          - nba
+          - nfl
+          - mlb
+          - nhl
+          - soccer
+      daysBack:
+        description: 'Days to backfill (only for backfill_historical)'
+        required: false
+        default: '30'
+        type: string
 
 jobs:
-  update-stats:
+  run-scraper:
     runs-on: ubuntu-latest
     steps:
-      # ✅ Step 1: Scrape TODAY'S finished games via ESPN (live data)
-      - name: Scrape Today's Games (ESPN)
+      # ✅ Option 1: Scrape TODAY'S finished games via ESPN (default hourly)
+      - name: Scrape Today (ESPN)
+        if: github.event_name == 'schedule' || github.event.inputs.operation == 'scrape_today'
         run: |
-          curl -X POST https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/espn-scraper \
+          echo "🎯 Running: scrape_finished via ESPN"
+          RESPONSE=$(curl -s -X POST https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/espn-scraper \
             -H "Content-Type: application/json" \
-            -d '{"operation": "scrape_finished", "sport": "nba"}'
+            -d "{\"operation\": \"scrape_finished\", \"sport\": \"${{ github.event.inputs.sport || 'nba' }}\"}")
+          echo "✅ Response: $RESPONSE"
+          echo "$RESPONSE" | jq -r '.message // .error // "Done"'
 
-      # ✅ Step 2: Backfill missing historical data via BallDontLie (only if needed)
-      # Runs weekly to fill gaps, not every hour
-      - name: Backfill Historical Gaps (BallDontLie)
-        if: github.event.schedule == '0 0 * * 0'  # Only run on Sundays at midnight
+      # ✅ Option 2: Backfill historical data via BallDontLie (manual trigger only)
+      - name: Backfill Historical (BallDontLie)
+        if: github.event.inputs.operation == 'backfill_historical'
         run: |
-          curl -X POST https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/balldontlie-scraper \
+          echo "🎯 Running: backfill_historical via BallDontLie"
+          echo "   Sport: ${{ github.event.inputs.sport || 'nba' }}"
+          echo "   Days: ${{ github.event.inputs.daysBack || '30' }}"
+          
+          RESPONSE=$(curl -s -X POST https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/balldontlie-scraper \
             -H "Content-Type: application/json" \
-            -d '{"operation": "backfill_historical", "sport": "nba", "daysBack": 7}'
+            -d "{
+              \"operation\": \"backfill_historical\",
+              \"sport\": \"${{ github.event.inputs.sport || 'nba' }}\",
+              \"daysBack\": ${{ github.event.inputs.daysBack || 30 }}
+            }")
+          
+          echo "✅ Response: $RESPONSE"
+          echo "$RESPONSE" | jq -r '.message // .error // "Done"'
+          
+          # Log summary
+          echo ""
+          echo "📊 Summary:"
+          echo "$RESPONSE" | jq -r '"   Games: \(.games_processed // 0) | Stats: \(.stats_inserted // 0) | Players: \(.players_updated // 0)"'
