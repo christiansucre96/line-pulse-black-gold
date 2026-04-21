@@ -5,6 +5,8 @@
 // ✅ ADDITION: Game filter dropdown (next 24h games)
 // ✅ FIXED: Game time formatted nicely (e.g., "7:00 PM")
 // ✅ ADDED: Rolling stats integration via playerService + L20 badges
+// ✅ FIXED: fetchPlayers correctly uses array return from fetchPlayersWithRollingStats
+// ✅ FIXED: Safe optional chaining in game dropdown
 
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -146,7 +148,7 @@ export default function Scanner() {
     }
   };
 
-  // ✅ UPDATED: Fetch players with rolling stats via playerService
+  // ✅ UPDATED & FIXED: Fetch players with rolling stats via playerService
   const fetchPlayers = async (page: number = 1, gameId?: string) => {
     setLoading(true); setError(null);
     try {
@@ -172,19 +174,23 @@ export default function Scanner() {
       if (!edgeData.success) throw new Error(edgeData.error || "Failed");
       
       // ✅ Then enrich with rolling stats from Supabase
-      const playerIds = (edgeData.players || []).map((p: any) => p.player_id).filter(Boolean);
+      const playerIds = (edgeData.players || [])
+        .map((p: any) => p.player_id)
+        .filter(Boolean);
       
       let enrichedPlayers: ScannerPlayer[] = edgeData.players || [];
       
       if (playerIds.length > 0) {
-        // Fetch rolling stats for these players
-        const {  playersWithStats } = await fetchPlayersWithRollingStats(sport, 500);
-        const statsMap = new Map(playersWithStats.map(p => [p.id, p]));
+        // ✅ fetchPlayersWithRollingStats returns an array directly (not an object)
+        const playersWithStats = await fetchPlayersWithRollingStats(sport, 500);
+        const statsMap = new Map(
+          playersWithStats.map((p: any) => [p.id, p.rolling_stats])
+        );
         
         // Merge rolling stats into edge data
         enrichedPlayers = enrichedPlayers.map((p: any) => ({
           ...p,
-          rolling_stats: p.player_id ? statsMap.get(p.player_id)?.rolling_stats : null
+          rolling_stats: p.player_id ? statsMap.get(p.player_id) : null
         }));
       }
       
@@ -328,14 +334,15 @@ export default function Scanner() {
             </SelectContent>
           </Select>
 
-          {/* ✅ Game Filter Dropdown with formatted time */}
+          {/* ✅ Game Filter Dropdown with formatted time and safe mapping */}
           <Select value={selectedGame} onValueChange={handleGameChange}>
             <SelectTrigger className="w-72 bg-gray-900 border-gray-700 text-gray-300 text-sm">
               <SelectValue placeholder="All Games (Next 24h)" />
             </SelectTrigger>
             <SelectContent className="bg-gray-900 border-gray-700 max-h-64 overflow-y-auto">
               <SelectItem value="all">All Games (Next 24h)</SelectItem>
-              {availableGames.map((game: any) => (
+              {/* ✅ Safe map with optional chaining */}
+              {(availableGames || []).map((game: any) => (
                 <SelectItem key={game.external_id} value={game.external_id}>
                   {game.home_team?.abbreviation} vs {game.away_team?.abbreviation} -{" "}
                   {game.game_date 
