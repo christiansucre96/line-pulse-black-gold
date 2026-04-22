@@ -1,101 +1,164 @@
 # .github/workflows/hourly-stats.yml
-name: Hourly NBA Stats Update
+# Runs hourly to archive finished games → L19+today=L20 rolling window
+# Also supports manual backfill of historical games back to Jan 2026
+# 100% FREE - No paid APIs
+
+name: Hourly Stats Update
 
 on:
-  # 🕐 Hourly: Scrape today's finished games via ESPN
+  # Hourly cron — archives any games that finished in the last hour
   schedule:
     - cron: '0 * * * *'
-  
-  # 🎯 Manual trigger with inputs
+
+  # Manual trigger for backfill or on-demand scrape
   workflow_dispatch:
     inputs:
       operation:
-        description: 'Operation to run'
+        description: 'Operation'
         required: true
-        default: 'scrape_today'
+        default: 'scrape_finished'
         type: choice
         options:
-          - scrape_today
-          - backfill_espn_history
+          - scrape_finished      # archive today's finished games (all sports)
+          - backfill_history     # backfill games from startDate → endDate
       sport:
         description: 'Sport'
         required: true
         default: 'nba'
         type: choice
-        options:
-          - nba
+        options: [nba, mlb, nhl, nfl]
       startDate:
-        description: 'Start Date (YYYY-MM-DD) - For backfill only'
+        description: 'Backfill start (YYYY-MM-DD)'
         required: false
         default: '2026-01-01'
       endDate:
-        description: 'End Date (YYYY-MM-DD) - For backfill only'
+        description: 'Backfill end (YYYY-MM-DD)'
         required: false
         default: '2026-04-21'
 
-jobs:
-  run-scraper:
-    runs-on: ubuntu-latest
-    steps:
-      # ✅ Option 1: Scrape TODAY'S finished games via ESPN (default)
-      - name: Scrape Today (ESPN)
-        if: github.event_name == 'schedule' || github.event.inputs.operation == 'scrape_today'
-        run: |
-          echo "🎯 Running: scrape_finished via ESPN"
-          RESPONSE=$(curl -s -X POST https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/espn-scraper \
-            -H "Content-Type: application/json" \
-            -d "{\"operation\": \"scrape_finished\", \"sport\": \"nba\"}")
-          echo "✅ Response: $RESPONSE"
+env:
+  SCRAPER_URL: https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/espn-scraper
 
-      # ✅ Option 2: Backfill Historical Dates via ESPN (Jan 2026 -> Now)
-      - name: Backfill History (ESPN)
-        if: github.event.inputs.operation == 'backfill_espn_history'
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55   # stay under GitHub's 60 min limit
+
+    steps:
+      # ── Install jq ONCE at the top (not inside any loop) ──────
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      # ════════════════════════════════════════════════════════════
+      # HOURLY CRON — scrape all sports that have games today
+      # ════════════════════════════════════════════════════════════
+      - name: Scrape Today (all sports, cron)
+        if: github.event_name == 'schedule'
         run: |
-          echo "🎯 Running: backfill_espn_history"
-          echo "   Start: ${{ github.event.inputs.startDate || '2026-01-01' }}"
-          echo "   End: ${{ github.event.inputs.endDate || '2026-04-21' }}"
-          
+          echo "🕐 Hourly cron: archiving finished games for all sports"
+          TODAY=$(date -u +%Y-%m-%d)
+          echo "📅 Date: $TODAY"
+
+          for SPORT in nba mlb nhl nfl; do
+            echo ""
+            echo "── $SPORT ──────────────────────────────"
+            RESP=$(curl -sf -X POST "$SCRAPER_URL" \
+              -H "Content-Type: application/json" \
+              -d "{\"operation\":\"scrape_finished\",\"sport\":\"$SPORT\"}" \
+              --max-time 30 || echo '{"error":"curl failed"}')
+            echo "   $RESP" | jq -r '"   ✅ archived: \(.stats_archived // 0), games: \(.games_found // 0)"' 2>/dev/null || echo "   $RESP"
+          done
+
+          echo ""
+          echo "✅ Done. L19+today=L20 rolling window enforced for all sports."
+
+      # ════════════════════════════════════════════════════════════
+      # MANUAL: scrape_finished — same as cron but for one sport
+      # ════════════════════════════════════════════════════════════
+      - name: Scrape Finished (manual)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.operation == 'scrape_finished'
+        run: |
+          SPORT="${{ github.event.inputs.sport }}"
+          echo "🎯 Manual: scrape_finished for $SPORT"
+          RESP=$(curl -sf -X POST "$SCRAPER_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"operation\":\"scrape_finished\",\"sport\":\"$SPORT\"}" \
+            --max-time 30 || echo '{"error":"curl failed"}')
+          echo "$RESP" | jq .
+
+      # ════════════════════════════════════════════════════════════
+      # MANUAL: backfill_history — scrape game-by-game from date range
+      # HOW IT WORKS:
+      #   1. For each date: get ESPN scoreboard → find STATUS_FINAL games
+      #   2. espn-scraper box_score for each game → L19→L20 insert
+      #
+      # PREREQUISITE: Run "Full Ingest" from Admin panel first so
+      #   players exist in DB (box_score needs player external_id → uuid map)
+      # ════════════════════════════════════════════════════════════
+      - name: Backfill History
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.operation == 'backfill_history'
+        run: |
+          SPORT="${{ github.event.inputs.sport || 'nba' }}"
           START="${{ github.event.inputs.startDate || '2026-01-01' }}"
           END="${{ github.event.inputs.endDate || '2026-04-21' }}"
+
+          echo "🎯 Backfill: $SPORT from $START to $END"
+          echo "⚠️  Make sure players are in DB first (Admin → Full Ingest → $SPORT)"
+          echo ""
+
           START_TS=$(date -d "$START" +%s)
           END_TS=$(date -d "$END" +%s)
-          
-          # Loop through each day
-          for (( i=START_TS; i<=END_TS; i+=86400 )); do
-            DATE=$(date -d @$i +%Y%m%d)
-            echo "--------------------------------------------------"
-            echo "📅 Processing Date: $DATE"
-            
-            # 1. Get Games List from ESPN
-            GAMES_RESPONSE=$(curl -s "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=$DATE")
-            
-            # Extract game IDs that are finished (simple grep/sed approach for shell)
-            # Note: This requires jq for robustness, but we can try basic extraction if jq fails
-            # Installing jq to make this reliable
-            sudo apt-get update && sudo apt-get install -y jq > /dev/null
-            
-            GAME_IDS=$(echo "$GAMES_RESPONSE" | jq -r '.events[] | select(.status.type.name == "STATUS_FINAL" or .status.type.name == "final") | .id')
-            
+          TOTAL_INSERTED=0
+          TOTAL_GAMES=0
+
+          for (( TS=$START_TS; TS<=$END_TS; TS+=86400 )); do
+            DATE_FMT=$(date -d "@$TS" +%Y%m%d)    # ESPN format: 20260419
+            DATE_ISO=$(date -d "@$TS" +%Y-%m-%d)  # ISO format:  2026-04-19
+
+            echo "── $DATE_ISO ─────────────────────────────────"
+
+            # Get ESPN scoreboard for this date
+            SCOREBOARD=$(curl -sf \
+              "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=$DATE_FMT" \
+              --max-time 15 || echo '{}')
+
+            # Extract only STATUS_FINAL game IDs
+            # ESPN field: .status.type.completed (bool) or .status.type.name == "STATUS_FINAL"
+            GAME_IDS=$(echo "$SCOREBOARD" | \
+              jq -r '.events[]? | select(.status.type.completed == true) | .id' 2>/dev/null)
+
             if [ -z "$GAME_IDS" ]; then
-              echo "   ⚪ No finished games found for $DATE"
+              echo "   ⚪ No completed games"
+              sleep 1
               continue
             fi
-            
-            echo "   🏀 Found Games: $GAME_IDS"
-            
-            # 2. Scrape each game
+
+            # Count games
+            GAME_COUNT=$(echo "$GAME_IDS" | wc -l)
+            echo "   🏀 $GAME_COUNT completed games found"
+            TOTAL_GAMES=$((TOTAL_GAMES + GAME_COUNT))
+
             for GAME_ID in $GAME_IDS; do
-              echo "   📦 Scraping Game: $GAME_ID"
-              SCRAPE_RES=$(curl -s -X POST https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/espn-scraper \
+              RESP=$(curl -sf -X POST "$SCRAPER_URL" \
                 -H "Content-Type: application/json" \
-                -d "{\"operation\": \"box_score\", \"game_id\": \"$GAME_ID\", \"sport\": \"nba\"}")
-              
-              echo "      Result: $(echo $SCRAPE_RES | jq -r '.inserted // 0') stats inserted"
-              
-              # Rate limit
-              sleep 1
+                -d "{\"operation\":\"box_score\",\"game_id\":\"$GAME_ID\",\"sport\":\"$SPORT\"}" \
+                --max-time 20 || echo '{"inserted":0,"error":"curl failed"}')
+
+              INSERTED=$(echo "$RESP" | jq -r '.inserted // 0' 2>/dev/null || echo 0)
+              TOTAL_INSERTED=$((TOTAL_INSERTED + INSERTED))
+              echo "   📦 Game $GAME_ID: $INSERTED player rows inserted"
+
+              sleep 1  # rate limit between games
             done
+
+            sleep 2  # rate limit between dates
           done
-          
-          echo "--------------------------------------------------"
-          echo "✅ Backfill Complete! Refresh your app to see L20 data."
+
+          echo ""
+          echo "════════════════════════════════════════"
+          echo "✅ Backfill Complete!"
+          echo "   Games processed: $TOTAL_GAMES"
+          echo "   Total rows inserted: $TOTAL_INSERTED"
+          echo "   L19+today=L20 rolling window enforced per player"
+          echo "   Refresh your app to see the data."
+          echo "════════════════════════════════════════"
