@@ -7,6 +7,7 @@
 // ✅ ADDED: Rolling stats integration via playerService + L20 badges
 // ✅ FIXED: fetchPlayers correctly uses array return from fetchPlayersWithRollingStats
 // ✅ FIXED: Safe optional chaining in game dropdown
+// ✅ UPDATED: Table now shows streak and enhanced trend (Strong Over/Over/Under/Strong Under)
 
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -28,7 +29,7 @@ function HRBox({ value }: { value: number | null }) {
   return <div className={`w-9 h-6 rounded text-[10px] font-bold flex items-center justify-center ${bg}`}>{value}%</div>;
 }
 
-// ✅ NEW: L20 Completion Badge Component
+// ✅ NEW: L20 Completion Badge Component (kept for reference, but not used in new table)
 function L20Badge({ gamesAnalyzed, targetGames = 20, isComplete }: { gamesAnalyzed: number | null; targetGames?: number; isComplete: boolean | null }) {
   if (gamesAnalyzed === null || gamesAnalyzed === undefined) {
     return <span className="text-[10px] text-gray-600">—</span>;
@@ -416,29 +417,30 @@ export default function Scanner() {
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full">
+                  {/* Table Headers */}
                   <thead className="border-b border-gray-800">
                     <tr>
-                      <SortTh label="Player"  sk="name" />
+                      <SortTh label="Player" sk="name" />
                       <th className="p-3 text-left text-[11px] font-semibold text-yellow-400/70 uppercase tracking-wider">Game</th>
-                      <SortTh label="Line"    sk="line" />
-                      <SortTh label="Avg L10" sk="avg"  />
-                      <SortTh label="Diff"    sk="diff" />
-                      <SortTh label="L5"      sk="l5"   />
-                      <SortTh label="L10"     sk="l10"  />
-                      <SortTh label="L15"     sk="l15"  />
-                      <SortTh label="L20"     sk="l20"  />
-                      {/* ✅ NEW: Rolling Stats Column */}
+                      <SortTh label="Line" sk="line" />
+                      <SortTh label="Avg L10" sk="avg" />
+                      <SortTh label="Diff" sk="diff" />
+                      <SortTh label="L5" sk="l5" />
+                      <SortTh label="L10" sk="l10" />
+                      <SortTh label="L15" sk="l15" />
+                      <SortTh label="L20" sk="l20" />
                       <th className="p-3 text-left text-[11px] font-semibold text-yellow-400/70 uppercase tracking-wider">Rolling</th>
-                      <th className="p-3 text-left text-[11px] font-semibold text-yellow-400/70 uppercase">Trend</th>
+                      <th className="p-3 text-left text-[11px] font-semibold text-yellow-400/70 uppercase tracking-wider">Trend</th>
                     </tr>
                   </thead>
+
+                  {/* Table Rows */}
                   <tbody>
                     {displayPlayers.map((p, i) => {
                       const pd = p.all_props?.[filterProp] || p.all_props?.[Object.keys(p.all_props || {})[0]];
                       if (!pd) return null;
                       const diff = ((pd.avg_l10 ?? 0) - (pd.line ?? 0));
-                      const rs = p.rolling_stats;
-                      
+
                       return (
                         <tr
                           key={`${p.player_id}-${i}`}
@@ -449,13 +451,11 @@ export default function Scanner() {
                           <td className="p-3">
                             <div className="flex items-center gap-2.5">
                               <div className="w-9 h-9 rounded-full bg-gradient-to-br from-yellow-500 to-yellow-700 flex items-center justify-center text-black text-xs font-bold shrink-0">
-                                {getInitials(p.name || p.full_name || "?")}
+                                {getInitials(p.name)}
                               </div>
                               <div>
-                                <p className="font-semibold text-white text-sm leading-tight">{p.name || p.full_name}</p>
-                                <p className="text-[10px] text-gray-500">
-                                  {p.team_abbr} · {p.position} · {pd.label}
-                                </p>
+                                <p className="font-semibold text-white text-sm leading-tight">{p.name}</p>
+                                <p className="text-[10px] text-gray-500">{p.team_abbr} · {p.position} · {pd.label}</p>
                               </div>
                             </div>
                           </td>
@@ -466,11 +466,11 @@ export default function Scanner() {
                               <p className="text-[10px] text-gray-600">{p.game_date}</p>
                             </div>
                           </td>
-                          {/* Line */}
+                          {/* App-Calculated Line */}
                           <td className="p-3">
                             <span className="text-yellow-400 font-bold text-sm">{pd.line?.toFixed(1)}</span>
                           </td>
-                          {/* Avg */}
+                          {/* Avg L10 */}
                           <td className="p-3 text-gray-300 text-sm">{pd.avg_l10}</td>
                           {/* Diff */}
                           <td className="p-3">
@@ -478,32 +478,44 @@ export default function Scanner() {
                               {diff > 0 ? "+" : ""}{diff.toFixed(1)}
                             </span>
                           </td>
-                          {/* Hit rate boxes */}
+                          {/* Hit Rate Boxes */}
                           <td className="p-3"><HRBox value={pd.l5} /></td>
                           <td className="p-3"><HRBox value={pd.l10} /></td>
                           <td className="p-3"><HRBox value={pd.l15} /></td>
                           <td className="p-3"><HRBox value={pd.l20} /></td>
                           
-                          {/* ✅ NEW: Rolling Stats Badge */}
+                          {/* ✅ ROLLING: Streak Display */}
                           <td className="p-3">
-                            <L20Badge 
-                              gamesAnalyzed={rs?.games_analyzed} 
-                              targetGames={rs?.target_games || 20}
-                              isComplete={rs?.is_complete}
-                            />
-                            {/* Optional: Show server-calculated avg if available */}
-                            {rs?.avg_points !== null && rs?.avg_points !== undefined && (
-                              <p className="text-[10px] text-gray-500 mt-0.5">
-                                Server avg: {rs.avg_points}
-                              </p>
+                            {pd.streak ? (
+                              <span className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-bold ${
+                                pd.streak.type === 'Over' 
+                                  ? 'bg-green-500/20 text-green-400 border border-green-500/30' 
+                                  : 'bg-red-500/20 text-red-400 border border-red-500/30'
+                              }`}>
+                                {pd.streak.type === 'Over' ? '🔺' : '🔻'} {pd.streak.count}
+                              </span>
+                            ) : (
+                              <span className="text-gray-600 text-xs">—</span>
                             )}
                           </td>
                           
-                          {/* Trend */}
+                          {/* ✅ TREND: Strong Over/Over/Under/Strong Under */}
                           <td className="p-3">
-                            <span className={`text-xs font-bold ${pd.trend === 'up' ? 'text-green-400' : pd.trend === 'down' ? 'text-red-400' : 'text-gray-600'}`}>
-                              {pd.trend === 'up' ? '↑ HOT' : pd.trend === 'down' ? '↓ COLD' : '→ FLAT'}
-                            </span>
+                            {(() => {
+                              const trend = pd.trend || 'Neutral';
+                              const styles: Record<string, string> = {
+                                'Strong Over': 'bg-green-500/30 text-green-300 border border-green-500/50',
+                                'Over': 'bg-green-500/10 text-green-400 border border-green-500/30',
+                                'Strong Under': 'bg-red-500/30 text-red-300 border border-red-500/50',
+                                'Under': 'bg-red-500/10 text-red-400 border border-red-500/30',
+                                'Neutral': 'bg-gray-500/10 text-gray-400 border border-gray-500/30'
+                              };
+                              return (
+                                <span className={`inline-flex px-2 py-1 rounded text-xs font-bold ${styles[trend] || styles['Neutral']}`}>
+                                  {trend}
+                                </span>
+                              );
+                            })()}
                           </td>
                         </tr>
                       );
