@@ -8,6 +8,7 @@
 // ✅ FIXED: fetchPlayers correctly uses array return from fetchPlayersWithRollingStats
 // ✅ FIXED: Safe optional chaining in game dropdown
 // ✅ UPDATED: Table now shows streak and enhanced trend (Strong Over/Over/Under/Strong Under)
+// ✅ NEW: Market line input for betting signals (100% free, no APIs)
 
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -29,7 +30,7 @@ function HRBox({ value }: { value: number | null }) {
   return <div className={`w-9 h-6 rounded text-[10px] font-bold flex items-center justify-center ${bg}`}>{value}%</div>;
 }
 
-// ✅ NEW: L20 Completion Badge Component (kept for reference, but not used in new table)
+// ✅ NEW: L20 Completion Badge Component (kept for reference)
 function L20Badge({ gamesAnalyzed, targetGames = 20, isComplete }: { gamesAnalyzed: number | null; targetGames?: number; isComplete: boolean | null }) {
   if (gamesAnalyzed === null || gamesAnalyzed === undefined) {
     return <span className="text-[10px] text-gray-600">—</span>;
@@ -91,7 +92,7 @@ function getInitials(name: string) {
   return (name || "??").split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
 }
 
-// ✅ Extend player type to include rolling stats
+// ✅ Extend player type to include rolling stats + streak/trend
 interface ScannerPlayer extends PlayerWithRollingStats {
   all_props?: Record<string, any>;
   name?: string;
@@ -122,6 +123,9 @@ export default function Scanner() {
   // Game filter state
   const [selectedGame, setSelectedGame] = useState<string>("");
   const [availableGames, setAvailableGames] = useState<any[]>([]);
+
+  // ✅ NEW: Market line input for betting signals
+  const [marketLine, setMarketLine] = useState<number | null>(null);
 
   const playerId = searchParams.get("playerId");
   const urlSport = searchParams.get("sport");
@@ -383,6 +387,24 @@ export default function Scanner() {
           </div>
         </div>
 
+        {/* ✅ NEW: Market Line Input for Betting Signals */}
+        <div className="mb-4 p-3 bg-gray-900/50 rounded-lg border border-gray-700 flex items-center gap-3 flex-wrap">
+          <span className="text-sm text-gray-400 font-medium">📊 Market Line (from sportsbook):</span>
+          <input
+            type="number"
+            step="0.5"
+            placeholder="e.g. 26.5"
+            value={marketLine ?? ""}
+            onChange={(e) => setMarketLine(e.target.value ? parseFloat(e.target.value) : null)}
+            className="w-24 px-3 py-1.5 bg-gray-800 border border-gray-600 rounded text-white text-sm focus:border-blue-500 focus:outline-none"
+          />
+          {marketLine && (
+            <span className="text-xs text-blue-400">
+              Enter the line you see on Stake/DraftKings/etc. → app calculates your edge instantly
+            </span>
+          )}
+        </div>
+
         {/* Error */}
         {error && (
           <div className="mb-4 p-3 bg-red-900/20 border border-red-800 rounded-lg text-red-400 text-sm">
@@ -499,9 +521,44 @@ export default function Scanner() {
                             )}
                           </td>
                           
-                          {/* ✅ TREND: Strong Over/Over/Under/Strong Under */}
+                          {/* ✅ TREND: Betting Signal (Strong Over/Over/Under/Strong Under) */}
                           <td className="p-3">
                             {(() => {
+                              // If user entered a market line, calculate betting signal vs that line
+                              if (marketLine && pd.avg_l10) {
+                                const edge = pd.avg_l10 - marketLine;
+                                const pctEdge = marketLine > 0 ? (edge / marketLine) * 100 : 0;
+                                
+                                let signal = "Neutral";
+                                let colorClass = "bg-gray-500/10 text-gray-400 border border-gray-500/30";
+                                
+                                if (pctEdge >= 10) {
+                                  signal = "🟢 STRONG OVER";
+                                  colorClass = "bg-green-500/30 text-green-300 border border-green-500/50";
+                                } else if (pctEdge >= 3) {
+                                  signal = "🟡 Over";
+                                  colorClass = "bg-green-500/15 text-green-400 border border-green-500/30";
+                                } else if (pctEdge <= -10) {
+                                  signal = "🔴 STRONG UNDER";
+                                  colorClass = "bg-red-500/30 text-red-300 border border-red-500/50";
+                                } else if (pctEdge <= -3) {
+                                  signal = "🟠 Under";
+                                  colorClass = "bg-red-500/15 text-red-400 border border-red-500/30";
+                                }
+                                
+                                return (
+                                  <div className="flex flex-col gap-1">
+                                    <span className={`inline-flex px-2 py-1 rounded text-xs font-bold ${colorClass}`}>
+                                      {signal}
+                                    </span>
+                                    <span className="text-[10px] text-gray-500">
+                                      Edge: {edge > 0 ? "+" : ""}{edge.toFixed(1)} ({pctEdge > 0 ? "+" : ""}{pctEdge.toFixed(1)}%)
+                                    </span>
+                                  </div>
+                                );
+                              }
+                              
+                              // Fallback: show app-calculated trend if no market line entered
                               const trend = pd.trend || 'Neutral';
                               const styles: Record<string, string> = {
                                 'Strong Over': 'bg-green-500/30 text-green-300 border border-green-500/50',
