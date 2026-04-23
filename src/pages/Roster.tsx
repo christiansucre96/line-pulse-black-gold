@@ -66,9 +66,26 @@ export default function Roster() {
           });
         }
 
+        // Sort and enforce max 5 starters per team
         for (const team of Object.values(teamMap)) {
-          team.players.sort((a, b) => ({ starter: 0, bench: 1, injured: 2 }[a.status] - { starter: 0, bench: 1, injured: 2 }[b.status]));
+          // Sort: starters first, then bench, then injured
+          team.players.sort((a, b) => {
+            const statusOrder = { starter: 0, bench: 1, injured: 2 };
+            return statusOrder[a.status] - statusOrder[b.status];
+          });
+
+          // ✅ SAFETY: If more than 5 starters, demote extras to bench
+          let starterCount = 0;
+          for (const player of team.players) {
+            if (player.status === 'starter') {
+              starterCount++;
+              if (starterCount > 5) {
+                player.status = 'bench'; // Demote extra starters
+              }
+            }
+          }
         }
+
         setTeams(Object.values(teamMap).sort((a, b) => a.abbreviation.localeCompare(b.abbreviation)));
       } else {
         setTeams([]);
