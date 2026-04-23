@@ -8,20 +8,33 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { 
-  TrendingUp, 
-  Plus, 
-  X, 
-  Sparkles, 
-  Trophy, 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
+  TrendingUp,
+  Plus,
+  X,
+  Sparkles,
+  Trophy,
   AlertCircle,
   ChevronRight,
   Trash2,
   RefreshCw,
   Zap,
   Filter,
-  Star,
-  TrendingDown
+  ChevronDown,
+  ChevronUp,
+  ListChecks,
 } from "lucide-react";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
@@ -36,17 +49,21 @@ interface Player {
   all_props: Record<string, any>;
 }
 
-interface ParlayLeg {
+interface PropPick {
   id: string;
   player: Player;
   propType: string;
+  propLabel: string;
   line: number;
   confidence: number;
   odds: number;
   reasoning: string;
   hitRate: number;
   streak: { type: string; count: number } | null;
+  avgL10: number;
 }
+
+interface ParlayLeg extends PropPick {}
 
 interface Game {
   external_id: string;
@@ -56,6 +73,33 @@ interface Game {
   start_time: string;
 }
 
+// Prop type labels for display
+const PROP_LABELS: Record<string, string> = {
+  points: "Points",
+  rebounds: "Rebounds",
+  assists: "Assists",
+  three_pointers_made: "3PM",
+  steals: "Steals",
+  blocks: "Blocks",
+  turnovers: "Turnovers",
+  minutes_played: "Minutes",
+  combo_pra: "PRA",
+  combo_pr: "P+R",
+  combo_pa: "P+A",
+  passing_yards: "Pass Yds",
+  rushing_yards: "Rush Yds",
+  receiving_yards: "Rec Yds",
+  passing_tds: "Pass TDs",
+  receptions: "Receptions",
+  hits: "Hits",
+  runs: "Runs",
+  rbi: "RBI",
+  home_runs: "HR",
+  goals: "Goals",
+  assists_hockey: "Assists",
+  shots_on_goal: "SOG",
+};
+
 export default function ParlayBuilder() {
   const navigate = useNavigate();
   const [sport, setSport] = useState("nba");
@@ -63,13 +107,18 @@ export default function ParlayBuilder() {
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(false);
   const [parlayLegs, setParlayLegs] = useState<ParlayLeg[]>([]);
-  const [allSuggestions, setAllSuggestions] = useState<ParlayLeg[]>([]);
+  const [allPropPicks, setAllPropPicks] = useState<PropPick[]>([]);
   const [selectedGame, setSelectedGame] = useState<string>("all");
-  
-  // ✅ NEW: Filter settings - let users control strictness
-  const [minConfidence, setMinConfidence] = useState(50); // Lowered from 70 to 50
+
+  // ✅ NEW: Parlay size selector (1-5 legs)
+  const [parlaySize, setParlaySize] = useState(3);
+
+  // Filter settings
+  const [minConfidence, setMinConfidence] = useState(40);
   const [showOnlyHighConfidence, setShowOnlyHighConfidence] = useState(false);
   const [searchPlayer, setSearchPlayer] = useState("");
+  const [selectedPropFilter, setSelectedPropFilter] = useState<string>("all");
+  const [expandedPlayers, setExpandedPlayers] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetchGames();
@@ -100,20 +149,20 @@ export default function ParlayBuilder() {
   const fetchPlayersForGames = async () => {
     setLoading(true);
     try {
-      const gameIds = selectedGame === "all" 
+      const gameIds = selectedGame === "all"
         ? games.map(g => g.external_id)
         : [selectedGame];
 
       const allPlayers: Player[] = [];
-      
+
       for (const gameId of gameIds) {
         const res = await fetch(EDGE_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ 
-            operation: "get_players", 
+          body: JSON.stringify({
+            operation: "get_players",
             sport,
-            game_id: gameId 
+            game_id: gameId
           }),
         });
         const data = await res.json();
@@ -121,9 +170,9 @@ export default function ParlayBuilder() {
           allPlayers.push(...(data.players || []));
         }
       }
-      
+
       setPlayers(allPlayers);
-      generateAllSuggestions(allPlayers);
+      generateAllPropPicks(allPlayers);
     } catch (err) {
       console.error("Error fetching players:", err);
     } finally {
@@ -131,9 +180,9 @@ export default function ParlayBuilder() {
     }
   };
 
-  // 🤖 AI LOGIC: Generate ALL picks (not just high confidence)
-  const generateAllSuggestions = (playerList: Player[]) => {
-    const suggestions: ParlayLeg[] = [];
+  // 🤖 AI LOGIC: Generate ALL prop picks for ALL players
+  const generateAllPropPicks = (playerList: Player[]) => {
+    const picks: PropPick[] = [];
 
     for (const player of playerList) {
       if (!player.all_props) continue;
@@ -141,16 +190,16 @@ export default function ParlayBuilder() {
       for (const [propType, propData] of Object.entries(player.all_props)) {
         const data = propData as any;
         if (!data?.line) continue;
-        
+
         let confidence = 0;
         let reasoning: string[] = [];
-        
+
         // Factor 1: Hit Rate (40% weight)
         const hrScore = (data.l10 || 0) / 100;
         confidence += hrScore * 40;
         if (data.l10 >= 80) reasoning.push(`🔥 ${data.l10}% HR`);
         else if (data.l10 >= 60) reasoning.push(`📊 ${data.l10}% HR`);
-        
+
         // Factor 2: Streak (25% weight)
         if (data.streak) {
           if (data.streak.type === 'Over') {
@@ -163,7 +212,7 @@ export default function ParlayBuilder() {
             reasoning.push(`📉 Under ${data.streak.count}`);
           }
         }
-        
+
         // Factor 3: Avg vs Line (25% weight)
         if (data.avg_l10 && data.line) {
           const diff = data.avg_l10 - data.line;
@@ -177,40 +226,36 @@ export default function ParlayBuilder() {
           } else if (pctDiff >= 3) {
             confidence += 8;
             reasoning.push(`↗️ +${pctDiff.toFixed(0)}%`);
-          } else if (pctDiff <= -8) {
-            reasoning.push(`↘️ ${pctDiff.toFixed(0)}%`);
           }
         }
-        
-        // Factor 4: Sample Size (10% weight)
-        if (data.games_n >= 20) {
-          confidence += 10;
-        } else if (data.games_n >= 15) {
-          confidence += 7;
-        } else if (data.games_n >= 10) {
-          confidence += 5;
-        }
 
-        // ✅ LOWERED THRESHOLD: Show picks with 40%+ confidence (was 70%)
+        // Factor 4: Sample Size (10% weight)
+        if (data.games_n >= 20) confidence += 10;
+        else if (data.games_n >= 15) confidence += 7;
+        else if (data.games_n >= 10) confidence += 5;
+
+        // Only include if confidence >= 40%
         if (confidence >= 40) {
-          suggestions.push({
+          picks.push({
             id: `${player.player_id}-${propType}`,
             player,
             propType,
+            propLabel: PROP_LABELS[propType] || propType,
             line: data.line,
             confidence: Math.round(confidence),
             odds: calculateOdds(confidence),
             reasoning: reasoning.join(" • ") || "Statistical edge",
             hitRate: data.l10 || 0,
             streak: data.streak || null,
+            avgL10: data.avg_l10 || 0,
           });
         }
       }
     }
 
     // Sort by confidence (highest first)
-    suggestions.sort((a, b) => b.confidence - a.confidence);
-    setAllSuggestions(suggestions);
+    picks.sort((a, b) => b.confidence - a.confidence);
+    setAllPropPicks(picks);
   };
 
   const calculateOdds = (probability: number): number => {
@@ -223,50 +268,130 @@ export default function ParlayBuilder() {
     return -100;
   };
 
-  // ✅ Filter suggestions based on user settings
-  const filteredSuggestions = useMemo(() => {
-    let filtered = [...allSuggestions];
-    
+  // ✅ Filter picks based on user settings
+  const filteredPicks = useMemo(() => {
+    let filtered = [...allPropPicks];
+
     // Filter by confidence threshold
     if (showOnlyHighConfidence) {
-      filtered = filtered.filter(s => s.confidence >= 70);
+      filtered = filtered.filter(p => p.confidence >= 70);
     } else {
-      filtered = filtered.filter(s => s.confidence >= minConfidence);
+      filtered = filtered.filter(p => p.confidence >= minConfidence);
     }
-    
+
+    // Filter by prop type
+    if (selectedPropFilter !== "all") {
+      filtered = filtered.filter(p => p.propType === selectedPropFilter);
+    }
+
     // Filter by search
     if (searchPlayer.trim()) {
       const search = searchPlayer.toLowerCase();
-      filtered = filtered.filter(s => 
-        s.player.name.toLowerCase().includes(search) ||
-        s.player.team_abbr.toLowerCase().includes(search) ||
-        s.propType.toLowerCase().includes(search)
+      filtered = filtered.filter(p =>
+        p.player.name.toLowerCase().includes(search) ||
+        p.player.team_abbr.toLowerCase().includes(search) ||
+        p.propLabel.toLowerCase().includes(search)
       );
     }
-    
-    return filtered;
-  }, [allSuggestions, minConfidence, showOnlyHighConfidence, searchPlayer]);
 
-  const addToParlay = (suggestion: ParlayLeg) => {
+    return filtered;
+  }, [allPropPicks, minConfidence, showOnlyHighConfidence, selectedPropFilter, searchPlayer]);
+
+  // ✅ Group picks by player for collapsible display
+  const picksByPlayer = useMemo(() => {
+    const grouped: Record<string, PropPick[]> = {};
+    for (const pick of filteredPicks) {
+      if (!grouped[pick.player.player_id]) {
+        grouped[pick.player.player_id] = [];
+      }
+      grouped[pick.player.player_id].push(pick);
+    }
+    // Sort each player's props by confidence
+    for (const playerId of Object.keys(grouped)) {
+      grouped[playerId].sort((a, b) => b.confidence - a.confidence);
+    }
+    return grouped;
+  }, [filteredPicks]);
+
+  const togglePlayerExpanded = (playerId: string) => {
+    const newExpanded = new Set(expandedPlayers);
+    if (newExpanded.has(playerId)) {
+      newExpanded.delete(playerId);
+    } else {
+      newExpanded.add(playerId);
+    }
+    setExpandedPlayers(newExpanded);
+  };
+
+  const addToParlay = (pick: PropPick) => {
     if (parlayLegs.length >= 5) {
       alert("Maximum 5 legs per parlay");
       return;
     }
-    if (parlayLegs.find(leg => leg.id === suggestion.id)) return;
-    setParlayLegs([...parlayLegs, suggestion]);
+    if (parlayLegs.find(leg => leg.id === pick.id)) return;
+    setParlayLegs([...parlayLegs, pick]);
   };
 
   const removeFromParlay = (id: string) => {
     setParlayLegs(parlayLegs.filter(leg => leg.id !== id));
   };
 
+  // ✅ AI Auto-Pick: Select exactly parlaySize number of high-confidence picks
   const autoPick = () => {
-    const topPicks = filteredSuggestions.slice(0, 3);
-    if (topPicks.length >= 1) {
-      setParlayLegs(topPicks);
-    } else {
-      alert("No picks available with current filters");
+    const availablePicks = filteredPicks.filter(
+      p => !parlayLegs.find(l => l.id === p.id)
+    );
+
+    if (availablePicks.length < parlaySize) {
+      alert(`Only ${availablePicks.length} picks available. Need ${parlaySize} for auto-pick.`);
+      return;
     }
+
+    // Pick top N by confidence
+    const topPicks = availablePicks.slice(0, parlaySize);
+    setParlayLegs([...parlayLegs, ...topPicks]);
+  };
+
+  // ✅ AI Smart Pick: Pick diverse props (not all same player)
+  const smartPick = () => {
+    const availablePicks = filteredPicks.filter(
+      p => !parlayLegs.find(l => l.id === p.id)
+    );
+
+    if (availablePicks.length < parlaySize) {
+      alert(`Only ${availablePicks.length} picks available.`);
+      return;
+    }
+
+    // Smart selection: avoid same player, diversify prop types
+    const selected: PropPick[] = [];
+    const selectedPlayers = new Set<string>();
+    const selectedProps = new Set<string>();
+
+    for (const pick of availablePicks) {
+      if (selected.length >= parlaySize) break;
+
+      // Prefer different players and prop types
+      const playerPenalty = selectedPlayers.has(pick.player.player_id) ? -10 : 0;
+      const propPenalty = selectedProps.has(pick.propType) ? -5 : 0;
+      const adjustedConfidence = pick.confidence + playerPenalty + propPenalty;
+
+      if (adjustedConfidence >= 50) {
+        selected.push(pick);
+        selectedPlayers.add(pick.player.player_id);
+        selectedProps.add(pick.propType);
+      }
+    }
+
+    // Fallback: just take top N if smart pick didn't get enough
+    if (selected.length < parlaySize) {
+      const remaining = availablePicks
+        .filter(p => !selected.find(s => s.id === p.id))
+        .slice(0, parlaySize - selected.length);
+      selected.push(...remaining);
+    }
+
+    setParlayLegs([...parlayLegs, ...selected]);
   };
 
   const parlayOdds = useMemo(() => {
@@ -307,6 +432,15 @@ export default function ParlayBuilder() {
     return "bg-gray-500/20 border-gray-500/50";
   };
 
+  // Available prop types for filter dropdown
+  const availablePropTypes = useMemo(() => {
+    const types = new Set<string>();
+    for (const pick of allPropPicks) {
+      types.add(pick.propType);
+    }
+    return Array.from(types).sort();
+  }, [allPropPicks]);
+
   return (
     <DashboardLayout>
       <div className="p-6 max-w-7xl mx-auto">
@@ -317,35 +451,73 @@ export default function ParlayBuilder() {
             ⚡ AI Parlay Builder
           </h1>
           <p className="text-gray-400">
-            Build smart parlays • {allSuggestions.length} picks available • You decide
+            Build smart parlays • {allPropPicks.length} prop picks available • You decide
           </p>
         </div>
 
-        {/* ✅ NEW: Filter Controls */}
+        {/* ✅ NEW: Filter Controls + Parlay Size */}
         <Card className="mb-6 bg-gray-900/50 border-gray-700">
           <CardContent className="p-4 space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-4">
               <div className="flex items-center gap-3">
                 <Filter className="w-5 h-5 text-yellow-400" />
-                <h3 className="font-bold text-white">Filters</h3>
+                <h3 className="font-bold text-white">Filters & Settings</h3>
               </div>
-              
+
               <div className="flex items-center gap-4 flex-wrap">
-                {/* Search Player */}
-                <div className="relative">
-                  <Input
-                    type="text"
-                    placeholder="Search player..."
-                    value={searchPlayer}
-                    onChange={(e) => setSearchPlayer(e.target.value)}
-                    className="w-48 bg-gray-800 border-gray-700 text-white"
-                  />
+                {/* ✅ Parlay Size Selector */}
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm text-gray-400 whitespace-nowrap">
+                    Parlay Size:
+                  </Label>
+                  <Select
+                    value={parlaySize.toString()}
+                    onValueChange={(val) => setParlaySize(Number(val))}
+                  >
+                    <SelectTrigger className="w-20 bg-gray-800 border-gray-700 text-white">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-gray-900 border-gray-700">
+                      {[1, 2, 3, 4, 5].map(num => (
+                        <SelectItem key={num} value={num.toString()}>
+                          {num} Leg{num > 1 ? 's' : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
+
+                {/* Search Player */}
+                <Input
+                  type="text"
+                  placeholder="Search player/prop..."
+                  value={searchPlayer}
+                  onChange={(e) => setSearchPlayer(e.target.value)}
+                  className="w-48 bg-gray-800 border-gray-700 text-white"
+                />
+
+                {/* Prop Type Filter */}
+                <Select
+                  value={selectedPropFilter}
+                  onValueChange={setSelectedPropFilter}
+                >
+                  <SelectTrigger className="w-40 bg-gray-800 border-gray-700 text-white">
+                    <SelectValue placeholder="All Props" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-gray-900 border-gray-700 max-h-64">
+                    <SelectItem value="all">All Props</SelectItem>
+                    {availablePropTypes.map(prop => (
+                      <SelectItem key={prop} value={prop}>
+                        {PROP_LABELS[prop] || prop}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
 
                 {/* Confidence Slider */}
                 <div className="flex items-center gap-3">
                   <Label className="text-sm text-gray-400 whitespace-nowrap">
-                    Min Confidence: <span className="text-yellow-400 font-bold">{minConfidence}%</span>
+                    Min: <span className="text-yellow-400 font-bold">{minConfidence}%</span>
                   </Label>
                   <input
                     type="range"
@@ -355,11 +527,11 @@ export default function ParlayBuilder() {
                     value={minConfidence}
                     onChange={(e) => setMinConfidence(Number(e.target.value))}
                     disabled={showOnlyHighConfidence}
-                    className="w-32 accent-yellow-500 disabled:opacity-50"
+                    className="w-24 accent-yellow-500 disabled:opacity-50"
                   />
                 </div>
 
-                {/* High Confidence Only Toggle */}
+                {/* High Confidence Toggle */}
                 <div className="flex items-center gap-2">
                   <Switch
                     checked={showOnlyHighConfidence}
@@ -367,35 +539,55 @@ export default function ParlayBuilder() {
                     id="high-confidence"
                   />
                   <Label htmlFor="high-confidence" className="text-sm text-gray-400 cursor-pointer">
-                    High Confidence Only (70%+)
+                    High Only (70%+)
                   </Label>
                 </div>
               </div>
             </div>
 
-            {/* Results Count */}
-            <div className="flex items-center justify-between pt-3 border-t border-gray-800">
+            {/* Results Count + Auto-Pick Buttons */}
+            <div className="flex items-center justify-between pt-3 border-t border-gray-800 flex-wrap gap-2">
               <p className="text-sm text-gray-400">
-                Showing <span className="text-white font-bold">{filteredSuggestions.length}</span> of <span className="text-white font-bold">{allSuggestions.length}</span> picks
+                Showing <span className="text-white font-bold">{filteredPicks.length}</span> of <span className="text-white font-bold">{allPropPicks.length}</span> picks
               </p>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setMinConfidence(50);
-                  setShowOnlyHighConfidence(false);
-                  setSearchPlayer("");
-                }}
-                className="border-gray-700 text-gray-300 text-xs"
-              >
-                Reset Filters
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setMinConfidence(40);
+                    setShowOnlyHighConfidence(false);
+                    setSearchPlayer("");
+                    setSelectedPropFilter("all");
+                  }}
+                  className="border-gray-700 text-gray-300 text-xs"
+                >
+                  Reset
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={autoPick}
+                  className="bg-yellow-500 hover:bg-yellow-600 text-black font-bold text-xs"
+                >
+                  <Sparkles className="w-3 h-3 mr-1" />
+                  Auto-Pick {parlaySize}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={smartPick}
+                  className="border-blue-500/50 text-blue-400 hover:bg-blue-500/10 text-xs"
+                >
+                  <ListChecks className="w-3 h-3 mr-1" />
+                  Smart Pick
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
 
         {/* AI Suggestion Banner */}
-        {filteredSuggestions.length > 0 && (
+        {filteredPicks.length > 0 && (
           <div className="mb-6 p-4 bg-gradient-to-r from-yellow-900/30 to-orange-900/30 border border-yellow-600/50 rounded-xl">
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div className="flex items-center gap-3">
@@ -405,28 +597,38 @@ export default function ParlayBuilder() {
                     🤖 AI Suggestions Ready
                   </p>
                   <p className="text-sm text-gray-400">
-                    Top pick: {filteredSuggestions[0]?.player.name} - {filteredSuggestions[0]?.confidence}% confidence
+                    Top pick: {filteredPicks[0]?.player.name} - {filteredPicks[0]?.propLabel} ({filteredPicks[0]?.confidence}% confidence)
                   </p>
                 </div>
               </div>
-              <Button
-                onClick={autoPick}
-                className="bg-yellow-500 hover:bg-yellow-600 text-black font-bold"
-              >
-                <Sparkles className="w-4 h-4 mr-2" />
-                AUTO-PICK TOP 3
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={autoPick}
+                  className="bg-yellow-500 hover:bg-yellow-600 text-black font-bold"
+                >
+                  <Sparkles className="w-4 h-4 mr-2" />
+                  AUTO-PICK {parlaySize}
+                </Button>
+                <Button
+                  onClick={smartPick}
+                  variant="outline"
+                  className="border-blue-500/50 text-blue-400 hover:bg-blue-500/10"
+                >
+                  <ListChecks className="w-4 h-4 mr-2" />
+                  SMART PICK
+                </Button>
+              </div>
             </div>
           </div>
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left: All Picks */}
+          {/* Left: All Prop Picks (Grouped by Player) */}
           <div className="lg:col-span-2 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold text-white flex items-center gap-2">
                 <TrendingUp className="w-5 h-5 text-green-400" />
-                Available Picks
+                Available Prop Picks
               </h2>
               <Button
                 variant="outline"
@@ -445,7 +647,7 @@ export default function ParlayBuilder() {
                 <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-3 text-yellow-400" />
                 <p className="text-gray-400">Analyzing player data...</p>
               </div>
-            ) : filteredSuggestions.length === 0 ? (
+            ) : filteredPicks.length === 0 ? (
               <Card className="bg-gray-900/50 border-gray-700">
                 <CardContent className="p-8 text-center">
                   <AlertCircle className="w-12 h-12 mx-auto mb-3 text-gray-600" />
@@ -456,6 +658,7 @@ export default function ParlayBuilder() {
                       setMinConfidence(40);
                       setShowOnlyHighConfidence(false);
                       setSearchPlayer("");
+                      setSelectedPropFilter("all");
                     }}
                     className="mt-4 border-gray-700 text-gray-300"
                   >
@@ -465,76 +668,108 @@ export default function ParlayBuilder() {
               </Card>
             ) : (
               <div className="space-y-3">
-                {filteredSuggestions.map((suggestion) => (
-                  <Card 
-                    key={suggestion.id}
-                    className={`bg-gray-900/50 border hover:border-yellow-500/50 transition-all cursor-pointer ${getConfidenceBg(suggestion.confidence)}`}
-                    onClick={() => addToParlay(suggestion)}
-                  >
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-4">
-                          <div className={`w-12 h-12 rounded-full bg-gradient-to-br from-yellow-500 to-orange-600 flex items-center justify-center text-black font-bold text-sm shrink-0`}>
-                            {suggestion.player.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2)}
-                          </div>
-                          <div className="min-w-0">
-                            <h3 className="font-bold text-white text-lg truncate">
-                              {suggestion.player.name}
-                            </h3>
-                            <p className="text-sm text-gray-400">
-                              {suggestion.player.team_abbr} vs {suggestion.player.opponent} • {suggestion.propType}
-                            </p>
-                            <div className="flex items-center gap-2 mt-2 flex-wrap">
-                              <Badge variant="outline" className={`text-xs ${
-                                suggestion.hitRate >= 80 ? 'border-green-500 text-green-400' :
-                                suggestion.hitRate >= 60 ? 'border-yellow-500 text-yellow-400' :
-                                'border-gray-500 text-gray-400'
-                              }`}>
-                                HR: {suggestion.hitRate}%
-                              </Badge>
-                              <Badge variant="outline" className="text-xs border-blue-500 text-blue-400">
-                                Line: {suggestion.line}
-                              </Badge>
-                              {suggestion.streak && (
-                                <Badge variant="outline" className={`text-xs ${
-                                  suggestion.streak.type === 'Over'
-                                    ? 'border-green-500 text-green-400'
-                                    : 'border-red-500 text-red-400'
-                                }`}>
-                                  {suggestion.streak.type === 'Over' ? '🔺' : '🔻'} {suggestion.streak.count}
-                                </Badge>
-                              )}
+                {/* Grouped by Player with Collapsible Props */}
+                {Object.entries(picksByPlayer).map(([playerId, playerPicks]) => {
+                  const player = playerPicks[0].player;
+                  const isExpanded = expandedPlayers.has(playerId);
+
+                  return (
+                    <Collapsible
+                      key={playerId}
+                      open={isExpanded}
+                      onOpenChange={() => togglePlayerExpanded(playerId)}
+                    >
+                      <Card className={`bg-gray-900/50 border hover:border-yellow-500/50 transition-all ${getConfidenceBg(playerPicks[0].confidence)}`}>
+                        {/* Player Header (always visible) */}
+                        <CollapsibleTrigger asChild>
+                          <CardContent className="p-4 cursor-pointer">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 rounded-full bg-gradient-to-br from-yellow-500 to-orange-600 flex items-center justify-center text-black font-bold text-sm shrink-0">
+                                  {player.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2)}
+                                </div>
+                                <div className="min-w-0">
+                                  <h3 className="font-bold text-white text-lg truncate">
+                                    {player.name}
+                                  </h3>
+                                  <p className="text-sm text-gray-400">
+                                    {player.team_abbr} vs {player.opponent} • {playerPicks.length} props
+                                  </p>
+                                  <div className="flex items-center gap-2 mt-2 flex-wrap">
+                                    {playerPicks.slice(0, 3).map(pick => (
+                                      <Badge key={pick.propType} variant="outline" className="text-xs border-gray-500 text-gray-400">
+                                        {pick.propLabel}: {pick.line}
+                                      </Badge>
+                                    ))}
+                                    {playerPicks.length > 3 && (
+                                      <Badge variant="outline" className="text-xs border-gray-500 text-gray-400">
+                                        +{playerPicks.length - 3} more
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-4 shrink-0">
+                                <div className="text-right">
+                                  <div className={`text-xl font-bold ${getConfidenceColor(playerPicks[0].confidence)}`}>
+                                    {playerPicks[0].confidence}%
+                                  </div>
+                                  <div className="text-[10px] text-gray-500">Top Prop</div>
+                                </div>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="text-gray-400"
+                                >
+                                  {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                                </Button>
+                              </div>
                             </div>
+                          </CardContent>
+                        </CollapsibleTrigger>
+
+                        {/* Expanded: Show All Props for This Player */}
+                        <CollapsibleContent>
+                          <div className="px-4 pb-4 space-y-2 border-t border-gray-800 pt-3">
+                            {playerPicks.map(pick => (
+                              <div
+                                key={pick.id}
+                                className="flex items-center justify-between p-3 bg-gray-800/50 rounded-lg border border-gray-700 hover:border-yellow-500/50 transition-all"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <Badge variant="outline" className={`text-xs ${getConfidenceBg(pick.confidence)} ${getConfidenceColor(pick.confidence)}`}>
+                                    {pick.confidence}%
+                                  </Badge>
+                                  <div>
+                                    <p className="font-medium text-white text-sm">
+                                      {pick.propLabel} Over {pick.line}
+                                    </p>
+                                    <p className="text-[10px] text-gray-400">
+                                      Avg: {pick.avgL10} • HR: {pick.hitRate}% • {pick.reasoning}
+                                    </p>
+                                  </div>
+                                </div>
+                                <Button
+                                  size="sm"
+                                  onClick={(e) => { e.stopPropagation(); addToParlay(pick); }}
+                                  disabled={parlayLegs.length >= 5 || parlayLegs.find(l => l.id === pick.id)}
+                                  className={`${
+                                    pick.confidence >= 70 ? 'bg-green-600 hover:bg-green-700' :
+                                    pick.confidence >= 60 ? 'bg-yellow-600 hover:bg-yellow-700' :
+                                    'bg-gray-600 hover:bg-gray-700'
+                                  } disabled:opacity-50`}
+                                >
+                                  <Plus className="w-4 h-4" />
+                                </Button>
+                              </div>
+                            ))}
                           </div>
-                        </div>
-                        
-                        <div className="flex items-center gap-4 shrink-0">
-                          <div className="text-right">
-                            <div className={`text-2xl font-bold ${getConfidenceColor(suggestion.confidence)}`}>
-                              {suggestion.confidence}%
-                            </div>
-                            <div className="text-xs text-gray-500">Confidence</div>
-                            <div className="text-[10px] text-gray-400 mt-1 max-w-[150px] truncate">
-                              {suggestion.reasoning}
-                            </div>
-                          </div>
-                          <Button
-                            size="sm"
-                            onClick={(e) => { e.stopPropagation(); addToParlay(suggestion); }}
-                            disabled={parlayLegs.length >= 5 || parlayLegs.find(l => l.id === suggestion.id)}
-                            className={`${
-                              suggestion.confidence >= 70 ? 'bg-green-600 hover:bg-green-700' :
-                              suggestion.confidence >= 60 ? 'bg-yellow-600 hover:bg-yellow-700' :
-                              'bg-gray-600 hover:bg-gray-700'
-                            } disabled:opacity-50 shrink-0`}
-                          >
-                            <Plus className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+                        </CollapsibleContent>
+                      </Card>
+                    </Collapsible>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -545,23 +780,19 @@ export default function ParlayBuilder() {
               <CardHeader className="pb-3">
                 <CardTitle className="text-white flex items-center gap-2">
                   <Trophy className="w-5 h-5 text-yellow-400" />
-                  Bet Slip
+                  Bet Slip ({parlayLegs.length}/{parlaySize})
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-4">
-                <div className="text-sm text-gray-400 mb-4">
-                  {parlayLegs.length}/5 legs selected
-                </div>
-
                 {parlayLegs.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
-                    <p className="text-sm">Click picks to add to your parlay</p>
-                    <p className="text-xs mt-2">Or use AUTO-PICK for instant suggestions</p>
+                    <p className="text-sm">Click props to add to your parlay</p>
+                    <p className="text-xs mt-2">Or use AUTO-PICK for {parlaySize} legs</p>
                   </div>
                 ) : (
                   <div className="space-y-3 mb-4 max-h-[400px] overflow-y-auto">
                     {parlayLegs.map((leg, index) => (
-                      <div 
+                      <div
                         key={leg.id}
                         className="p-3 bg-gray-800/50 rounded-lg border border-gray-700"
                       >
@@ -574,7 +805,7 @@ export default function ParlayBuilder() {
                               </h4>
                             </div>
                             <p className="text-xs text-gray-400 truncate">
-                              {leg.propType} Over {leg.line}
+                              {leg.propLabel} Over {leg.line}
                             </p>
                             <div className="flex items-center gap-2 mt-2">
                               <Badge className={`text-xs ${getConfidenceBg(leg.confidence)} ${getConfidenceColor(leg.confidence)}`}>
@@ -617,11 +848,11 @@ export default function ParlayBuilder() {
                         {combinedConfidence}%
                       </span>
                     </div>
-                    <Button 
+                    <Button
                       className="w-full bg-yellow-500 hover:bg-yellow-600 text-black font-bold py-6"
-                      onClick={() => alert("🎯 Parlay placed! (Demo mode)\n\nIn production, this would connect to your sportsbook API.")}
+                      onClick={() => alert(`🎯 Parlay placed! (Demo)\n\n${parlayLegs.length}-leg parlay at ${parlayOdds > 0 ? '+' : ''}${parlayOdds}\n\nIn production, this connects to your sportsbook.`)}
                     >
-                      Place Parlay
+                      Place {parlayLegs.length}-Leg Parlay
                       <ChevronRight className="w-5 h-5 ml-2" />
                     </Button>
                     <Button
