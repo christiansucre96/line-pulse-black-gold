@@ -25,90 +25,33 @@ import {
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
-// ✅ CLEAR, DESCRIPTIVE PROP LABELS
+// ✅ NBA CORE PROPS ONLY
 const PROP_LABELS: Record<string, string> = {
-  // NBA Core Stats
   points: "Points",
   rebounds: "Rebounds",
   assists: "Assists",
-  three_pointers_made: "3-Pointers Made",
+  three_pointers_made: "3PM",
   steals: "Steals",
   blocks: "Blocks",
-  turnovers: "Turnovers",
-  minutes_played: "Minutes Played",
-  
-  // NBA Combo Props
-  combo_pra: "Points + Rebounds + Assists (PRA)",
-  combo_pr: "Points + Rebounds (P+R)",
-  combo_pa: "Points + Assists (P+A)",
-  combo_ra: "Rebounds + Assists (R+A)",
-  combo_bs: "Blocks + Steals (Defensive Stats)",
-  combo_dd: "Double-Double (Yes/No)",
-  combo_td: "Triple-Double (Yes/No)",
-  
-  // NFL Stats
-  passing_yards: "Passing Yards",
-  passing_tds: "Passing Touchdowns",
-  pass_completions: "Pass Completions",
-  pass_attempts: "Pass Attempts",
-  interceptions: "Interceptions",
-  rushing_yards: "Rushing Yards",
-  rush_attempts: "Rush Attempts",
-  rushing_tds: "Rushing Touchdowns",
-  receptions: "Receptions",
-  receiving_yards: "Receiving Yards",
-  receiving_tds: "Receiving Touchdowns",
-  targets: "Targets",
-  sacks: "Sacks",
-  tackles: "Tackles",
-  combo_pass_rush: "Passing + Rushing Yards",
-  combo_rush_rec: "Rushing + Receiving Yards",
-  
-  // MLB Stats
-  hits: "Hits",
-  runs: "Runs",
-  rbi: "RBIs",
-  home_runs: "Home Runs",
-  total_bases: "Total Bases",
-  walks: "Walks",
-  strikeouts_batting: "Strikeouts (Batting)",
-  stolen_bases: "Stolen Bases",
-  strikeouts_pitching: "Strikeouts (Pitching)",
-  hits_allowed: "Hits Allowed",
-  earned_runs: "Earned Runs",
-  walks_allowed: "Walks Allowed",
-  outs_pitched: "Outs Pitched",
-  combo_hrr: "Hits + Runs + RBIs",
-  
-  // NHL Stats
-  goals: "Goals",
-  assists_hockey: "Assists",
-  shots_on_goal: "Shots on Goal",
-  blocked_shots: "Blocked Shots",
-  hits_hockey: "Hits",
-  penalty_minutes: "Penalty Minutes",
-  plus_minus: "Plus/Minus",
-  saves: "Saves",
-  goals_allowed: "Goals Allowed",
-  combo_ga: "Goals + Assists",
-  combo_pts: "Points (G+A)",
-  combo_sog: "Points + Shots on Goal",
-  
-  // Soccer Stats
-  goals_soccer: "Goals",
-  assists_soccer: "Assists",
-  shots_soccer: "Shots",
-  shots_on_target: "Shots on Target",
-  key_passes: "Key Passes",
-  passes_soccer: "Passes",
-  tackles: "Tackles",
-  interceptions: "Interceptions",
-  clearances: "Clearances",
-  yellow_cards: "Yellow Cards",
-  fouls_committed: "Fouls Committed",
-  dribbles_success: "Successful Dribbles",
-  combo_ga_s: "Goals + Assists",
+  turnovers: "TOV",
+  combo_pra: "PRA (P+R+A)",
+  combo_pr: "P+R",
+  combo_pa: "P+A",
 };
+
+// ✅ Only these props will be shown
+const ALLOWED_PROPS = [
+  "points",
+  "rebounds",
+  "assists",
+  "three_pointers_made",
+  "steals",
+  "blocks",
+  "turnovers",
+  "combo_pra",
+  "combo_pr",
+  "combo_pa",
+];
 
 interface Player {
   player_id: string;
@@ -174,6 +117,9 @@ export default function Leaderboard() {
       if (!player.all_props) continue;
 
       for (const [propType, propData] of Object.entries(player.all_props)) {
+        // ✅ Filter: Only allow specific props
+        if (!ALLOWED_PROPS.includes(propType)) continue;
+
         const data = propData as any;
         if (!data?.l10 || data.games_n < 5) continue;
 
@@ -236,7 +182,9 @@ export default function Leaderboard() {
     const types = new Set<string>();
     for (const player of players) {
       if (player.all_props) {
-        Object.keys(player.all_props).forEach(prop => types.add(prop));
+        Object.keys(player.all_props).forEach(prop => {
+          if (ALLOWED_PROPS.includes(prop)) types.add(prop);
+        });
       }
     }
     return Array.from(types).sort();
