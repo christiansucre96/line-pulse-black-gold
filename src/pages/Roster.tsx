@@ -54,7 +54,6 @@ export default function Roster() {
   const [filterStatus, setFilterStatus] = useState<"all" | "starter" | "bench" | "injured">("all");
   const [searchTeam, setSearchTeam] = useState("");
 
-  // Fetch Games & Players just like the Scanner
   useEffect(() => {
     fetchRosterData();
   }, [sport]);
@@ -62,7 +61,7 @@ export default function Roster() {
   const fetchRosterData = async () => {
     setLoading(true);
     try {
-      // 1. Fetch Upcoming Games
+      // 1. Fetch Upcoming Games (for the header/stats)
       const gamesRes = await fetch(EDGE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -70,35 +69,30 @@ export default function Roster() {
       });
       const gamesData = await gamesRes.json();
       
-      if (!gamesData.success || !gamesData.games) {
-        setTeams([]);
-        return;
+      if (gamesData.success && gamesData.games) {
+        setGames(gamesData.games);
       }
 
-      const upcomingGames = gamesData.games;
-      setGames(upcomingGames);
-
-      // 2. Fetch Players for these games (Same logic as Scanner)
-      // We fetch "all" to get players from all upcoming games, or specific IDs
+      // 2. Fetch Players (Default behavior = Next 3 Days)
+      // ✅ FIXED: Removed 'game_id: "all"' which was causing 0 results
       const playersRes = await fetch(EDGE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           operation: "get_players", 
-          sport,
-          game_id: "all" // Gets all players from the next 3 days
+          sport
         }),
       });
       const playersData = await playersRes.json();
 
-      if (playersData.success && playersData.players) {
+      if (playersData.success && playersData.players && playersData.players.length > 0) {
         const rawPlayers = playersData.players;
-        
-        // Map players to Teams
         const teamMap: Record<string, Team> = {};
 
         for (const p of rawPlayers) {
           const teamAbbr = p.team_abbr;
+          if (!teamAbbr) continue;
+
           if (!teamMap[teamAbbr]) {
             teamMap[teamAbbr] = {
               team_id: teamAbbr,
@@ -109,12 +103,10 @@ export default function Roster() {
           }
 
           // Determine Status (Green/Gray/Red)
-          // Since API might not return explicit 'starter' flag for future games,
-          // we use a heuristic: If they have high L10 stats, they are likely starters.
-          // You can replace this logic if your backend adds a 'started' flag.
+          // Logic: If they have a high hit rate, they are likely a starter.
           const l10HR = p.all_props?.points?.l10 || 0;
-          const isStarter = l10HR >= 50 || Math.random() > 0.6; // Mock logic for demo
-          const isInjured = p.status === "injured" || l10HR === 0; 
+          const isStarter = l10HR >= 50; // Heuristic: >50% HR usually means starter
+          const isInjured = p.status === "injured"; 
 
           let status: "starter" | "bench" | "injured" = "bench";
           if (isInjured) status = "injured";
@@ -137,7 +129,7 @@ export default function Roster() {
           });
         }
 
-        // Sort players within team: Starters -> Bench -> Injured
+        // Sort players: Starters -> Bench -> Injured
         for (const team of Object.values(teamMap)) {
           team.players.sort((a, b) => {
             const statusOrder = { starter: 0, bench: 1, injured: 2 };
@@ -145,7 +137,10 @@ export default function Roster() {
           });
         }
 
-        setTeams(Object.values(teamMap));
+        setTeams(Object.values(teamMap).sort((a, b) => a.abbreviation.localeCompare(b.abbreviation)));
+      } else {
+        // If no players returned, clear teams
+        setTeams([]);
       }
     } catch (err) {
       console.error("Error fetching roster:", err);
