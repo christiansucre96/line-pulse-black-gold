@@ -39,6 +39,91 @@ import {
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
+// ✅ CLEAR, DESCRIPTIVE PROP LABELS
+const PROP_LABELS: Record<string, string> = {
+  // NBA Core Stats
+  points: "Points",
+  rebounds: "Rebounds",
+  assists: "Assists",
+  three_pointers_made: "3-Pointers Made",
+  steals: "Steals",
+  blocks: "Blocks",
+  turnovers: "Turnovers",
+  minutes_played: "Minutes Played",
+  
+  // NBA Combo Props
+  combo_pra: "Points + Rebounds + Assists (PRA)",
+  combo_pr: "Points + Rebounds (P+R)",
+  combo_pa: "Points + Assists (P+A)",
+  combo_ra: "Rebounds + Assists (R+A)",
+  combo_bs: "Blocks + Steals (Defensive Stats)",
+  combo_dd: "Double-Double (Yes/No)",
+  combo_td: "Triple-Double (Yes/No)",
+  
+  // NFL Stats
+  passing_yards: "Passing Yards",
+  passing_tds: "Passing Touchdowns",
+  pass_completions: "Pass Completions",
+  pass_attempts: "Pass Attempts",
+  interceptions: "Interceptions",
+  rushing_yards: "Rushing Yards",
+  rush_attempts: "Rush Attempts",
+  rushing_tds: "Rushing Touchdowns",
+  receptions: "Receptions",
+  receiving_yards: "Receiving Yards",
+  receiving_tds: "Receiving Touchdowns",
+  targets: "Targets",
+  sacks: "Sacks",
+  tackles: "Tackles",
+  combo_pass_rush: "Passing + Rushing Yards",
+  combo_rush_rec: "Rushing + Receiving Yards",
+  
+  // MLB Stats
+  hits: "Hits",
+  runs: "Runs",
+  rbi: "RBIs",
+  home_runs: "Home Runs",
+  total_bases: "Total Bases",
+  walks: "Walks",
+  strikeouts_batting: "Strikeouts (Batting)",
+  stolen_bases: "Stolen Bases",
+  strikeouts_pitching: "Strikeouts (Pitching)",
+  hits_allowed: "Hits Allowed",
+  earned_runs: "Earned Runs",
+  walks_allowed: "Walks Allowed",
+  outs_pitched: "Outs Pitched",
+  combo_hrr: "Hits + Runs + RBIs",
+  
+  // NHL Stats
+  goals: "Goals",
+  assists_hockey: "Assists",
+  shots_on_goal: "Shots on Goal",
+  blocked_shots: "Blocked Shots",
+  hits_hockey: "Hits",
+  penalty_minutes: "Penalty Minutes",
+  plus_minus: "Plus/Minus",
+  saves: "Saves",
+  goals_allowed: "Goals Allowed",
+  combo_ga: "Goals + Assists",
+  combo_pts: "Points (G+A)",
+  combo_sog: "Points + Shots on Goal",
+  
+  // Soccer Stats
+  goals_soccer: "Goals",
+  assists_soccer: "Assists",
+  shots_soccer: "Shots",
+  shots_on_target: "Shots on Target",
+  key_passes: "Key Passes",
+  passes_soccer: "Passes",
+  tackles: "Tackles",
+  interceptions: "Interceptions",
+  clearances: "Clearances",
+  yellow_cards: "Yellow Cards",
+  fouls_committed: "Fouls Committed",
+  dribbles_success: "Successful Dribbles",
+  combo_ga_s: "Goals + Assists",
+};
+
 interface Player {
   player_id: string;
   name: string;
@@ -73,33 +158,6 @@ interface Game {
   start_time: string;
 }
 
-// Prop type labels for display
-const PROP_LABELS: Record<string, string> = {
-  points: "Points",
-  rebounds: "Rebounds",
-  assists: "Assists",
-  three_pointers_made: "3PM",
-  steals: "Steals",
-  blocks: "Blocks",
-  turnovers: "Turnovers",
-  minutes_played: "Minutes",
-  combo_pra: "PRA",
-  combo_pr: "P+R",
-  combo_pa: "P+A",
-  passing_yards: "Pass Yds",
-  rushing_yards: "Rush Yds",
-  receiving_yards: "Rec Yds",
-  passing_tds: "Pass TDs",
-  receptions: "Receptions",
-  hits: "Hits",
-  runs: "Runs",
-  rbi: "RBI",
-  home_runs: "HR",
-  goals: "Goals",
-  assists_hockey: "Assists",
-  shots_on_goal: "SOG",
-};
-
 export default function ParlayBuilder() {
   const navigate = useNavigate();
   const [sport, setSport] = useState("nba");
@@ -109,11 +167,7 @@ export default function ParlayBuilder() {
   const [parlayLegs, setParlayLegs] = useState<ParlayLeg[]>([]);
   const [allPropPicks, setAllPropPicks] = useState<PropPick[]>([]);
   const [selectedGame, setSelectedGame] = useState<string>("all");
-
-  // ✅ NEW: Parlay size selector (1-5 legs)
   const [parlaySize, setParlaySize] = useState(3);
-
-  // Filter settings
   const [minConfidence, setMinConfidence] = useState(40);
   const [showOnlyHighConfidence, setShowOnlyHighConfidence] = useState(false);
   const [searchPlayer, setSearchPlayer] = useState("");
@@ -180,7 +234,6 @@ export default function ParlayBuilder() {
     }
   };
 
-  // 🤖 AI LOGIC: Generate ALL prop picks for ALL players
   const generateAllPropPicks = (playerList: Player[]) => {
     const picks: PropPick[] = [];
 
@@ -194,13 +247,11 @@ export default function ParlayBuilder() {
         let confidence = 0;
         let reasoning: string[] = [];
 
-        // Factor 1: Hit Rate (40% weight)
         const hrScore = (data.l10 || 0) / 100;
         confidence += hrScore * 40;
         if (data.l10 >= 80) reasoning.push(`🔥 ${data.l10}% HR`);
         else if (data.l10 >= 60) reasoning.push(`📊 ${data.l10}% HR`);
 
-        // Factor 2: Streak (25% weight)
         if (data.streak) {
           if (data.streak.type === 'Over') {
             const streakBonus = Math.min(data.streak.count * 5, 25);
@@ -213,7 +264,6 @@ export default function ParlayBuilder() {
           }
         }
 
-        // Factor 3: Avg vs Line (25% weight)
         if (data.avg_l10 && data.line) {
           const diff = data.avg_l10 - data.line;
           const pctDiff = (diff / data.line) * 100;
@@ -229,12 +279,10 @@ export default function ParlayBuilder() {
           }
         }
 
-        // Factor 4: Sample Size (10% weight)
         if (data.games_n >= 20) confidence += 10;
         else if (data.games_n >= 15) confidence += 7;
         else if (data.games_n >= 10) confidence += 5;
 
-        // Only include if confidence >= 40%
         if (confidence >= 40) {
           picks.push({
             id: `${player.player_id}-${propType}`,
@@ -253,7 +301,6 @@ export default function ParlayBuilder() {
       }
     }
 
-    // Sort by confidence (highest first)
     picks.sort((a, b) => b.confidence - a.confidence);
     setAllPropPicks(picks);
   };
@@ -268,23 +315,19 @@ export default function ParlayBuilder() {
     return -100;
   };
 
-  // ✅ Filter picks based on user settings
   const filteredPicks = useMemo(() => {
     let filtered = [...allPropPicks];
 
-    // Filter by confidence threshold
     if (showOnlyHighConfidence) {
       filtered = filtered.filter(p => p.confidence >= 70);
     } else {
       filtered = filtered.filter(p => p.confidence >= minConfidence);
     }
 
-    // Filter by prop type
     if (selectedPropFilter !== "all") {
       filtered = filtered.filter(p => p.propType === selectedPropFilter);
     }
 
-    // Filter by search
     if (searchPlayer.trim()) {
       const search = searchPlayer.toLowerCase();
       filtered = filtered.filter(p =>
@@ -297,7 +340,6 @@ export default function ParlayBuilder() {
     return filtered;
   }, [allPropPicks, minConfidence, showOnlyHighConfidence, selectedPropFilter, searchPlayer]);
 
-  // ✅ Group picks by player for collapsible display
   const picksByPlayer = useMemo(() => {
     const grouped: Record<string, PropPick[]> = {};
     for (const pick of filteredPicks) {
@@ -306,7 +348,6 @@ export default function ParlayBuilder() {
       }
       grouped[pick.player.player_id].push(pick);
     }
-    // Sort each player's props by confidence
     for (const playerId of Object.keys(grouped)) {
       grouped[playerId].sort((a, b) => b.confidence - a.confidence);
     }
@@ -336,7 +377,6 @@ export default function ParlayBuilder() {
     setParlayLegs(parlayLegs.filter(leg => leg.id !== id));
   };
 
-  // ✅ AI Auto-Pick: Select exactly parlaySize number of high-confidence picks
   const autoPick = () => {
     const availablePicks = filteredPicks.filter(
       p => !parlayLegs.find(l => l.id === p.id)
@@ -347,12 +387,10 @@ export default function ParlayBuilder() {
       return;
     }
 
-    // Pick top N by confidence
     const topPicks = availablePicks.slice(0, parlaySize);
     setParlayLegs([...parlayLegs, ...topPicks]);
   };
 
-  // ✅ AI Smart Pick: Pick diverse props (not all same player)
   const smartPick = () => {
     const availablePicks = filteredPicks.filter(
       p => !parlayLegs.find(l => l.id === p.id)
@@ -363,7 +401,6 @@ export default function ParlayBuilder() {
       return;
     }
 
-    // Smart selection: avoid same player, diversify prop types
     const selected: PropPick[] = [];
     const selectedPlayers = new Set<string>();
     const selectedProps = new Set<string>();
@@ -371,7 +408,6 @@ export default function ParlayBuilder() {
     for (const pick of availablePicks) {
       if (selected.length >= parlaySize) break;
 
-      // Prefer different players and prop types
       const playerPenalty = selectedPlayers.has(pick.player.player_id) ? -10 : 0;
       const propPenalty = selectedProps.has(pick.propType) ? -5 : 0;
       const adjustedConfidence = pick.confidence + playerPenalty + propPenalty;
@@ -383,7 +419,6 @@ export default function ParlayBuilder() {
       }
     }
 
-    // Fallback: just take top N if smart pick didn't get enough
     if (selected.length < parlaySize) {
       const remaining = availablePicks
         .filter(p => !selected.find(s => s.id === p.id))
@@ -432,7 +467,6 @@ export default function ParlayBuilder() {
     return "bg-gray-500/20 border-gray-500/50";
   };
 
-  // Available prop types for filter dropdown
   const availablePropTypes = useMemo(() => {
     const types = new Set<string>();
     for (const pick of allPropPicks) {
@@ -444,7 +478,6 @@ export default function ParlayBuilder() {
   return (
     <DashboardLayout>
       <div className="p-6 max-w-7xl mx-auto">
-        {/* Header */}
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-yellow-400 mb-2 flex items-center gap-3">
             <Zap className="w-8 h-8" />
@@ -455,7 +488,6 @@ export default function ParlayBuilder() {
           </p>
         </div>
 
-        {/* ✅ NEW: Filter Controls + Parlay Size */}
         <Card className="mb-6 bg-gray-900/50 border-gray-700">
           <CardContent className="p-4 space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-4">
@@ -465,7 +497,6 @@ export default function ParlayBuilder() {
               </div>
 
               <div className="flex items-center gap-4 flex-wrap">
-                {/* ✅ Parlay Size Selector */}
                 <div className="flex items-center gap-2">
                   <Label className="text-sm text-gray-400 whitespace-nowrap">
                     Parlay Size:
@@ -487,7 +518,6 @@ export default function ParlayBuilder() {
                   </Select>
                 </div>
 
-                {/* Search Player */}
                 <Input
                   type="text"
                   placeholder="Search player/prop..."
@@ -496,7 +526,6 @@ export default function ParlayBuilder() {
                   className="w-48 bg-gray-800 border-gray-700 text-white"
                 />
 
-                {/* Prop Type Filter */}
                 <Select
                   value={selectedPropFilter}
                   onValueChange={setSelectedPropFilter}
@@ -514,7 +543,6 @@ export default function ParlayBuilder() {
                   </SelectContent>
                 </Select>
 
-                {/* Confidence Slider */}
                 <div className="flex items-center gap-3">
                   <Label className="text-sm text-gray-400 whitespace-nowrap">
                     Min: <span className="text-yellow-400 font-bold">{minConfidence}%</span>
@@ -531,7 +559,6 @@ export default function ParlayBuilder() {
                   />
                 </div>
 
-                {/* High Confidence Toggle */}
                 <div className="flex items-center gap-2">
                   <Switch
                     checked={showOnlyHighConfidence}
@@ -545,7 +572,6 @@ export default function ParlayBuilder() {
               </div>
             </div>
 
-            {/* Results Count + Auto-Pick Buttons */}
             <div className="flex items-center justify-between pt-3 border-t border-gray-800 flex-wrap gap-2">
               <p className="text-sm text-gray-400">
                 Showing <span className="text-white font-bold">{filteredPicks.length}</span> of <span className="text-white font-bold">{allPropPicks.length}</span> picks
@@ -586,7 +612,6 @@ export default function ParlayBuilder() {
           </CardContent>
         </Card>
 
-        {/* AI Suggestion Banner */}
         {filteredPicks.length > 0 && (
           <div className="mb-6 p-4 bg-gradient-to-r from-yellow-900/30 to-orange-900/30 border border-yellow-600/50 rounded-xl">
             <div className="flex items-center justify-between flex-wrap gap-3">
@@ -623,7 +648,6 @@ export default function ParlayBuilder() {
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left: All Prop Picks (Grouped by Player) */}
           <div className="lg:col-span-2 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold text-white flex items-center gap-2">
@@ -668,7 +692,6 @@ export default function ParlayBuilder() {
               </Card>
             ) : (
               <div className="space-y-3">
-                {/* Grouped by Player with Collapsible Props */}
                 {Object.entries(picksByPlayer).map(([playerId, playerPicks]) => {
                   const player = playerPicks[0].player;
                   const isExpanded = expandedPlayers.has(playerId);
@@ -680,7 +703,6 @@ export default function ParlayBuilder() {
                       onOpenChange={() => togglePlayerExpanded(playerId)}
                     >
                       <Card className={`bg-gray-900/50 border hover:border-yellow-500/50 transition-all ${getConfidenceBg(playerPicks[0].confidence)}`}>
-                        {/* Player Header (always visible) */}
                         <CollapsibleTrigger asChild>
                           <CardContent className="p-4 cursor-pointer">
                             <div className="flex items-center justify-between">
@@ -729,7 +751,6 @@ export default function ParlayBuilder() {
                           </CardContent>
                         </CollapsibleTrigger>
 
-                        {/* Expanded: Show All Props for This Player */}
                         <CollapsibleContent>
                           <div className="px-4 pb-4 space-y-2 border-t border-gray-800 pt-3">
                             {playerPicks.map(pick => (
@@ -774,7 +795,6 @@ export default function ParlayBuilder() {
             )}
           </div>
 
-          {/* Right: Bet Slip */}
           <div className="lg:col-span-1">
             <Card className="bg-gray-900/80 border-gray-700 sticky top-4">
               <CardHeader className="pb-3">
