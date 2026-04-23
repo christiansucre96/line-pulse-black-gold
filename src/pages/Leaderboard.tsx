@@ -25,6 +25,91 @@ import {
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
+// ✅ CLEAR, DESCRIPTIVE PROP LABELS
+const PROP_LABELS: Record<string, string> = {
+  // NBA Core Stats
+  points: "Points",
+  rebounds: "Rebounds",
+  assists: "Assists",
+  three_pointers_made: "3-Pointers Made",
+  steals: "Steals",
+  blocks: "Blocks",
+  turnovers: "Turnovers",
+  minutes_played: "Minutes Played",
+  
+  // NBA Combo Props
+  combo_pra: "Points + Rebounds + Assists (PRA)",
+  combo_pr: "Points + Rebounds (P+R)",
+  combo_pa: "Points + Assists (P+A)",
+  combo_ra: "Rebounds + Assists (R+A)",
+  combo_bs: "Blocks + Steals (Defensive Stats)",
+  combo_dd: "Double-Double (Yes/No)",
+  combo_td: "Triple-Double (Yes/No)",
+  
+  // NFL Stats
+  passing_yards: "Passing Yards",
+  passing_tds: "Passing Touchdowns",
+  pass_completions: "Pass Completions",
+  pass_attempts: "Pass Attempts",
+  interceptions: "Interceptions",
+  rushing_yards: "Rushing Yards",
+  rush_attempts: "Rush Attempts",
+  rushing_tds: "Rushing Touchdowns",
+  receptions: "Receptions",
+  receiving_yards: "Receiving Yards",
+  receiving_tds: "Receiving Touchdowns",
+  targets: "Targets",
+  sacks: "Sacks",
+  tackles: "Tackles",
+  combo_pass_rush: "Passing + Rushing Yards",
+  combo_rush_rec: "Rushing + Receiving Yards",
+  
+  // MLB Stats
+  hits: "Hits",
+  runs: "Runs",
+  rbi: "RBIs",
+  home_runs: "Home Runs",
+  total_bases: "Total Bases",
+  walks: "Walks",
+  strikeouts_batting: "Strikeouts (Batting)",
+  stolen_bases: "Stolen Bases",
+  strikeouts_pitching: "Strikeouts (Pitching)",
+  hits_allowed: "Hits Allowed",
+  earned_runs: "Earned Runs",
+  walks_allowed: "Walks Allowed",
+  outs_pitched: "Outs Pitched",
+  combo_hrr: "Hits + Runs + RBIs",
+  
+  // NHL Stats
+  goals: "Goals",
+  assists_hockey: "Assists",
+  shots_on_goal: "Shots on Goal",
+  blocked_shots: "Blocked Shots",
+  hits_hockey: "Hits",
+  penalty_minutes: "Penalty Minutes",
+  plus_minus: "Plus/Minus",
+  saves: "Saves",
+  goals_allowed: "Goals Allowed",
+  combo_ga: "Goals + Assists",
+  combo_pts: "Points (G+A)",
+  combo_sog: "Points + Shots on Goal",
+  
+  // Soccer Stats
+  goals_soccer: "Goals",
+  assists_soccer: "Assists",
+  shots_soccer: "Shots",
+  shots_on_target: "Shots on Target",
+  key_passes: "Key Passes",
+  passes_soccer: "Passes",
+  tackles: "Tackles",
+  interceptions: "Interceptions",
+  clearances: "Clearances",
+  yellow_cards: "Yellow Cards",
+  fouls_committed: "Fouls Committed",
+  dribbles_success: "Successful Dribbles",
+  combo_ga_s: "Goals + Assists",
+};
+
 interface Player {
   player_id: string;
   name: string;
@@ -47,18 +132,6 @@ interface LeaderboardEntry {
   gamesPlayed: number;
   confidence: number;
 }
-
-const PROP_LABELS: Record<string, string> = {
-  points: "Points",
-  rebounds: "Rebounds",
-  assists: "Assists",
-  three_pointers_made: "3PM",
-  steals: "Steals",
-  blocks: "Blocks",
-  combo_pra: "PRA",
-  combo_pr: "P+R",
-  combo_pa: "P+A",
-};
 
 export default function Leaderboard() {
   const [sport, setSport] = useState("nba");
@@ -94,7 +167,6 @@ export default function Leaderboard() {
     }
   };
 
-  // 📊 Calculate leaderboard entries from player data
   const leaderboardData: LeaderboardEntry[] = useMemo(() => {
     const entries: LeaderboardEntry[] = [];
 
@@ -105,10 +177,8 @@ export default function Leaderboard() {
         const data = propData as any;
         if (!data?.l10 || data.games_n < 5) continue;
 
-        // Filter by prop type if selected
         if (propFilter !== "all" && propType !== propFilter) continue;
 
-        // Calculate consistency (standard deviation inverse)
         const values = data.values || [];
         const avg = data.avg_l10 || 0;
         const variance = values.length > 0
@@ -117,7 +187,7 @@ export default function Leaderboard() {
         const consistency = Math.max(0, 100 - Math.sqrt(variance) / avg * 100);
 
         entries.push({
-          rank: 0, // Will be set after sorting
+          rank: 0,
           player: {
             player_id: player.player_id,
             name: player.name,
@@ -139,7 +209,6 @@ export default function Leaderboard() {
       }
     }
 
-    // Sort based on selected criteria
     entries.sort((a, b) => {
       if (sortBy === "hitRate") {
         return (b.hitRateL10 || 0) - (a.hitRateL10 || 0);
@@ -153,7 +222,6 @@ export default function Leaderboard() {
       return 0;
     });
 
-    // Assign ranks
     entries.forEach((entry, index) => {
       entry.rank = index + 1;
     });
@@ -161,11 +229,9 @@ export default function Leaderboard() {
     return entries;
   }, [players, sortBy, propFilter]);
 
-  // Get top 3 for podium
   const topThree = leaderboardData.slice(0, 3);
   const rest = leaderboardData.slice(3);
 
-  // Available prop types for filter
   const availablePropTypes = useMemo(() => {
     const types = new Set<string>();
     for (const player of players) {
@@ -185,7 +251,6 @@ export default function Leaderboard() {
   return (
     <DashboardLayout>
       <div className="p-6 max-w-7xl mx-auto">
-        {/* Header */}
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-yellow-400 mb-2 flex items-center gap-3">
             <Trophy className="w-8 h-8" />
@@ -196,7 +261,6 @@ export default function Leaderboard() {
           </p>
         </div>
 
-        {/* Controls */}
         <div className="mb-6 flex flex-wrap gap-4">
           <Select value={sortBy} onValueChange={(v) => setSortBy(v as any)}>
             <SelectTrigger className="w-40 bg-gray-900 border-gray-700 text-white">
@@ -275,14 +339,13 @@ export default function Leaderboard() {
           </div>
         ) : (
           <>
-            {/*  Podium - Top 3 */}
             {topThree.length > 0 && (
               <div className="mb-8 grid grid-cols-1 md:grid-cols-3 gap-4">
                 {topThree.map((entry, index) => {
                   const medalColors = [
-                    "from-yellow-400 to-yellow-600", // Gold
-                    "from-gray-300 to-gray-500",     // Silver
-                    "from-orange-400 to-orange-600", // Bronze
+                    "from-yellow-400 to-yellow-600",
+                    "from-gray-300 to-gray-500",
+                    "from-orange-400 to-orange-600",
                   ];
                   const medalIcons = ["🥇", "🥈", "🥉"];
 
@@ -321,7 +384,6 @@ export default function Leaderboard() {
               </div>
             )}
 
-            {/* 📊 Full Leaderboard Table */}
             <Card className="bg-gray-900/50 border-gray-700">
               <CardContent className="p-0">
                 <div className="overflow-x-auto">
@@ -406,7 +468,6 @@ export default function Leaderboard() {
               </CardContent>
             </Card>
 
-            {/* Stats Summary */}
             <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
               <Card className="bg-gray-900/50 border-gray-700">
                 <CardContent className="p-4 text-center">
