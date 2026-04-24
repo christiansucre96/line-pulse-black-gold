@@ -9,6 +9,7 @@
 // ✅ FIXED: Safe optional chaining in game dropdown
 // ✅ UPDATED: Table now shows streak and enhanced trend (Strong Over/Over/Under/Strong Under)
 // ✅ NEW: Market line input for betting signals (100% free, no APIs)
+// ✅ UPDATED: Game filter dropdown shows ONLY today's games
 
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -130,11 +131,15 @@ export default function Scanner() {
   const playerId = searchParams.get("playerId");
   const urlSport = searchParams.get("sport");
 
+  // ✅ Get today's date in YYYY-MM-DD format
+  const today = new Date().toISOString().split('T')[0];
+  console.log(`📅 Scanner filtering for today: ${today}`);
+
   useEffect(() => {
     if (urlSport && urlSport !== sport) setSport(urlSport);
   }, [urlSport]);
 
-  // Fetch available games for the selected sport
+  // Fetch available games for the selected sport – ONLY today's games
   const fetchGames = async () => {
     try {
       const res = await fetch(EDGE_URL, {
@@ -144,7 +149,13 @@ export default function Scanner() {
       });
       const data = await res.json();
       if (data.success) {
-        setAvailableGames(data.games || []);
+        // 🚨 FILTER: Only show TODAY's games
+        const todaysGames = (data.games || []).filter((game: any) => {
+          const gameDate = game.game_date || '';
+          return gameDate === today;
+        });
+        console.log(`✅ Scanner found ${todaysGames.length} games for today`);
+        setAvailableGames(todaysGames);
       } else {
         console.error("Failed to fetch games:", data.error);
       }
@@ -339,14 +350,13 @@ export default function Scanner() {
             </SelectContent>
           </Select>
 
-          {/* ✅ Game Filter Dropdown with formatted time and safe mapping */}
+          {/* ✅ Game Filter Dropdown with formatted time – NOW ONLY TODAY'S GAMES */}
           <Select value={selectedGame} onValueChange={handleGameChange}>
             <SelectTrigger className="w-72 bg-gray-900 border-gray-700 text-gray-300 text-sm">
-              <SelectValue placeholder="All Games (Next 24h)" />
+              <SelectValue placeholder="Select a game (today only)" />
             </SelectTrigger>
             <SelectContent className="bg-gray-900 border-gray-700 max-h-64 overflow-y-auto">
-              <SelectItem value="all">All Games (Next 24h)</SelectItem>
-              {/* ✅ Safe map with optional chaining */}
+              <SelectItem value="all">All Games (Today only)</SelectItem>
               {(availableGames || []).map((game: any) => (
                 <SelectItem key={game.external_id} value={game.external_id}>
                   {game.home_team?.abbreviation} vs {game.away_team?.abbreviation} -{" "}
