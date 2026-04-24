@@ -1,0 +1,27 @@
+name: Auto-Update NBA Lineups
+
+on:
+  schedule:
+    # Projected lineups: 10AM and 12PM ET (3PM and 5PM UTC)
+    - cron: '0 15 * * *'
+    - cron: '0 17 * * *'
+    # Confirmed lineups: Every 15 minutes
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  update-lineups:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run Projected Lineup Engine
+        if: github.event.schedule == '0 15 * * *' || github.event.schedule == '0 17 * * *'
+        run: |
+          curl -X POST "${{ secrets.PROJECTED_LINEUP_URL }}" \
+            -H "Content-Type: application/json" \
+            -d '{}'
+      
+      - name: Run Confirmed Lineup Scraper
+        run: |
+          curl -X POST "${{ secrets.CONFIRMED_LINEUP_URL }}" \
+            -H "Content-Type: application/json" \
+            -d '{"sport": "nba"}'
