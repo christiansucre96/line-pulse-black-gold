@@ -42,7 +42,11 @@ export default function Roster() {
   const fetchRosterData = async () => {
     setLoading(true);
     try {
-      // 1. Fetch Games (Next 3 Days) to determine which teams are playing
+      // Get TODAY's date in YYYY-MM-DD format
+      const today = new Date().toISOString().split('T')[0];
+      console.log(`📅 Filtering games for today: ${today}`);
+
+      // 1. Fetch Games (Next 3 Days from API)
       const gamesRes = await fetch(EDGE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -50,17 +54,24 @@ export default function Roster() {
       });
       const gamesData = await gamesRes.json();
 
-      // Extract active team abbreviations
+      // 2. Filter to ONLY today's games
+      const todaysGames = (gamesData.games || []).filter((game: any) => {
+        const gameDate = game.game_date || '';
+        return gameDate === today;
+      });
+
+      console.log(`✅ Found ${todaysGames.length} games for today`);
+
+      // Extract active team abbreviations from TODAY's games only
       const activeTeamAbbrs = new Set<string>();
-      if (gamesData.success && gamesData.games) {
-        setActiveGamesCount(gamesData.games.length);
-        for (const game of gamesData.games) {
-          if (game.home_team?.abbreviation) activeTeamAbbrs.add(game.home_team.abbreviation);
-          if (game.away_team?.abbreviation) activeTeamAbbrs.add(game.away_team.abbreviation);
-        }
+      setActiveGamesCount(todaysGames.length);
+      
+      for (const game of todaysGames) {
+        if (game.home_team?.abbreviation) activeTeamAbbrs.add(game.home_team.abbreviation);
+        if (game.away_team?.abbreviation) activeTeamAbbrs.add(game.away_team.abbreviation);
       }
 
-      // 2. Fetch Players
+      // 3. Fetch Players
       const playersRes = await fetch(EDGE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -74,7 +85,7 @@ export default function Roster() {
         for (const p of playersData.players) {
           const teamAbbr = p.team_abbr;
           
-          // 🚨 FILTER: Only keep players from teams that are playing in the next 24h
+          // 🚨 FILTER: Only keep players from teams playing TODAY
           if (!activeTeamAbbrs.has(teamAbbr)) continue;
 
           if (!teamMap[teamAbbr]) {
@@ -166,7 +177,7 @@ export default function Roster() {
           </h1>
           <p className="text-gray-400 flex items-center gap-2">
             <CalendarDays className="w-4 h-4" /> 
-            Showing active teams for next 24 hours ({activeGamesCount} games scheduled)
+            Showing active teams for today ({activeGamesCount} games scheduled)
           </p>
         </div>
 
@@ -205,7 +216,7 @@ export default function Roster() {
         ) : filteredTeams.length === 0 ? (
           <div className="text-center py-20 text-gray-500 bg-gray-900/20 rounded-xl border border-gray-800">
             <CalendarDays className="w-16 h-16 mx-auto mb-4 text-gray-600" />
-            <p className="text-xl font-semibold">No games scheduled</p>
+            <p className="text-xl font-semibold">No games scheduled today</p>
             <p className="text-sm mt-2">Check back later for upcoming matchups.</p>
           </div>
         ) : (
