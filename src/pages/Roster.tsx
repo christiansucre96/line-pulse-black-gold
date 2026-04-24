@@ -42,9 +42,8 @@ export default function Roster() {
   const fetchRosterData = async () => {
     setLoading(true);
     try {
-      // Get TODAY's date in YYYY-MM-DD format
+      // Get TODAY's date
       const today = new Date().toISOString().split('T')[0];
-      console.log(`📅 Filtering games for today: ${today}`);
 
       // 1. Fetch Games (Next 3 Days from API)
       const gamesRes = await fetch(EDGE_URL, {
@@ -159,10 +158,27 @@ export default function Roster() {
     }).filter(team => team.players.length > 0);
   }, [teams, filterStatus, searchTeam]);
 
-  const getStatusColor = (status: string) => {
-    if (status === "starter") return "bg-green-500/10 border-green-500/50 text-green-300";
+  // ✅ UPDATED: Color scheme matches ESPN
+  const getStarterColor = (status: string, lineupStatus: string) => {
     if (status === "injured") return "bg-red-500/10 border-red-500/50 text-red-300";
+    if (status === "starter") {
+      // 🟠 ESPN-style: Amber/Orange for projected, Green for confirmed
+      if (lineupStatus === "confirmed") {
+        return "bg-green-500/10 border-green-500/50 text-green-300"; // Green when confirmed
+      }
+      return "bg-amber-500/10 border-amber-500/50 text-amber-300"; // Amber for projected
+    }
     return "bg-gray-500/10 border-gray-700 text-gray-400";
+  };
+
+  const getStatusIcon = (status: string, lineupStatus: string) => {
+    if (status === "injured") return <UserX className="w-3 h-3" />;
+    if (status === "starter") {
+      return lineupStatus === "confirmed" 
+        ? <CheckCircle2 className="w-3 h-3 text-green-400" />
+        : <Clock className="w-3 h-3 text-amber-400" />;
+    }
+    return <Users className="w-3 h-3" />;
   };
 
   const totalPlayers = teams.reduce((s, t) => s + t.players.length, 0);
@@ -177,7 +193,7 @@ export default function Roster() {
           </h1>
           <p className="text-gray-400 flex items-center gap-2">
             <CalendarDays className="w-4 h-4" /> 
-            Showing active teams for today ({activeGamesCount} games scheduled)
+            Showing active teams for {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} ({activeGamesCount} games)
           </p>
         </div>
 
@@ -192,7 +208,7 @@ export default function Roster() {
           <Select value={filterStatus} onValueChange={(v) => setFilterStatus(v as any)}>
             <SelectTrigger className="w-40 bg-gray-900 border-gray-700 text-white"><SelectValue /></SelectTrigger>
             <SelectContent className="bg-gray-900 border-gray-700">
-              <SelectItem value="all">All Players</SelectItem><SelectItem value="starter">🟢 Starters</SelectItem>
+              <SelectItem value="all">All Players</SelectItem><SelectItem value="starter">🟠 Starters</SelectItem>
               <SelectItem value="bench">⚪ Bench</SelectItem><SelectItem value="injured">🔴 Injured</SelectItem>
             </SelectContent>
           </Select>
@@ -216,7 +232,7 @@ export default function Roster() {
         ) : filteredTeams.length === 0 ? (
           <div className="text-center py-20 text-gray-500 bg-gray-900/20 rounded-xl border border-gray-800">
             <CalendarDays className="w-16 h-16 mx-auto mb-4 text-gray-600" />
-            <p className="text-xl font-semibold">No games scheduled today</p>
+            <p className="text-xl font-semibold">No games scheduled</p>
             <p className="text-sm mt-2">Check back later for upcoming matchups.</p>
           </div>
         ) : (
@@ -231,7 +247,8 @@ export default function Roster() {
                         <span className="text-lg font-normal text-gray-400 hidden sm:inline">{team.name}</span>
                       </CardTitle>
                       <p className="text-sm text-gray-500 mt-1 flex items-center gap-2">
-                        <span className="text-green-400">{team.players.filter(p => p.status === "starter").length} Starters</span> • 
+                        <span className="text-amber-400">{team.players.filter(p => p.status === "starter" && p.lineup_status === "projected").length} Probable</span> • 
+                        <span className="text-green-400">{team.players.filter(p => p.status === "starter" && p.lineup_status === "confirmed").length} Confirmed</span> • 
                         <span className="text-gray-400">{team.players.filter(p => p.status === "bench").length} Bench</span>
                       </p>
                     </div>
@@ -241,30 +258,46 @@ export default function Roster() {
                 <CardContent className="p-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                     {team.players.map((player) => (
-                      <div key={player.player_id} className={`group relative p-3 rounded-xl border transition-all hover:scale-[1.02] ${getStatusColor(player.status)}`}>
+                      <div 
+                        key={player.player_id} 
+                        className={`group relative p-3 rounded-xl border transition-all hover:scale-[1.02] ${getStarterColor(player.status, player.lineup_status)}`}
+                      >
                         <div className="flex items-start justify-between mb-2">
                           <div className="min-w-0">
                             <h4 className="font-bold text-sm truncate pr-2">{player.name}</h4>
                             <p className="text-xs opacity-80 font-mono">{player.position}</p>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
-                            {player.status === "starter" ? <UserCheck className="w-3 h-3" /> : player.status === "injured" ? <UserX className="w-3 h-3" /> : <Users className="w-3 h-3" />}
-                            <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${getStatusColor(player.status)}`}>
-                              {player.status === "starter" ? "START" : player.status === "injured" ? "OUT" : "BENCH"}
-                            </span>
+                            {getStatusIcon(player.status, player.lineup_status)}
+                            {/* ✅ UPDATED: Show "Probable Starter" or "Confirmed" instead of "START" */}
+                            {player.status === "starter" && (
+                              <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                                player.lineup_status === "confirmed" 
+                                  ? "bg-green-500/20 text-green-300 border border-green-500/30"
+                                  : "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                              }`}>
+                                {player.lineup_status === "confirmed" ? "CONFIRMED" : "PROBABLE"}
+                              </span>
+                            )}
+                            {player.status === "injured" && (
+                              <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-red-500/20 text-red-300 border border-red-500/30">
+                                OUT
+                              </span>
+                            )}
                           </div>
                         </div>
                         
+                        {/* Show status badge */}
                         <div className="mb-2">
                           {player.lineup_status === "confirmed" ? (
                             <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-400 bg-green-500/10 px-2 py-0.5 rounded">
-                              <CheckCircle2 className="w-3 h-3" /> Confirmed
+                              <CheckCircle2 className="w-3 h-3" /> Confirmed by ESPN
                             </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-yellow-400 bg-yellow-500/10 px-2 py-0.5 rounded">
-                              <Clock className="w-3 h-3" /> Projected
+                          ) : player.status === "starter" ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded">
+                              <Clock className="w-3 h-3" /> Projected Starter
                             </span>
-                          )}
+                          ) : null}
                         </div>
 
                         <div className="grid grid-cols-2 gap-2 mt-3 pt-2 border-t border-current border-opacity-10">
