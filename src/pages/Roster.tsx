@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RefreshCw, UserCheck, UserX, Users, TrendingUp, Shield, Clock, CheckCircle2, CalendarDays } from "lucide-react";
-import { supabase } from "@/lib/supabase"; // ✅ ADDED: import supabase client
+import { supabase } from "@/lib/supabase";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
@@ -40,7 +40,7 @@ export default function Roster() {
 
   useEffect(() => { fetchRosterData(); }, [sport]);
 
-  // ✅ REPLACED fetchRosterData with version that uses projected_lineups table
+  // ✅ UPDATED: Fetch ALL lineups (projected + confirmed) from projected_lineups
   const fetchRosterData = async () => {
     setLoading(true);
     try {
@@ -64,42 +64,35 @@ export default function Roster() {
 
       console.log(`✅ Found ${todaysGames.length} games today`);
 
-      // Extract active team IDs and abbreviations
-      const activeTeamIds = new Set<string>();
+      // Extract active team abbreviations
       const activeTeamAbbrs = new Set<string>();
       setActiveGamesCount(todaysGames.length);
-      
       for (const game of todaysGames) {
-        if (game.home_team?.id) {
-          activeTeamIds.add(game.home_team.id);
-          activeTeamAbbrs.add(game.home_team.abbreviation);
-        }
-        if (game.away_team?.id) {
-          activeTeamIds.add(game.away_team.id);
-          activeTeamAbbrs.add(game.away_team.abbreviation);
-        }
+        if (game.home_team?.abbreviation) activeTeamAbbrs.add(game.home_team.abbreviation);
+        if (game.away_team?.abbreviation) activeTeamAbbrs.add(game.away_team.abbreviation);
       }
 
-      // 2. Fetch CONFIRMED starters from projected_lineups table
-      // This is where your scraper stores the exact ESPN starters
-      const { data: confirmedLineups } = await supabase
+      // 2. Fetch ALL lineups (projected + confirmed) from scraper storage
+      const { data: allLineups } = await supabase
         .from('projected_lineups')
-        .select('*')
-        .eq('game_date', today)
-        .eq('confirmed', true);
+        .select('team_id, team_abbreviation, projected_starters, confirmed, lineup_confidence')
+        .eq('game_date', today);
 
-      console.log(`📊 Found ${confirmedLineups?.length || 0} confirmed lineups`);
-
-      // Build a map of team_id → confirmed starter ESPN IDs
-      const confirmedStartersMap = new Map<string, Set<string>>();
-      if (confirmedLineups) {
-        for (const lineup of confirmedLineups) {
+      // Build map: team_id → { starters: Set<string>, confirmed: boolean }
+      const lineupMap = new Map<string, { starters: Set<string>, confirmed: boolean }>();
+      if (allLineups) {
+        for (const lineup of allLineups) {
           const starters = lineup.projected_starters || [];
-          const espnIds = new Set(starters.map((s: any) => s.espnId || s.player_id || s.id));
-          confirmedStartersMap.set(lineup.team_id, espnIds);
-          console.log(`  ${lineup.team_abbreviation}: ${espnIds.size} confirmed starters`);
+          const playerIds = new Set(
+            starters.map((s: any) => s.player_id || s.espnId || s.id).filter(Boolean)
+          );
+          lineupMap.set(lineup.team_id, {
+            starters: playerIds,
+            confirmed: lineup.confirmed === true
+          });
         }
       }
+      console.log(`📊 Loaded lineups for ${lineupMap.size} teams`);
 
       // 3. Fetch ALL players for active teams
       const playersRes = await fetch(EDGE_URL, {
@@ -111,55 +104,53 @@ export default function Roster() {
 
       if (playersData.success && playersData.players?.length > 0) {
         const teamMap: Record<string, Team> = {};
-        
+
         for (const p of playersData.players) {
           const teamAbbr = p.team_abbr;
-          
-          // Filter: Only keep players from teams playing TODAY
           if (!activeTeamAbbrs.has(teamAbbr)) continue;
 
           if (!teamMap[teamAbbr]) {
-            teamMap[teamAbbr] = { 
-              team_id: p.team_id || teamAbbr, 
-              abbreviation: teamAbbr, 
-              name: p.team || teamAbbr, 
-              players: [] 
+            teamMap[teamAbbr] = {
+              team_id: p.team_id || teamAbbr,
+              abbreviation: teamAbbr,
+              name: p.team || teamAbbr,
+              players: []
             };
           }
 
-          // ✅ CHECK if this player is a CONFIRMED starter from scraper
-          const teamConfirmedIds = confirmedStartersMap.get(p.team_id) || new Set();
-          const isConfirmedStarter = teamConfirmedIds.has(p.player_id) || 
-                                     teamConfirmedIds.has(p.external_id);
+          // ✅ Use lineupMap to determine starter status and confirmation
+          const lineupInfo = lineupMap.get(p.team_id);
+          const isStarter = lineupInfo?.starters.has(p.player_id) || lineupInfo?.starters.has(p.external_id);
+          const isConfirmed = lineupInfo?.confirmed === true;
 
-          // Determine status based on scraper data
           let status: "starter" | "bench" | "injured" = "bench";
-          let lineupStatus = p.lineup_status || "projected";
-          
+          let lineupStatus: "projected" | "confirmed" = "projected";
+
           if (p.status === "injured") {
             status = "injured";
-          } else if (isConfirmedStarter) {
+          } else if (isStarter) {
             status = "starter";
-            lineupStatus = "confirmed"; // ✅ Mark as confirmed from scraper
+            lineupStatus = isConfirmed ? "confirmed" : "projected";
           } else if (p.is_starter) {
+            // Fallback: if not in lineupMap but player.is_starter is true, treat as projected starter
             status = "starter";
             lineupStatus = "projected";
           }
 
           teamMap[teamAbbr].players.push({
-            player_id: p.player_id, 
-            name: p.name, 
-            team_abbr: teamAbbr, 
+            player_id: p.player_id,
+            name: p.name,
+            team_abbr: teamAbbr,
             team_name: p.team,
-            position: p.position, 
-            status, 
+            position: p.position,
+            status,
             lineup_status: lineupStatus,
-            opponent: p.opponent, 
+            opponent: p.opponent,
             game_date: p.game_date,
-            stats: { 
-              avgPoints: p.all_props?.points?.avg_l10 || 0, 
-              hitRate: p.all_props?.points?.l10 || 0, 
-              streak: p.all_props?.points?.streak || null 
+            stats: {
+              avgPoints: p.all_props?.points?.avg_l10 || 0,
+              hitRate: p.all_props?.points?.l10 || 0,
+              streak: p.all_props?.points?.streak || null
             }
           });
         }
@@ -167,14 +158,13 @@ export default function Roster() {
         // Sort players: Confirmed Starters → Projected Starters → Bench → Injured
         for (const team of Object.values(teamMap)) {
           team.players.sort((a, b) => {
-            // Priority: confirmed starters first, then projected, then bench, then injured
-            const getStatusPriority = (p: Player) => {
+            const priority = (p: Player) => {
               if (p.status === "injured") return 3;
               if (p.lineup_status === "confirmed" && p.status === "starter") return 0;
               if (p.status === "starter") return 1;
-              return 2; // bench
+              return 2;
             };
-            return getStatusPriority(a) - getStatusPriority(b);
+            return priority(a) - priority(b);
           });
 
           // Enforce exactly 5 starters (prioritize confirmed)
@@ -183,29 +173,20 @@ export default function Roster() {
             if (p.status === "starter") {
               starterCount++;
               if (starterCount > 5 && p.lineup_status !== "confirmed") {
-                p.status = "bench"; // Demote non-confirmed if > 5
+                p.status = "bench";
               }
             }
           }
         }
-        
+
         setTeams(Object.values(teamMap).sort((a, b) => a.abbreviation.localeCompare(b.abbreviation)));
-        
-        // Debug: Log what we found
-        for (const team of Object.values(teamMap)) {
-          const starters = team.players.filter(p => p.status === "starter");
-          console.log(`🏀 ${team.abbreviation}: ${starters.length} starters (${starters.filter(s => s.lineup_status === "confirmed").length} confirmed)`);
-          starters.forEach(s => {
-            console.log(`  ${s.lineup_status === "confirmed" ? "✅" : "🟡"} ${s.name} (${s.lineup_status})`);
-          });
-        }
       } else {
         setTeams([]);
       }
-    } catch (err) { 
-      console.error("❌ Error fetching roster:", err); 
-    } finally { 
-      setLoading(false); 
+    } catch (err) {
+      console.error("❌ Error fetching roster:", err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -222,14 +203,13 @@ export default function Roster() {
     }).filter(team => team.players.length > 0);
   }, [teams, filterStatus, searchTeam]);
 
-  // ✅ Color scheme matches ESPN (updated)
   const getStarterColor = (status: string, lineupStatus: string) => {
     if (status === "injured") return "bg-red-500/10 border-red-500/50 text-red-300";
     if (status === "starter") {
       if (lineupStatus === "confirmed") {
         return "bg-green-500/10 border-green-500/50 text-green-300";
       }
-      return "bg-amber-500/10 border-amber-500/50 text-amber-300"; // Projected
+      return "bg-amber-500/10 border-amber-500/50 text-amber-300";
     }
     return "bg-gray-500/10 border-gray-700 text-gray-400";
   };
@@ -237,7 +217,7 @@ export default function Roster() {
   const getStatusIcon = (status: string, lineupStatus: string) => {
     if (status === "injured") return <UserX className="w-3 h-3" />;
     if (status === "starter") {
-      return lineupStatus === "confirmed" 
+      return lineupStatus === "confirmed"
         ? <CheckCircle2 className="w-3 h-3 text-green-400" />
         : <Clock className="w-3 h-3 text-amber-400" />;
     }
@@ -255,7 +235,7 @@ export default function Roster() {
             <Shield className="w-8 h-8" /> Game Day Rosters
           </h1>
           <p className="text-gray-400 flex items-center gap-2">
-            <CalendarDays className="w-4 h-4" /> 
+            <CalendarDays className="w-4 h-4" />
             Showing active teams for {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} ({activeGamesCount} games)
           </p>
         </div>
@@ -275,12 +255,12 @@ export default function Roster() {
               <SelectItem value="bench">⚪ Bench</SelectItem><SelectItem value="injured">🔴 Injured</SelectItem>
             </SelectContent>
           </Select>
-          <input 
-            type="text" 
-            placeholder="Search team or player..." 
-            value={searchTeam} 
-            onChange={(e) => setSearchTeam(e.target.value)} 
-            className="flex-1 min-w-[200px] px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-yellow-500" 
+          <input
+            type="text"
+            placeholder="Search team or player..."
+            value={searchTeam}
+            onChange={(e) => setSearchTeam(e.target.value)}
+            className="flex-1 min-w-[200px] px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-yellow-500"
           />
           <Button variant="outline" size="sm" onClick={fetchRosterData} disabled={loading} className="border-gray-700 text-gray-300">
             <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} /> Refresh
@@ -310,8 +290,8 @@ export default function Roster() {
                         <span className="text-lg font-normal text-gray-400 hidden sm:inline">{team.name}</span>
                       </CardTitle>
                       <p className="text-sm text-gray-500 mt-1 flex items-center gap-2">
-                        <span className="text-amber-400">{team.players.filter(p => p.status === "starter" && p.lineup_status === "projected").length} Probable</span> • 
-                        <span className="text-green-400">{team.players.filter(p => p.status === "starter" && p.lineup_status === "confirmed").length} Confirmed</span> • 
+                        <span className="text-amber-400">{team.players.filter(p => p.status === "starter" && p.lineup_status === "projected").length} Probable</span> •
+                        <span className="text-green-400">{team.players.filter(p => p.status === "starter" && p.lineup_status === "confirmed").length} Confirmed</span> •
                         <span className="text-gray-400">{team.players.filter(p => p.status === "bench").length} Bench</span>
                       </p>
                     </div>
@@ -321,8 +301,8 @@ export default function Roster() {
                 <CardContent className="p-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                     {team.players.map((player) => (
-                      <div 
-                        key={player.player_id} 
+                      <div
+                        key={player.player_id}
                         className={`group relative p-3 rounded-xl border transition-all hover:scale-[1.02] ${getStarterColor(player.status, player.lineup_status)}`}
                       >
                         <div className="flex items-start justify-between mb-2">
@@ -334,7 +314,7 @@ export default function Roster() {
                             {getStatusIcon(player.status, player.lineup_status)}
                             {player.status === "starter" && (
                               <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
-                                player.lineup_status === "confirmed" 
+                                player.lineup_status === "confirmed"
                                   ? "bg-green-500/20 text-green-300 border border-green-500/30"
                                   : "bg-amber-500/20 text-amber-300 border border-amber-500/30"
                               }`}>
@@ -348,7 +328,7 @@ export default function Roster() {
                             )}
                           </div>
                         </div>
-                        
+
                         <div className="mb-2">
                           {player.lineup_status === "confirmed" ? (
                             <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-400 bg-green-500/10 px-2 py-0.5 rounded">
