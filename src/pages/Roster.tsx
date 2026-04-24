@@ -5,7 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { RefreshCw, UserCheck, UserX, Users, TrendingUp, Shield } from "lucide-react";
+import { RefreshCw, UserCheck, UserX, Users, TrendingUp, Shield, CheckCircle2, Clock, AlertCircle } from "lucide-react";
+import { supabase } from "@/lib/supabase"; // adjust import path to your supabase client
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
@@ -18,6 +19,7 @@ interface Player {
   status: "starter" | "bench" | "injured";
   opponent: string;
   game_date: string;
+  lineup_status?: string; // added from DB
   stats?: { avgPoints: number; hitRate: number; streak: { type: string; count: number } | null };
 }
 
@@ -34,8 +36,31 @@ export default function Roster() {
   const [loading, setLoading] = useState(false);
   const [filterStatus, setFilterStatus] = useState<"all" | "starter" | "bench" | "injured">("all");
   const [searchTeam, setSearchTeam] = useState("");
+  const [lineupData, setLineupData] = useState<any[]>([]);
+  const [lineupLoading, setLineupLoading] = useState(false);
 
-  useEffect(() => { fetchRosterData(); }, [sport]);
+  useEffect(() => {
+    fetchRosterData();
+    fetchLineupData();
+  }, [sport]);
+
+  const fetchLineupData = async () => {
+    setLineupLoading(true);
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const { data, error } = await supabase
+        .from('projected_lineups')
+        .select('*')
+        .eq('game_date', today)
+        .order('game_time_utc', { ascending: true });
+      if (error) throw error;
+      setLineupData(data || []);
+    } catch (error) {
+      console.error('Error fetching lineups:', error);
+    } finally {
+      setLineupLoading(false);
+    }
+  };
 
   const fetchRosterData = async () => {
     setLoading(true);
@@ -54,7 +79,6 @@ export default function Roster() {
           if (!teamAbbr) continue;
           if (!teamMap[teamAbbr]) teamMap[teamAbbr] = { team_id: teamAbbr, abbreviation: teamAbbr, name: p.team || teamAbbr, players: [] };
 
-          // ✅ Use actual is_starter flag from ESPN
           const status: "starter" | "bench" | "injured" = 
             p.status === "injured" ? "injured" :
             p.is_starter === true ? "starter" : "bench";
@@ -62,25 +86,24 @@ export default function Roster() {
           teamMap[teamAbbr].players.push({
             player_id: p.player_id, name: p.name, team_abbr: teamAbbr, team_name: p.team,
             position: p.position, status, opponent: p.opponent, game_date: p.game_date,
+            lineup_status: p.lineup_status,
             stats: { avgPoints: p.all_props?.points?.avg_l10 || 0, hitRate: p.all_props?.points?.l10 || 0, streak: p.all_props?.points?.streak || null }
           });
         }
 
         // Sort and enforce max 5 starters per team
         for (const team of Object.values(teamMap)) {
-          // Sort: starters first, then bench, then injured
           team.players.sort((a, b) => {
             const statusOrder = { starter: 0, bench: 1, injured: 2 };
             return statusOrder[a.status] - statusOrder[b.status];
           });
 
-          // ✅ SAFETY: If more than 5 starters, demote extras to bench
           let starterCount = 0;
           for (const player of team.players) {
             if (player.status === 'starter') {
               starterCount++;
               if (starterCount > 5) {
-                player.status = 'bench'; // Demote extra starters
+                player.status = 'bench';
               }
             }
           }
@@ -116,6 +139,38 @@ export default function Roster() {
     if (status === "starter") return <UserCheck className="w-3 h-3" />;
     if (status === "injured") return <UserX className="w-3 h-3" />;
     return <Users className="w-3 h-3" />;
+  };
+
+  const getLineupBadge = (player: Player, teamAbbr: string) => {
+    const teamLineup = lineupData.find(l => l.team_abbreviation === teamAbbr);
+    
+    if (player.lineup_status === 'confirmed') {
+      return (
+        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-400 bg-green-500/10 px-2 py-0.5 rounded border border-green-500/30">
+          <CheckCircle2 className="w-3 h-3" /> Confirmed
+        </span>
+      );
+    }
+    
+    if (teamLineup?.lineup_confidence) {
+      const config = {
+        high: { color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/30', icon: '🎯' },
+        medium: { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', icon: '⚠️' },
+        low: { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', icon: '❓' },
+      };
+      const c = config[teamLineup.lineup_confidence as keyof typeof config];
+      return (
+        <span className={`inline-flex items-center gap-1 text-[10px] font-medium ${c.color} ${c.bg} px-2 py-0.5 rounded border ${c.border}`}>
+          {c.icon} {teamLineup.lineup_confidence}
+        </span>
+      );
+    }
+    
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-yellow-400 bg-yellow-500/10 px-2 py-0.5 rounded border border-yellow-500/30">
+        <Clock className="w-3 h-3" /> Projected
+      </span>
+    );
   };
 
   const totalPlayers = teams.reduce((s, t) => s + t.players.length, 0);
@@ -192,7 +247,13 @@ export default function Roster() {
                     {team.players.map((player) => (
                       <div key={player.player_id} className={`group relative p-3 rounded-xl border transition-all hover:scale-[1.02] ${getStatusColor(player.status)}`}>
                         <div className="flex items-start justify-between mb-2">
-                          <div className="min-w-0"><h4 className="font-bold text-sm truncate pr-2">{player.name}</h4><p className="text-xs opacity-80 font-mono">{player.position}</p></div>
+                          <div className="min-w-0">
+                            <h4 className="font-bold text-sm truncate pr-2">{player.name}</h4>
+                            <div className="mb-2 flex items-center gap-2 flex-wrap">
+                              {getLineupBadge(player, team.abbreviation)}
+                            </div>
+                            <p className="text-xs opacity-80 font-mono">{player.position}</p>
+                          </div>
                           <div className="flex items-center gap-1 shrink-0">
                             {getStatusIcon(player.status)}
                             <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${getStatusColor(player.status)}`}>
