@@ -44,13 +44,12 @@ export default function Roster() {
     fetchLineupData();
   }, [sport]);
 
-  // ✅ Enhanced: fetches both projected_lineups and related players (as requested)
+  // ✅ Enhanced: fetches both projected_lineups and related players
   const fetchLineupData = async () => {
     setLineupLoading(true);
     try {
       const today = new Date().toISOString().split('T')[0];
       
-      // Fetch projected lineups from your DB (no Edge Function needed)
       const { data: lineups, error: lineupError } = await supabase
         .from('projected_lineups')
         .select('*')
@@ -59,7 +58,7 @@ export default function Roster() {
       
       if (lineupError) throw lineupError;
       
-      // Fetch players with starter status (for completeness, though not used in current UI)
+      // Optional: fetch players for completeness (not used in UI)
       const { data: players, error: playerError } = await supabase
         .from('players')
         .select('*, teams:team_id(abbreviation)')
@@ -155,9 +154,9 @@ export default function Roster() {
     return <Users className="w-3 h-3" />;
   };
 
+  // ✅ Updated badge component – shows 'Confirmed' from player.lineup_status,
+  //    or confidence level from projected_lineups table, or 'Projected' as fallback
   const getLineupBadge = (player: Player, teamAbbr: string) => {
-    const teamLineup = lineupData.find(l => l.team_abbreviation === teamAbbr);
-    
     if (player.lineup_status === 'confirmed') {
       return (
         <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-400 bg-green-500/10 px-2 py-0.5 rounded border border-green-500/30">
@@ -166,6 +165,8 @@ export default function Roster() {
       );
     }
     
+    // Show confidence from projected_lineups table
+    const teamLineup = lineupData.find(l => l.team_abbreviation === teamAbbr);
     if (teamLineup?.lineup_confidence) {
       const config = {
         high: { color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/30', icon: '🎯' },
@@ -173,6 +174,7 @@ export default function Roster() {
         low: { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', icon: '❓' },
       };
       const c = config[teamLineup.lineup_confidence as keyof typeof config];
+      
       return (
         <span className={`inline-flex items-center gap-1 text-[10px] font-medium ${c.color} ${c.bg} px-2 py-0.5 rounded border ${c.border}`}>
           {c.icon} {teamLineup.lineup_confidence}
