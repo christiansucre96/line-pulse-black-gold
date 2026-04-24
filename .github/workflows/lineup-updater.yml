@@ -1,14 +1,14 @@
-name: Auto-Update ESPN Lineups
+name: Auto-Update NBA Lineups
 on:
   schedule:
-    - cron: '0 */4 * * *'  # Runs every 4 hours
-  workflow_dispatch:      # Allows manual trigger
+    - cron: '*/15 * * * *'  # Every 15 minutes during games
+  workflow_dispatch:
 jobs:
   update-lineups:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger Lineup Update
+      - name: Trigger Balldontlie Lineup Update
         run: |
-          curl -X POST "${{ secrets.CLEVER_ACTION_URL }}" \
+          curl -X POST "${{ secrets.BALLDONTLIE_URL }}" \
             -H "Content-Type: application/json" \
-            -d '{"operation": "update_lineups", "sport": "nba"}'
+            -d '{"operation": "update_lineups"}'
