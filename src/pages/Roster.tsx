@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RefreshCw, UserCheck, UserX, Users, TrendingUp, Shield, Clock, CheckCircle2, CalendarDays } from "lucide-react";
+import { supabase } from "@/lib/supabase"; // ✅ ADDED: import supabase client
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
@@ -39,13 +40,15 @@ export default function Roster() {
 
   useEffect(() => { fetchRosterData(); }, [sport]);
 
+  // ✅ REPLACED fetchRosterData with version that uses projected_lineups table
   const fetchRosterData = async () => {
     setLoading(true);
     try {
       // Get TODAY's date
       const today = new Date().toISOString().split('T')[0];
+      console.log(`📅 Fetching rosters for: ${today}`);
 
-      // 1. Fetch Games (Next 3 Days from API)
+      // 1. Fetch Games (TODAY only)
       const gamesRes = await fetch(EDGE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -53,24 +56,52 @@ export default function Roster() {
       });
       const gamesData = await gamesRes.json();
 
-      // 2. Filter to ONLY today's games
+      // Filter to ONLY today's games
       const todaysGames = (gamesData.games || []).filter((game: any) => {
         const gameDate = game.game_date || '';
         return gameDate === today;
       });
 
-      console.log(`✅ Found ${todaysGames.length} games for today`);
+      console.log(`✅ Found ${todaysGames.length} games today`);
 
-      // Extract active team abbreviations from TODAY's games only
+      // Extract active team IDs and abbreviations
+      const activeTeamIds = new Set<string>();
       const activeTeamAbbrs = new Set<string>();
       setActiveGamesCount(todaysGames.length);
       
       for (const game of todaysGames) {
-        if (game.home_team?.abbreviation) activeTeamAbbrs.add(game.home_team.abbreviation);
-        if (game.away_team?.abbreviation) activeTeamAbbrs.add(game.away_team.abbreviation);
+        if (game.home_team?.id) {
+          activeTeamIds.add(game.home_team.id);
+          activeTeamAbbrs.add(game.home_team.abbreviation);
+        }
+        if (game.away_team?.id) {
+          activeTeamIds.add(game.away_team.id);
+          activeTeamAbbrs.add(game.away_team.abbreviation);
+        }
       }
 
-      // 3. Fetch Players
+      // 2. Fetch CONFIRMED starters from projected_lineups table
+      // This is where your scraper stores the exact ESPN starters
+      const { data: confirmedLineups } = await supabase
+        .from('projected_lineups')
+        .select('*')
+        .eq('game_date', today)
+        .eq('confirmed', true);
+
+      console.log(`📊 Found ${confirmedLineups?.length || 0} confirmed lineups`);
+
+      // Build a map of team_id → confirmed starter ESPN IDs
+      const confirmedStartersMap = new Map<string, Set<string>>();
+      if (confirmedLineups) {
+        for (const lineup of confirmedLineups) {
+          const starters = lineup.projected_starters || [];
+          const espnIds = new Set(starters.map((s: any) => s.espnId || s.player_id || s.id));
+          confirmedStartersMap.set(lineup.team_id, espnIds);
+          console.log(`  ${lineup.team_abbreviation}: ${espnIds.size} confirmed starters`);
+        }
+      }
+
+      // 3. Fetch ALL players for active teams
       const playersRes = await fetch(EDGE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -84,21 +115,36 @@ export default function Roster() {
         for (const p of playersData.players) {
           const teamAbbr = p.team_abbr;
           
-          // 🚨 FILTER: Only keep players from teams playing TODAY
+          // Filter: Only keep players from teams playing TODAY
           if (!activeTeamAbbrs.has(teamAbbr)) continue;
 
           if (!teamMap[teamAbbr]) {
             teamMap[teamAbbr] = { 
-              team_id: teamAbbr, 
+              team_id: p.team_id || teamAbbr, 
               abbreviation: teamAbbr, 
               name: p.team || teamAbbr, 
               players: [] 
             };
           }
 
-          const status: "starter" | "bench" | "injured" = 
-            p.status === "injured" ? "injured" :
-            p.is_starter === true ? "starter" : "bench";
+          // ✅ CHECK if this player is a CONFIRMED starter from scraper
+          const teamConfirmedIds = confirmedStartersMap.get(p.team_id) || new Set();
+          const isConfirmedStarter = teamConfirmedIds.has(p.player_id) || 
+                                     teamConfirmedIds.has(p.external_id);
+
+          // Determine status based on scraper data
+          let status: "starter" | "bench" | "injured" = "bench";
+          let lineupStatus = p.lineup_status || "projected";
+          
+          if (p.status === "injured") {
+            status = "injured";
+          } else if (isConfirmedStarter) {
+            status = "starter";
+            lineupStatus = "confirmed"; // ✅ Mark as confirmed from scraper
+          } else if (p.is_starter) {
+            status = "starter";
+            lineupStatus = "projected";
+          }
 
           teamMap[teamAbbr].players.push({
             player_id: p.player_id, 
@@ -107,7 +153,7 @@ export default function Roster() {
             team_name: p.team,
             position: p.position, 
             status, 
-            lineup_status: p.lineup_status || "projected",
+            lineup_status: lineupStatus,
             opponent: p.opponent, 
             game_date: p.game_date,
             stats: { 
@@ -118,28 +164,46 @@ export default function Roster() {
           });
         }
 
-        // Sort players: Starters -> Bench -> Injured
+        // Sort players: Confirmed Starters → Projected Starters → Bench → Injured
         for (const team of Object.values(teamMap)) {
           team.players.sort((a, b) => {
-            const statusOrder = { starter: 0, bench: 1, injured: 2 };
-            return statusOrder[a.status] - statusOrder[b.status];
+            // Priority: confirmed starters first, then projected, then bench, then injured
+            const getStatusPriority = (p: Player) => {
+              if (p.status === "injured") return 3;
+              if (p.lineup_status === "confirmed" && p.status === "starter") return 0;
+              if (p.status === "starter") return 1;
+              return 2; // bench
+            };
+            return getStatusPriority(a) - getStatusPriority(b);
           });
-          // Enforce exactly 5 starters
-          let count = 0;
+
+          // Enforce exactly 5 starters (prioritize confirmed)
+          let starterCount = 0;
           for (const p of team.players) {
             if (p.status === "starter") {
-              count++;
-              if (count > 5) p.status = "bench";
+              starterCount++;
+              if (starterCount > 5 && p.lineup_status !== "confirmed") {
+                p.status = "bench"; // Demote non-confirmed if > 5
+              }
             }
           }
         }
         
         setTeams(Object.values(teamMap).sort((a, b) => a.abbreviation.localeCompare(b.abbreviation)));
+        
+        // Debug: Log what we found
+        for (const team of Object.values(teamMap)) {
+          const starters = team.players.filter(p => p.status === "starter");
+          console.log(`🏀 ${team.abbreviation}: ${starters.length} starters (${starters.filter(s => s.lineup_status === "confirmed").length} confirmed)`);
+          starters.forEach(s => {
+            console.log(`  ${s.lineup_status === "confirmed" ? "✅" : "🟡"} ${s.name} (${s.lineup_status})`);
+          });
+        }
       } else {
         setTeams([]);
       }
     } catch (err) { 
-      console.error("Error fetching roster:", err); 
+      console.error("❌ Error fetching roster:", err); 
     } finally { 
       setLoading(false); 
     }
@@ -158,15 +222,14 @@ export default function Roster() {
     }).filter(team => team.players.length > 0);
   }, [teams, filterStatus, searchTeam]);
 
-  // ✅ UPDATED: Color scheme matches ESPN
+  // ✅ Color scheme matches ESPN (updated)
   const getStarterColor = (status: string, lineupStatus: string) => {
     if (status === "injured") return "bg-red-500/10 border-red-500/50 text-red-300";
     if (status === "starter") {
-      // 🟠 ESPN-style: Amber/Orange for projected, Green for confirmed
       if (lineupStatus === "confirmed") {
-        return "bg-green-500/10 border-green-500/50 text-green-300"; // Green when confirmed
+        return "bg-green-500/10 border-green-500/50 text-green-300";
       }
-      return "bg-amber-500/10 border-amber-500/50 text-amber-300"; // Amber for projected
+      return "bg-amber-500/10 border-amber-500/50 text-amber-300"; // Projected
     }
     return "bg-gray-500/10 border-gray-700 text-gray-400";
   };
@@ -269,7 +332,6 @@ export default function Roster() {
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
                             {getStatusIcon(player.status, player.lineup_status)}
-                            {/* ✅ UPDATED: Show "Probable Starter" or "Confirmed" instead of "START" */}
                             {player.status === "starter" && (
                               <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
                                 player.lineup_status === "confirmed" 
@@ -287,7 +349,6 @@ export default function Roster() {
                           </div>
                         </div>
                         
-                        {/* Show status badge */}
                         <div className="mb-2">
                           {player.lineup_status === "confirmed" ? (
                             <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-400 bg-green-500/10 px-2 py-0.5 rounded">
