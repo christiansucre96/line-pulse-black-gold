@@ -10,6 +10,7 @@
 // ✅ UPDATED: Table now shows streak and enhanced trend (Strong Over/Over/Under/Strong Under)
 // ✅ NEW: Market line input for betting signals (100% free, no APIs)
 // ✅ UPDATED: Game filter dropdown shows ONLY today's games
+// ✅ FIXED: Display game date without timezone shift (use YYYY-MM-DD directly)
 
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -315,6 +316,22 @@ export default function Scanner() {
   const currentProps = SPORT_PROPS[sport] || SPORT_PROPS.nba;
   const totalPages = Math.ceil(totalPlayers / PLAYERS_PER_PAGE);
 
+  // Helper to format date safely without timezone shift
+  const formatGameDate = (dateStr: string) => {
+    if (!dateStr) return '';
+    // If it's already in YYYY-MM-DD format, use it directly
+    if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      return dateStr;
+    }
+    // Otherwise parse and format as local date
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-US', { 
+      month: 'numeric', 
+      day: 'numeric', 
+      year: 'numeric' 
+    });
+  };
+
   return (
     <DashboardLayout>
       <div className="p-4 max-w-7xl mx-auto">
@@ -350,7 +367,7 @@ export default function Scanner() {
             </SelectContent>
           </Select>
 
-          {/* ✅ Game Filter Dropdown with formatted time – NOW ONLY TODAY'S GAMES */}
+          {/* ✅ Game Filter Dropdown – NOW ONLY TODAY'S GAMES with correct date formatting */}
           <Select value={selectedGame} onValueChange={handleGameChange}>
             <SelectTrigger className="w-72 bg-gray-900 border-gray-700 text-gray-300 text-sm">
               <SelectValue placeholder="Select a game (today only)" />
@@ -360,16 +377,13 @@ export default function Scanner() {
               {(availableGames || []).map((game: any) => (
                 <SelectItem key={game.external_id} value={game.external_id}>
                   {game.home_team?.abbreviation} vs {game.away_team?.abbreviation} -{" "}
-                  {game.game_date 
-                    ? `${new Date(game.game_date).toLocaleDateString()} ${
-                        game.start_time 
-                          ? new Date(game.start_time).toLocaleTimeString('en-US', { 
-                              hour: 'numeric', 
-                              minute: '2-digit'
-                            })
-                          : ''
-                      }`
-                    : 'TBD'
+                  {formatGameDate(game.game_date)} {" "}
+                  {game.start_time 
+                    ? new Date(game.start_time).toLocaleTimeString('en-US', { 
+                        hour: 'numeric', 
+                        minute: '2-digit'
+                      })
+                    : ''
                   }
                 </SelectItem>
               ))}
