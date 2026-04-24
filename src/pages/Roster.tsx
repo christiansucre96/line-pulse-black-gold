@@ -44,17 +44,31 @@ export default function Roster() {
     fetchLineupData();
   }, [sport]);
 
+  // ✅ Enhanced: fetches both projected_lineups and related players (as requested)
   const fetchLineupData = async () => {
     setLineupLoading(true);
     try {
       const today = new Date().toISOString().split('T')[0];
-      const { data, error } = await supabase
+      
+      // Fetch projected lineups from your DB (no Edge Function needed)
+      const { data: lineups, error: lineupError } = await supabase
         .from('projected_lineups')
         .select('*')
         .eq('game_date', today)
         .order('game_time_utc', { ascending: true });
-      if (error) throw error;
-      setLineupData(data || []);
+      
+      if (lineupError) throw lineupError;
+      
+      // Fetch players with starter status (for completeness, though not used in current UI)
+      const { data: players, error: playerError } = await supabase
+        .from('players')
+        .select('*, teams:team_id(abbreviation)')
+        .eq('sport', 'nba')
+        .in('team_id', lineups?.map(l => l.team_id) || []);
+      
+      if (playerError) throw playerError;
+      
+      setLineupData(lineups || []);
     } catch (error) {
       console.error('Error fetching lineups:', error);
     } finally {
