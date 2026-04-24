@@ -5,8 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { RefreshCw, UserCheck, UserX, Users, TrendingUp, Shield, CheckCircle2, Clock, AlertCircle } from "lucide-react";
-import { supabase } from "@/lib/supabase"; // adjust import path to your supabase client
+import { RefreshCw, UserCheck, UserX, Users, TrendingUp, Shield, Clock, CheckCircle2, CalendarDays } from "lucide-react";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
@@ -17,9 +16,9 @@ interface Player {
   team_name: string;
   position: string;
   status: "starter" | "bench" | "injured";
+  lineup_status: "projected" | "confirmed";
   opponent: string;
   game_date: string;
-  lineup_status?: string; // added from DB
   stats?: { avgPoints: number; hitRate: number; streak: { type: string; count: number } | null };
 }
 
@@ -36,48 +35,32 @@ export default function Roster() {
   const [loading, setLoading] = useState(false);
   const [filterStatus, setFilterStatus] = useState<"all" | "starter" | "bench" | "injured">("all");
   const [searchTeam, setSearchTeam] = useState("");
-  const [lineupData, setLineupData] = useState<any[]>([]);
-  const [lineupLoading, setLineupLoading] = useState(false);
+  const [activeGamesCount, setActiveGamesCount] = useState(0);
 
-  useEffect(() => {
-    fetchRosterData();
-    fetchLineupData();
-  }, [sport]);
-
-  // ✅ Enhanced: fetches both projected_lineups and related players
-  const fetchLineupData = async () => {
-    setLineupLoading(true);
-    try {
-      const today = new Date().toISOString().split('T')[0];
-      
-      const { data: lineups, error: lineupError } = await supabase
-        .from('projected_lineups')
-        .select('*')
-        .eq('game_date', today)
-        .order('game_time_utc', { ascending: true });
-      
-      if (lineupError) throw lineupError;
-      
-      // Optional: fetch players for completeness (not used in UI)
-      const { data: players, error: playerError } = await supabase
-        .from('players')
-        .select('*, teams:team_id(abbreviation)')
-        .eq('sport', 'nba')
-        .in('team_id', lineups?.map(l => l.team_id) || []);
-      
-      if (playerError) throw playerError;
-      
-      setLineupData(lineups || []);
-    } catch (error) {
-      console.error('Error fetching lineups:', error);
-    } finally {
-      setLineupLoading(false);
-    }
-  };
+  useEffect(() => { fetchRosterData(); }, [sport]);
 
   const fetchRosterData = async () => {
     setLoading(true);
     try {
+      // 1. Fetch Games (Next 3 Days) to determine which teams are playing
+      const gamesRes = await fetch(EDGE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operation: "get_games", sport }),
+      });
+      const gamesData = await gamesRes.json();
+
+      // Extract active team abbreviations
+      const activeTeamAbbrs = new Set<string>();
+      if (gamesData.success && gamesData.games) {
+        setActiveGamesCount(gamesData.games.length);
+        for (const game of gamesData.games) {
+          if (game.home_team?.abbreviation) activeTeamAbbrs.add(game.home_team.abbreviation);
+          if (game.away_team?.abbreviation) activeTeamAbbrs.add(game.away_team.abbreviation);
+        }
+      }
+
+      // 2. Fetch Players
       const playersRes = await fetch(EDGE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -87,46 +70,69 @@ export default function Roster() {
 
       if (playersData.success && playersData.players?.length > 0) {
         const teamMap: Record<string, Team> = {};
+        
         for (const p of playersData.players) {
           const teamAbbr = p.team_abbr;
-          if (!teamAbbr) continue;
-          if (!teamMap[teamAbbr]) teamMap[teamAbbr] = { team_id: teamAbbr, abbreviation: teamAbbr, name: p.team || teamAbbr, players: [] };
+          
+          // 🚨 FILTER: Only keep players from teams that are playing in the next 24h
+          if (!activeTeamAbbrs.has(teamAbbr)) continue;
+
+          if (!teamMap[teamAbbr]) {
+            teamMap[teamAbbr] = { 
+              team_id: teamAbbr, 
+              abbreviation: teamAbbr, 
+              name: p.team || teamAbbr, 
+              players: [] 
+            };
+          }
 
           const status: "starter" | "bench" | "injured" = 
             p.status === "injured" ? "injured" :
             p.is_starter === true ? "starter" : "bench";
 
           teamMap[teamAbbr].players.push({
-            player_id: p.player_id, name: p.name, team_abbr: teamAbbr, team_name: p.team,
-            position: p.position, status, opponent: p.opponent, game_date: p.game_date,
-            lineup_status: p.lineup_status,
-            stats: { avgPoints: p.all_props?.points?.avg_l10 || 0, hitRate: p.all_props?.points?.l10 || 0, streak: p.all_props?.points?.streak || null }
+            player_id: p.player_id, 
+            name: p.name, 
+            team_abbr: teamAbbr, 
+            team_name: p.team,
+            position: p.position, 
+            status, 
+            lineup_status: p.lineup_status || "projected",
+            opponent: p.opponent, 
+            game_date: p.game_date,
+            stats: { 
+              avgPoints: p.all_props?.points?.avg_l10 || 0, 
+              hitRate: p.all_props?.points?.l10 || 0, 
+              streak: p.all_props?.points?.streak || null 
+            }
           });
         }
 
-        // Sort and enforce max 5 starters per team
+        // Sort players: Starters -> Bench -> Injured
         for (const team of Object.values(teamMap)) {
           team.players.sort((a, b) => {
             const statusOrder = { starter: 0, bench: 1, injured: 2 };
             return statusOrder[a.status] - statusOrder[b.status];
           });
-
-          let starterCount = 0;
-          for (const player of team.players) {
-            if (player.status === 'starter') {
-              starterCount++;
-              if (starterCount > 5) {
-                player.status = 'bench';
-              }
+          // Enforce exactly 5 starters
+          let count = 0;
+          for (const p of team.players) {
+            if (p.status === "starter") {
+              count++;
+              if (count > 5) p.status = "bench";
             }
           }
         }
-
+        
         setTeams(Object.values(teamMap).sort((a, b) => a.abbreviation.localeCompare(b.abbreviation)));
       } else {
         setTeams([]);
       }
-    } catch (err) { console.error("Error fetching roster:", err); } finally { setLoading(false); }
+    } catch (err) { 
+      console.error("Error fetching roster:", err); 
+    } finally { 
+      setLoading(false); 
+    }
   };
 
   const filteredTeams = useMemo(() => {
@@ -148,58 +154,20 @@ export default function Roster() {
     return "bg-gray-500/10 border-gray-700 text-gray-400";
   };
 
-  const getStatusIcon = (status: string) => {
-    if (status === "starter") return <UserCheck className="w-3 h-3" />;
-    if (status === "injured") return <UserX className="w-3 h-3" />;
-    return <Users className="w-3 h-3" />;
-  };
-
-  // ✅ Updated badge component – shows 'Confirmed' from player.lineup_status,
-  //    or confidence level from projected_lineups table, or 'Projected' as fallback
-  const getLineupBadge = (player: Player, teamAbbr: string) => {
-    if (player.lineup_status === 'confirmed') {
-      return (
-        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-400 bg-green-500/10 px-2 py-0.5 rounded border border-green-500/30">
-          <CheckCircle2 className="w-3 h-3" /> Confirmed
-        </span>
-      );
-    }
-    
-    // Show confidence from projected_lineups table
-    const teamLineup = lineupData.find(l => l.team_abbreviation === teamAbbr);
-    if (teamLineup?.lineup_confidence) {
-      const config = {
-        high: { color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/30', icon: '🎯' },
-        medium: { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', icon: '⚠️' },
-        low: { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', icon: '❓' },
-      };
-      const c = config[teamLineup.lineup_confidence as keyof typeof config];
-      
-      return (
-        <span className={`inline-flex items-center gap-1 text-[10px] font-medium ${c.color} ${c.bg} px-2 py-0.5 rounded border ${c.border}`}>
-          {c.icon} {teamLineup.lineup_confidence}
-        </span>
-      );
-    }
-    
-    return (
-      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-yellow-400 bg-yellow-500/10 px-2 py-0.5 rounded border border-yellow-500/30">
-        <Clock className="w-3 h-3" /> Projected
-      </span>
-    );
-  };
-
   const totalPlayers = teams.reduce((s, t) => s + t.players.length, 0);
   const startersCount = teams.reduce((s, t) => s + t.players.filter(p => p.status === "starter").length, 0);
-  const benchCount = teams.reduce((s, t) => s + t.players.filter(p => p.status === "bench").length, 0);
-  const injuredCount = teams.reduce((s, t) => s + t.players.filter(p => p.status === "injured").length, 0);
 
   return (
     <DashboardLayout>
       <div className="p-6 max-w-7xl mx-auto">
         <div className="mb-6">
-          <h1 className="text-3xl font-bold text-yellow-400 mb-2 flex items-center gap-3"><Shield className="w-8 h-8" />Game Day Rosters</h1>
-          <p className="text-gray-400">Active players for upcoming games • Next 24 hours</p>
+          <h1 className="text-3xl font-bold text-yellow-400 mb-2 flex items-center gap-3">
+            <Shield className="w-8 h-8" /> Game Day Rosters
+          </h1>
+          <p className="text-gray-400 flex items-center gap-2">
+            <CalendarDays className="w-4 h-4" /> 
+            Showing active teams for next 24 hours ({activeGamesCount} games scheduled)
+          </p>
         </div>
 
         <div className="mb-6 flex flex-wrap gap-4">
@@ -213,30 +181,32 @@ export default function Roster() {
           <Select value={filterStatus} onValueChange={(v) => setFilterStatus(v as any)}>
             <SelectTrigger className="w-40 bg-gray-900 border-gray-700 text-white"><SelectValue /></SelectTrigger>
             <SelectContent className="bg-gray-900 border-gray-700">
-              <SelectItem value="all">All Players</SelectItem><SelectItem value="starter">🟢 Starters Only</SelectItem>
-              <SelectItem value="bench">⚪ Bench Only</SelectItem><SelectItem value="injured">🔴 Injured Only</SelectItem>
+              <SelectItem value="all">All Players</SelectItem><SelectItem value="starter">🟢 Starters</SelectItem>
+              <SelectItem value="bench">⚪ Bench</SelectItem><SelectItem value="injured">🔴 Injured</SelectItem>
             </SelectContent>
           </Select>
-          <input type="text" placeholder="Search team or player..." value={searchTeam} onChange={(e) => setSearchTeam(e.target.value)} className="flex-1 min-w-[200px] px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-yellow-500" />
+          <input 
+            type="text" 
+            placeholder="Search team or player..." 
+            value={searchTeam} 
+            onChange={(e) => setSearchTeam(e.target.value)} 
+            className="flex-1 min-w-[200px] px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-yellow-500" 
+          />
           <Button variant="outline" size="sm" onClick={fetchRosterData} disabled={loading} className="border-gray-700 text-gray-300">
-            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />Refresh
+            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} /> Refresh
           </Button>
         </div>
 
-        <div className="mb-8 grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card className="bg-gray-900/50 border-gray-700"><CardContent className="p-4 flex items-center gap-3"><Users className="w-6 h-6 text-blue-400" /><div><p className="text-2xl font-bold text-white">{totalPlayers}</p><p className="text-xs text-gray-500">Total Players</p></div></CardContent></Card>
-          <Card className="bg-gray-900/50 border-gray-700"><CardContent className="p-4 flex items-center gap-3"><UserCheck className="w-6 h-6 text-green-400" /><div><p className="text-2xl font-bold text-white">{startersCount}</p><p className="text-xs text-gray-500">Starters</p></div></CardContent></Card>
-          <Card className="bg-gray-900/50 border-gray-700"><CardContent className="p-4 flex items-center gap-3"><Users className="w-6 h-6 text-gray-400" /><div><p className="text-2xl font-bold text-white">{benchCount}</p><p className="text-xs text-gray-500">Bench</p></div></CardContent></Card>
-          <Card className="bg-gray-900/50 border-gray-700"><CardContent className="p-4 flex items-center gap-3"><UserX className="w-6 h-6 text-red-400" /><div><p className="text-2xl font-bold text-white">{injuredCount}</p><p className="text-xs text-gray-500">Injured</p></div></CardContent></Card>
-        </div>
-
         {loading ? (
-          <div className="text-center py-20"><RefreshCw className="w-12 h-12 animate-spin mx-auto mb-4 text-yellow-400" /><p className="text-gray-400 text-lg">Loading rosters...</p></div>
+          <div className="text-center py-20">
+            <RefreshCw className="w-12 h-12 animate-spin mx-auto mb-4 text-yellow-400" />
+            <p className="text-gray-400 text-lg">Loading rosters...</p>
+          </div>
         ) : filteredTeams.length === 0 ? (
           <div className="text-center py-20 text-gray-500 bg-gray-900/20 rounded-xl border border-gray-800">
-            <Users className="w-16 h-16 mx-auto mb-4 text-gray-600" />
-            <p className="text-xl font-semibold">No players found</p>
-            <p className="text-sm mt-2">Run Full Ingest to populate player data.</p>
+            <CalendarDays className="w-16 h-16 mx-auto mb-4 text-gray-600" />
+            <p className="text-xl font-semibold">No games scheduled</p>
+            <p className="text-sm mt-2">Check back later for upcoming matchups.</p>
           </div>
         ) : (
           <div className="space-y-8">
@@ -251,8 +221,7 @@ export default function Roster() {
                       </CardTitle>
                       <p className="text-sm text-gray-500 mt-1 flex items-center gap-2">
                         <span className="text-green-400">{team.players.filter(p => p.status === "starter").length} Starters</span> • 
-                        <span className="text-gray-400">{team.players.filter(p => p.status === "bench").length} Bench</span> • 
-                        <span className="text-red-400">{team.players.filter(p => p.status === "injured").length} Injured</span>
+                        <span className="text-gray-400">{team.players.filter(p => p.status === "bench").length} Bench</span>
                       </p>
                     </div>
                     <Badge variant="outline" className="border-gray-600 text-gray-400 text-xs py-1 px-2">NBA</Badge>
@@ -265,25 +234,32 @@ export default function Roster() {
                         <div className="flex items-start justify-between mb-2">
                           <div className="min-w-0">
                             <h4 className="font-bold text-sm truncate pr-2">{player.name}</h4>
-                            <div className="mb-2 flex items-center gap-2 flex-wrap">
-                              {getLineupBadge(player, team.abbreviation)}
-                            </div>
                             <p className="text-xs opacity-80 font-mono">{player.position}</p>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
-                            {getStatusIcon(player.status)}
+                            {player.status === "starter" ? <UserCheck className="w-3 h-3" /> : player.status === "injured" ? <UserX className="w-3 h-3" /> : <Users className="w-3 h-3" />}
                             <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${getStatusColor(player.status)}`}>
                               {player.status === "starter" ? "START" : player.status === "injured" ? "OUT" : "BENCH"}
                             </span>
                           </div>
                         </div>
+                        
+                        <div className="mb-2">
+                          {player.lineup_status === "confirmed" ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-green-400 bg-green-500/10 px-2 py-0.5 rounded">
+                              <CheckCircle2 className="w-3 h-3" /> Confirmed
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-yellow-400 bg-yellow-500/10 px-2 py-0.5 rounded">
+                              <Clock className="w-3 h-3" /> Projected
+                            </span>
+                          )}
+                        </div>
+
                         <div className="grid grid-cols-2 gap-2 mt-3 pt-2 border-t border-current border-opacity-10">
                           <div className="text-center"><p className="text-[10px] opacity-60">L10 Avg</p><p className="text-sm font-bold">{player.stats?.avgPoints.toFixed(1)}</p></div>
                           <div className="text-center"><p className="text-[10px] opacity-60">Hit Rate</p><p className={`text-sm font-bold ${(player.stats?.hitRate || 0) >= 80 ? "text-green-400" : (player.stats?.hitRate || 0) >= 60 ? "text-yellow-400" : "text-red-400"}`}>{player.stats?.hitRate}%</p></div>
                         </div>
-                        {player.stats?.streak && player.stats.streak.type === "Over" && player.stats.streak.count >= 3 && (
-                          <div className="mt-2 flex items-center justify-center gap-1 text-xs text-green-400 bg-green-500/10 py-1 rounded"><TrendingUp className="w-3 h-3" />Hot Streak ({player.stats.streak.count})</div>
-                        )}
                       </div>
                     ))}
                   </div>
