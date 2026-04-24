@@ -350,88 +350,122 @@ export default function RosterPage() {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string>("");
 
-  // Fetch real lineup data from your scraper's database
+  // ✅ UPDATED: fetch directly from projected_lineups table
   const fetchLineups = async () => {
     setLoading(true);
     setError(null);
     
     try {
       const today = new Date().toISOString().split('T')[0];
+      console.log('📅 Fetching lineups for:', today);
       
-      // 1. Get today's games to know which teams are playing
-      const { data: games, error: gamesError } = await supabase
-        .from('games_data')
+      // ✅ Fetch directly from projected_lineups (where scraper stores data)
+      const { data: lineups, error: lineupsError } = await supabase
+        .from('projected_lineups')
         .select(`
-          external_id,
-          home_team:teams!games_data_home_team_id_fkey(abbreviation, name),
-          away_team:teams!games_data_away_team_id_fkey(abbreviation, name),
-          game_date
+          team_id,
+          team_abbreviation,
+          game_id,
+          game_date,
+          game_time_utc,
+          opponent_abbreviation,
+          projected_starters,
+          bench_depth,
+          lineup_confidence,
+          confirmed,
+          confirmed_at
         `)
-        .eq('sport', 'nba')
-        .eq('game_date', today);
+        .eq('game_date', today)
+        .order('game_time_utc', { ascending: true });
       
-      if (gamesError) throw gamesError;
-      
-      const activeTeamIds = new Set<string>();
-      const activeTeamAbbrs = new Set<string>();
-      
-      for (const game of games || []) {
-        if (game.home_team?.id) {
-          activeTeamIds.add(game.home_team.id);
-          activeTeamAbbrs.add(game.home_team.abbreviation);
-        }
-        if (game.away_team?.id) {
-          activeTeamIds.add(game.away_team.id);
-          activeTeamAbbrs.add(game.away_team.abbreviation);
-        }
+      if (lineupsError) {
+        console.error('Error fetching lineups:', lineupsError);
+        throw lineupsError;
       }
       
-      if (activeTeamIds.size === 0) {
+      console.log('📊 Found lineups:', lineups?.length);
+      
+      if (!lineups || lineups.length === 0) {
+        // Try fetching without date filter to see what's in the table
+        const { data: allLineups } = await supabase
+          .from('projected_lineups')
+          .select('game_date, team_abbreviation')
+          .limit(5);
+        
+        console.log('📋 Recent lineups in DB:', allLineups);
+        
         setTeams([]);
         setLoading(false);
         return;
       }
       
-      // 2. Get players for active teams with lineup status from scraper
-      const { data: players, error: playersError } = await supabase
-        .from('players')
-        .select(`
-          id,
-          full_name,
-          position,
-          team_id,
-          is_starter,
-          lineup_status,
-          teams:team_id(abbreviation, name)
-        `)
-        .eq('sport', 'nba')
-        .in('team_id', [...activeTeamIds])
-        .order('is_starter', { ascending: false });
-      
-      if (playersError) throw playersError;
-      
-      // 3. Group players by team
+      // Group by team and fetch full player details
       const teamMap: Record<string, any> = {};
       
-      for (const player of players || []) {
-        const team = player.teams;
-        if (!team?.abbreviation) continue;
+      for (const lineup of lineups) {
+        const teamAbbr = lineup.team_abbreviation;
         
-        if (!teamMap[team.abbreviation]) {
-          teamMap[team.abbreviation] = {
-            abbreviation: team.abbreviation,
-            name: team.name,
-            players: []
+        if (!teamMap[teamAbbr]) {
+          teamMap[teamAbbr] = {
+            abbreviation: teamAbbr,
+            name: teamAbbr, // Will update below
+            players: [],
+            gameInfo: {
+              opponent: lineup.opponent_abbreviation,
+              confirmed: lineup.confirmed ? 5 : 0,
+              probable: lineup.confirmed ? 0 : 5,
+            }
           };
         }
         
-        // Add mock stats for display (replace with real stats from your player_game_stats table)
-        teamMap[team.abbreviation].players.push({
-          ...player,
-          l10avg: Math.random() * 25 + 5, // Mock: 5-30 avg
-          hitRate: Math.floor(Math.random() * 40) + 40, // Mock: 40-80%
-          jersey: Math.floor(Math.random() * 99) + 1 // Mock jersey number
-        });
+        // Add starters from projected_starters JSON
+        if (lineup.projected_starters) {
+          for (const starter of lineup.projected_starters) {
+            teamMap[teamAbbr].players.push({
+              player_id: starter.player_id || starter.espnId,
+              full_name: starter.full_name || starter.name,
+              position: starter.position,
+              jersey: starter.jersey,
+              is_starter: true,
+              lineup_status: lineup.confirmed ? 'confirmed' : 'projected',
+              l10avg: Math.random() * 20 + 10, // Mock stats for now
+              hitRate: Math.floor(Math.random() * 40) + 40,
+            });
+          }
+        }
+        
+        // Add bench from bench_depth JSON
+        if (lineup.bench_depth) {
+          for (const benchPlayer of lineup.bench_depth) {
+            teamMap[teamAbbr].players.push({
+              player_id: benchPlayer.player_id,
+              full_name: benchPlayer.full_name,
+              position: benchPlayer.position,
+              jersey: benchPlayer.jersey,
+              is_starter: false,
+              lineup_status: null,
+              l10avg: Math.random() * 15 + 5,
+              hitRate: Math.floor(Math.random() * 30) + 30,
+            });
+          }
+        }
+      }
+      
+      // Fetch team names from teams table
+      const teamAbbrs = Object.keys(teamMap);
+      if (teamAbbrs.length > 0) {
+        const { data: teamsData } = await supabase
+          .from('teams')
+          .select('abbreviation, name')
+          .in('abbreviation', teamAbbrs);
+        
+        if (teamsData) {
+          for (const team of teamsData) {
+            if (teamMap[team.abbreviation]) {
+              teamMap[team.abbreviation].name = team.name;
+            }
+          }
+        }
       }
       
       setTeams(Object.values(teamMap));
