@@ -21,6 +21,7 @@ import {
   RefreshCw,
   Star,
   Zap,
+  Calendar, // ✅ Added for date indicator
 } from "lucide-react";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
@@ -58,6 +59,7 @@ interface Player {
   name: string;
   team_abbr: string;
   position: string;
+  game_date?: string; // ✅ Added for filtering
 }
 
 interface LeaderboardEntry {
@@ -84,6 +86,15 @@ export default function Leaderboard() {
   const [propFilter, setPropFilter] = useState("all");
   const [timeWindow, setTimeWindow] = useState("L10");
 
+  // ✅ TODAY'S DATE (local timezone, YYYY-MM-DD)
+  const today = useMemo(() => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }, []);
+
   useEffect(() => {
     fetchLeaderboardData();
   }, [sport, propFilter]);
@@ -101,7 +112,10 @@ export default function Leaderboard() {
       });
       const data = await res.json();
       if (data.success) {
-        setPlayers(data.players || []);
+        // ✅ FILTER: Only today's players
+        const todaysPlayers = (data.players || []).filter((p: Player) => p.game_date === today);
+        console.log(`📅 Found ${todaysPlayers.length} players for today (${today})`);
+        setPlayers(todaysPlayers);
       }
     } catch (err) {
       console.error("Error fetching leaderboard:", err);
@@ -147,7 +161,7 @@ export default function Leaderboard() {
           hitRateL15: data.l15 || 0,
           hitRateL20: data.l20 || 0,
           currentStreak: data.streak || { type: "Under", count: 0 },
-          avgVsLine: data.avg_l10 - data.line || 0,
+          avgVsLine: (data.avg_l10 || 0) - (data.line || 0), // ✅ Safe math
           consistency: Math.round(consistency),
           gamesPlayed: data.games_n || 0,
           confidence: data.confidence || 0,
@@ -204,8 +218,10 @@ export default function Leaderboard() {
             <Trophy className="w-8 h-8" />
             🏆 Leaderboard
           </h1>
-          <p className="text-gray-400">
-            Top performers across all props • Live data updated hourly
+          {/* ✅ Updated subtitle to show today's date */}
+          <p className="text-gray-400 flex items-center gap-2">
+            <Calendar className="w-4 h-4" />
+            Today's games only ({new Date(today).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}) • Live data updated hourly
           </p>
         </div>
 
@@ -282,8 +298,8 @@ export default function Leaderboard() {
         ) : leaderboardData.length === 0 ? (
           <div className="text-center py-12 text-gray-500">
             <Award className="w-12 h-12 mx-auto mb-3" />
-            <p>No data available</p>
-            <p className="text-sm mt-2">Run Full Ingest to populate leaderboard</p>
+            <p>No data available for today</p>
+            <p className="text-sm mt-2">Check back when games start or run Full Ingest</p>
           </div>
         ) : (
           <>
