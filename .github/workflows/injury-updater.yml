@@ -1,0 +1,16 @@
+name: Auto-Update Injury Reports
+
+on:
+  schedule:
+    - cron: '0 */2 * * *'  # Every 2 hours
+  workflow_dispatch:
+
+jobs:
+  update-injuries:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger NBA Injury Scraper
+        run: |
+          curl -X POST "${{ secrets.SUPABASE_URL }}/functions/v1/nba-injury-scraper" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
