@@ -1,6 +1,7 @@
 // src/pages/RosterPage.tsx
 // Fetches REAL lineup data from your espn-lineup-scraper
 // Shows amber for projected starters, green for confirmed (matches ESPN)
+// ✅ FIX: When no starters exist, first 5 bench players become projected starters
 
 import { useState, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
@@ -16,7 +17,7 @@ const STATUS_CONFIG = {
   probable:     { label: "PROBABLE",     bg: "#2a2000", border: "#c8970a", text: "#f5bc2f", dot: "#f5bc2f" },
   questionable: { label: "QUESTIONABLE", bg: "#1a1200", border: "#8a6500", text: "#d4a017", dot: "#d4a017" },
   out:          { label: "OUT",          bg: "#200000", border: "#8b0000", text: "#ff4444", dot: "#ff4444" },
-  confirmed:    { label: "CONFIRMED",    bg: "#002a00", border: "#22c55e", text: "#22c55e", dot: "#22c55e" }, // ✅ Green for confirmed
+  confirmed:    { label: "CONFIRMED",    bg: "#002a00", border: "#22c55e", text: "#22c55e", dot: "#22c55e" },
 };
 
 // ─── Status Badge ─────────────────────────────────────────────────────────────
@@ -58,17 +59,16 @@ function PlayerCard({ player, isStarter, lineupStatus }: {
 }) {
   const [hovered, setHovered] = useState(false);
 
-  // ✅ Amber for projected starters, Green for confirmed
   const borderColor = isStarter
     ? lineupStatus === "confirmed" 
-      ? hovered ? "#22c55e" : "#16a34a"  // Green
-      : hovered ? "#f5bc2f" : "#c8970a"   // Amber
+      ? hovered ? "#22c55e" : "#16a34a"
+      : hovered ? "#f5bc2f" : "#c8970a"
     : hovered ? "#2e3748" : "#1e2530";
 
   const bgColor = isStarter
     ? lineupStatus === "confirmed"
-      ? hovered ? "#002a00" : "#001a00"  // Dark green
-      : hovered ? "#1a1400" : "#141000"   // Dark amber
+      ? hovered ? "#002a00" : "#001a00"
+      : hovered ? "#1a1400" : "#141000"
     : hovered ? "#141820" : "#0d1117";
 
   const glowStyle = isStarter ? {
@@ -93,7 +93,6 @@ function PlayerCard({ player, isStarter, lineupStatus }: {
         ...glowStyle,
       }}
     >
-      {/* Accent line: Amber for projected, Green for confirmed */}
       {isStarter && (
         <div style={{
           position: "absolute", top: 0, left: 0, right: 0, height: 2,
@@ -103,11 +102,9 @@ function PlayerCard({ player, isStarter, lineupStatus }: {
         }} />
       )}
 
-      {/* Header row */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {/* Jersey circle */}
             <div style={{
               width: 22, height: 22, borderRadius: "50%",
               background: isStarter 
@@ -146,7 +143,6 @@ function PlayerCard({ player, isStarter, lineupStatus }: {
           </div>
         </div>
 
-        {/* Right badges */}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
           <StatusBadge status={lineupStatus || (player.starter ? "probable" : null)} />
           {isStarter && (
@@ -167,7 +163,6 @@ function PlayerCard({ player, isStarter, lineupStatus }: {
         </div>
       </div>
 
-      {/* Stats row */}
       <div style={{
         borderTop: `1px solid ${isStarter 
           ? (lineupStatus === "confirmed" ? "#002a00" : "#2a1f00") 
@@ -276,7 +271,6 @@ function TeamSection({ team }: { team: any }) {
     }}>
       <TeamHeader team={team} />
 
-      {/* Tab bar */}
       <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
         {(["all", "starters"] as const).map(tab => (
           <button key={tab} onClick={() => setActiveTab(tab)} style={{
@@ -293,7 +287,6 @@ function TeamSection({ team }: { team: any }) {
         ))}
       </div>
 
-      {/* Section label */}
       {activeTab === "all" && starters.length > 0 && (
         <div style={{
           fontSize: 9, fontWeight: 700, color: "#c8970a",
@@ -304,7 +297,6 @@ function TeamSection({ team }: { team: any }) {
         </div>
       )}
 
-      {/* Starter cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 10 }}>
         {(activeTab === "all" ? starters : starters).map((p: any) => (
           <PlayerCard 
@@ -316,7 +308,6 @@ function TeamSection({ team }: { team: any }) {
         ))}
       </div>
 
-      {/* Bench section */}
       {activeTab === "all" && bench.length > 0 && (
         <>
           <div style={{
@@ -350,7 +341,6 @@ export default function RosterPage() {
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string>("");
 
-  // ✅ UPDATED: fetch directly from projected_lineups table
   const fetchLineups = async () => {
     setLoading(true);
     setError(null);
@@ -359,7 +349,6 @@ export default function RosterPage() {
       const today = new Date().toISOString().split('T')[0];
       console.log('📅 Fetching lineups for:', today);
       
-      // ✅ Fetch directly from projected_lineups (where scraper stores data)
       const { data: lineups, error: lineupsError } = await supabase
         .from('projected_lineups')
         .select(`
@@ -378,37 +367,29 @@ export default function RosterPage() {
         .eq('game_date', today)
         .order('game_time_utc', { ascending: true });
       
-      if (lineupsError) {
-        console.error('Error fetching lineups:', lineupsError);
-        throw lineupsError;
-      }
+      if (lineupsError) throw lineupsError;
       
       console.log('📊 Found lineups:', lineups?.length);
       
       if (!lineups || lineups.length === 0) {
-        // Try fetching without date filter to see what's in the table
         const { data: allLineups } = await supabase
           .from('projected_lineups')
           .select('game_date, team_abbreviation')
           .limit(5);
-        
         console.log('📋 Recent lineups in DB:', allLineups);
-        
         setTeams([]);
         setLoading(false);
         return;
       }
       
-      // Group by team and fetch full player details
       const teamMap: Record<string, any> = {};
       
       for (const lineup of lineups) {
         const teamAbbr = lineup.team_abbreviation;
-        
         if (!teamMap[teamAbbr]) {
           teamMap[teamAbbr] = {
             abbreviation: teamAbbr,
-            name: teamAbbr, // Will update below
+            name: teamAbbr,
             players: [],
             gameInfo: {
               opponent: lineup.opponent_abbreviation,
@@ -418,52 +399,57 @@ export default function RosterPage() {
           };
         }
         
-        // Add starters from projected_starters JSON
-        if (lineup.projected_starters) {
-          for (const starter of lineup.projected_starters) {
-            teamMap[teamAbbr].players.push({
-              player_id: starter.player_id || starter.espnId,
-              full_name: starter.full_name || starter.name,
-              position: starter.position,
-              jersey: starter.jersey,
-              is_starter: true,
-              lineup_status: lineup.confirmed ? 'confirmed' : 'projected',
-              l10avg: Math.random() * 20 + 10, // Mock stats for now
-              hitRate: Math.floor(Math.random() * 40) + 40,
-            });
-          }
+        // ✅ FIX: Handle empty projected_starters – promote first 5 bench players
+        const starterData = lineup.projected_starters || [];
+        const benchData = lineup.bench_depth || [];
+        
+        // Determine which players to show as starters
+        const displayStarters = starterData.length > 0 
+          ? starterData 
+          : benchData.slice(0, 5);
+        const displayBench = starterData.length > 0 
+          ? benchData 
+          : benchData.slice(5);
+        
+        // Add starters
+        for (const starter of displayStarters) {
+          teamMap[teamAbbr].players.push({
+            player_id: starter.player_id || starter.espnId,
+            full_name: starter.full_name || starter.name || 'Unknown',
+            position: starter.position || '–',
+            jersey: starter.jersey || '',
+            is_starter: true,
+            lineup_status: lineup.confirmed ? 'confirmed' : 'projected',
+            l10avg: Math.random() * 20 + 10, // mock – replace with real stats
+            hitRate: Math.floor(Math.random() * 40) + 40,
+          });
         }
         
-        // Add bench from bench_depth JSON
-        if (lineup.bench_depth) {
-          for (const benchPlayer of lineup.bench_depth) {
-            teamMap[teamAbbr].players.push({
-              player_id: benchPlayer.player_id,
-              full_name: benchPlayer.full_name,
-              position: benchPlayer.position,
-              jersey: benchPlayer.jersey,
-              is_starter: false,
-              lineup_status: null,
-              l10avg: Math.random() * 15 + 5,
-              hitRate: Math.floor(Math.random() * 30) + 30,
-            });
-          }
+        // Add bench
+        for (const benchPlayer of displayBench) {
+          teamMap[teamAbbr].players.push({
+            player_id: benchPlayer.player_id || benchPlayer.espnId,
+            full_name: benchPlayer.full_name || benchPlayer.name || 'Unknown',
+            position: benchPlayer.position || '–',
+            jersey: benchPlayer.jersey || '',
+            is_starter: false,
+            lineup_status: null,
+            l10avg: Math.random() * 15 + 5,
+            hitRate: Math.floor(Math.random() * 30) + 30,
+          });
         }
       }
       
-      // Fetch team names from teams table
+      // Fetch team names
       const teamAbbrs = Object.keys(teamMap);
       if (teamAbbrs.length > 0) {
         const { data: teamsData } = await supabase
           .from('teams')
           .select('abbreviation, name')
           .in('abbreviation', teamAbbrs);
-        
         if (teamsData) {
           for (const team of teamsData) {
-            if (teamMap[team.abbreviation]) {
-              teamMap[team.abbreviation].name = team.name;
-            }
+            if (teamMap[team.abbreviation]) teamMap[team.abbreviation].name = team.name;
           }
         }
       }
@@ -481,11 +467,8 @@ export default function RosterPage() {
     }
   };
 
-  // Initial load
   useEffect(() => {
     fetchLineups();
-    
-    // Auto-refresh every 5 minutes to catch confirmed starters
     const interval = setInterval(fetchLineups, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
@@ -531,7 +514,6 @@ export default function RosterPage() {
       }}>
         <div style={{ maxWidth: 1100, margin: "0 auto" }}>
 
-          {/* Page header */}
           <div style={{ marginBottom: 28, display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
             <div>
               <div style={{
@@ -557,7 +539,6 @@ export default function RosterPage() {
             </div>
           </div>
 
-          {/* Error message */}
           {error && (
             <div style={{
               marginBottom: 16, padding: "8px 12px",
@@ -569,7 +550,6 @@ export default function RosterPage() {
             </div>
           )}
 
-          {/* Team filter */}
           <div style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" }}>
             <button onClick={() => setSelectedTeam("ALL")} style={{
               padding: "6px 16px", borderRadius: 8,
@@ -600,7 +580,6 @@ export default function RosterPage() {
             }}>↻ Refresh</button>
           </div>
 
-          {/* Teams */}
           {displayed.length === 0 ? (
             <div style={{
               textAlign: "center", padding: "40px 20px",
@@ -614,7 +593,6 @@ export default function RosterPage() {
             ))
           )}
 
-          {/* Legend */}
           <div style={{
             display: "flex", gap: 20, marginTop: 8,
             padding: "12px 16px", background: "#0a0e14",
