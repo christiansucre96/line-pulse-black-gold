@@ -35,6 +35,7 @@ import {
   ChevronDown,
   ChevronUp,
   ListChecks,
+  Calendar,
 } from "lucide-react";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
@@ -117,6 +118,15 @@ export default function ParlayBuilder() {
   const [selectedPropFilter, setSelectedPropFilter] = useState<string>("all");
   const [expandedPlayers, setExpandedPlayers] = useState<Set<string>>(new Set());
 
+  // ✅ TODAY'S DATE (local timezone, YYYY-MM-DD)
+  const today = useMemo(() => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }, []);
+
   useEffect(() => {
     fetchGames();
   }, [sport]);
@@ -136,7 +146,10 @@ export default function ParlayBuilder() {
       });
       const data = await res.json();
       if (data.success) {
-        setGames(data.games || []);
+        // ✅ FILTER: Only today's games
+        const todaysGames = (data.games || []).filter((g: Game) => g.game_date === today);
+        console.log(`📅 Found ${todaysGames.length} games for today (${today})`);
+        setGames(todaysGames);
       }
     } catch (err) {
       console.error("Error fetching games:", err);
@@ -146,6 +159,7 @@ export default function ParlayBuilder() {
   const fetchPlayersForGames = async () => {
     setLoading(true);
     try {
+      // ✅ Use only today's game IDs
       const gameIds = selectedGame === "all"
         ? games.map(g => g.external_id)
         : [selectedGame];
@@ -164,7 +178,9 @@ export default function ParlayBuilder() {
         });
         const data = await res.json();
         if (data.success) {
-          allPlayers.push(...(data.players || []));
+          // ✅ Also filter players to today's game_date
+          const todaysPlayers = (data.players || []).filter((p: Player) => p.game_date === today);
+          allPlayers.push(...todaysPlayers);
         }
       }
 
@@ -203,7 +219,7 @@ export default function ParlayBuilder() {
             const streakBonus = Math.min(data.streak.count * 5, 25);
             confidence += streakBonus;
             if (data.streak.count >= 3) {
-              reasoning.push(` Over ${data.streak.count}`);
+              reasoning.push(`🔺 Over ${data.streak.count}`);
             }
           } else {
             reasoning.push(`📉 Under ${data.streak.count}`);
@@ -429,8 +445,10 @@ export default function ParlayBuilder() {
             <Zap className="w-8 h-8" />
             ⚡ AI Parlay Builder
           </h1>
-          <p className="text-gray-400">
-            Build smart parlays • {allPropPicks.length} prop picks available • You decide
+          {/* ✅ Updated subtitle to show today's date */}
+          <p className="text-gray-400 flex items-center gap-2">
+            <Calendar className="w-4 h-4" />
+            Today's games only ({new Date(today).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}) • {allPropPicks.length} prop picks available • You decide
           </p>
         </div>
 
