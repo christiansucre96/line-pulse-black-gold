@@ -400,16 +400,16 @@ export default function RosterPage() {
         }
         
         // ✅ FIX: Handle empty projected_starters – promote first 5 bench players
-        const starterData = lineup.projected_starters || [];
-        const benchData = lineup.bench_depth || [];
+        const rawStarters = lineup.projected_starters || [];
+        const rawBench = lineup.bench_depth || [];
         
         // Determine which players to show as starters
-        const displayStarters = starterData.length > 0 
-          ? starterData 
-          : benchData.slice(0, 5);
-        const displayBench = starterData.length > 0 
-          ? benchData 
-          : benchData.slice(5);
+        const displayStarters = rawStarters.length > 0 
+          ? rawStarters 
+          : rawBench.slice(0, 5);
+        const displayBench = rawStarters.length > 0 
+          ? rawBench 
+          : rawBench.slice(5);
         
         // Add starters
         for (const starter of displayStarters) {
