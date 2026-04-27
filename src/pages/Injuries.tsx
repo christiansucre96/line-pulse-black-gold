@@ -1,7 +1,4 @@
 // src/pages/InjuryReport.tsx
-// Shows all injured NBA players with injury type, description, return date
-// Auto-triggers scraper if DB is empty
-
 import { useState, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
 
@@ -10,7 +7,6 @@ const supabase = createClient(
   import.meta.env.VITE_SUPABASE_ANON_KEY!
 );
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 interface Injury {
   id: string;
   full_name: string;
@@ -20,325 +16,198 @@ interface Injury {
   injury_type: string;
   injury_side: string;
   injury_description: string;
-  return_date: string | null;
+  long_description: string;
+  return_estimate: string;
   last_updated: string;
 }
 
-// ─── Status Config ────────────────────────────────────────────────────────────
-const STATUS_CONFIG: Record<string, { bg: string; text: string; border: string; label: string; priority: number }> = {
+const STATUS: Record<string, { bg: string; text: string; border: string; label: string; priority: number }> = {
   out:          { bg: "#200000", text: "#ff4444", border: "#8b0000", label: "OUT",          priority: 1 },
-  suspended:    { bg: "#200000", text: "#ff4444", border: "#8b0000", label: "SUSPENDED",    priority: 2 },
-  doubtful:     { bg: "#2a1a00", text: "#ff8800", border: "#b85c00", label: "DOUBTFUL",     priority: 3 },
-  "day-to-day": { bg: "#2a2000", text: "#f5bc2f", border: "#c8970a", label: "DAY-TO-DAY",  priority: 4 },
-  questionable: { bg: "#2a2000", text: "#f5bc2f", border: "#c8970a", label: "QUESTIONABLE", priority: 5 },
-  probable:     { bg: "#001a00", text: "#22c55e", border: "#16a34a", label: "PROBABLE",     priority: 6 },
-};
-
-function getStatusConfig(status: string) {
-  return STATUS_CONFIG[status.toLowerCase()] || STATUS_CONFIG.questionable;
+  doubtful:     { bg: "#2a1000", text: "#ff6600", border: "#993d00", label: "DOUBTFUL",     priority: 2 },
+  questionable: { bg: "#2a2000", text: "#f5bc2f", border: "#c8970a", label: "QUESTIONABLE", priority: 3 },
+  probable:     { bg: "#001a00", text: "#22c55e", border: "#16a34a", label: "PROBABLE",     priority: 4 },
+  unknown:      { bg: "#111827", text: "#4a5568", border: "#1e2530", label: "UNKNOWN",      priority: 5 },
 }
 
-// ─── Status Badge ─────────────────────────────────────────────────────────────
-function StatusBadge({ status }: { status: string }) {
-  const cfg = getStatusConfig(status);
-  return (
-    <span style={{
-      display: "inline-flex", alignItems: "center", gap: 5,
-      padding: "3px 10px", borderRadius: 5,
-      background: cfg.bg, border: `1px solid ${cfg.border}`,
-      color: cfg.text, fontSize: 10, fontWeight: 700,
-      letterSpacing: "0.1em", fontFamily: "'DM Mono', monospace",
-    }}>
-      <svg width="5" height="5" viewBox="0 0 6 6">
-        <circle cx="3" cy="3" r="3" fill={cfg.text} />
-      </svg>
-      {cfg.label}
-    </span>
-  );
-}
+function getStatus(s: string) { return STATUS[s?.toLowerCase()] || STATUS.unknown }
 
-// ─── Injury Type Badge ────────────────────────────────────────────────────────
-function InjuryTypeBadge({ type }: { type: string }) {
-  if (!type) return null;
+function ReturnBadge({ estimate }: { estimate: string }) {
+  if (!estimate || estimate === "TBD") return null;
+  const isLong = estimate.toLowerCase().includes("season") || estimate.toLowerCase().includes("month");
   return (
     <span style={{
       padding: "2px 8px", borderRadius: 4,
-      background: "#0d1117", border: "1px solid #1e2530",
-      color: "#64748b", fontSize: 10, fontWeight: 600,
-      fontFamily: "'DM Mono', monospace", letterSpacing: "0.06em",
-    }}>
-      {type}
-    </span>
+      background: isLong ? "#200000" : "#0d1117",
+      border: `1px solid ${isLong ? "#8b000060" : "#1e2530"}`,
+      fontSize: 10, fontWeight: 600,
+      color: isLong ? "#ff4444" : "#94a3b8",
+      fontFamily: "'DM Mono', monospace",
+    }}>⏱ {estimate}</span>
   );
 }
 
-// ─── Injury Card ──────────────────────────────────────────────────────────────
 function InjuryCard({ injury }: { injury: Injury }) {
-  const cfg = getStatusConfig(injury.injury_status);
-  const [hovered, setHovered] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const cfg = getStatus(injury.injury_status);
+  const hasLong = injury.long_description && injury.long_description !== injury.injury_description;
 
   return (
     <div
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onClick={() => hasLong && setExpanded(!expanded)}
       style={{
-        background: hovered ? `${cfg.bg}80` : "#0a0e14",
-        border: `1px solid ${hovered ? cfg.border : `${cfg.border}40`}`,
-        borderRadius: 10, padding: "16px 18px",
-        transition: "all 0.18s ease", position: "relative",
-        boxShadow: hovered ? `0 0 0 1px ${cfg.border}30` : "none",
+        background: "#0a0e14", border: `1px solid ${cfg.border}40`,
+        borderRadius: 10, padding: "14px 16px", marginBottom: 8,
+        cursor: hasLong ? "pointer" : "default", transition: "border-color 0.15s",
       }}
+      onMouseEnter={e => { if (hasLong) e.currentTarget.style.borderColor = cfg.border }}
+      onMouseLeave={e => { e.currentTarget.style.borderColor = `${cfg.border}40` }}
     >
-      {/* Left accent bar */}
-      <div style={{
-        position: "absolute", left: 0, top: 0, bottom: 0, width: 3,
-        background: cfg.border, borderRadius: "10px 0 0 10px",
-        opacity: hovered ? 1 : 0.5,
-      }} />
-
-      <div style={{ paddingLeft: 8 }}>
-        {/* Top row */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-          <div>
-            {/* Name */}
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-              <span style={{
-                fontSize: 15, fontWeight: 700, color: "#e8d48b",
-                fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: "0.03em",
-                textTransform: "uppercase",
-              }}>
-                {injury.full_name}
-              </span>
-              <StatusBadge status={injury.injury_status} />
-              {injury.injury_type && <InjuryTypeBadge type={injury.injury_type} />}
-            </div>
-
-            {/* Team / Position */}
-            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <span style={{
-                padding: "2px 8px", borderRadius: 4,
-                background: "#1a1200", border: "1px solid #c8970a40",
-                color: "#f5bc2f", fontSize: 11, fontWeight: 700,
-                fontFamily: "'Barlow Condensed', sans-serif",
-              }}>
-                {injury.team_abbreviation}
-              </span>
-              {injury.position && (
-                <span style={{ fontSize: 11, color: "#4a5568", fontFamily: "'DM Mono', monospace" }}>
-                  {injury.position}
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* Return date */}
-          {injury.return_date && (
-            <div style={{
-              textAlign: "right", padding: "6px 10px",
-              background: "#0d1117", border: "1px solid #1e2530",
-              borderRadius: 6,
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+            <span style={{
+              display: "inline-flex", alignItems: "center", gap: 5,
+              padding: "2px 8px", borderRadius: 4,
+              background: cfg.bg, border: `1px solid ${cfg.border}`,
+              fontSize: 10, fontWeight: 700, color: cfg.text,
+              fontFamily: "'DM Mono', monospace", letterSpacing: "0.08em",
             }}>
-              <div style={{ fontSize: 9, color: "#4a5568", fontFamily: "'DM Mono', monospace", marginBottom: 2 }}>
-                EST. RETURN
-              </div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#94a3b8", fontFamily: "'DM Mono', monospace" }}>
-                {injury.return_date}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Description */}
-        {injury.injury_description && (
-          <div style={{
-            padding: "8px 12px",
-            background: `${cfg.bg}60`,
-            borderLeft: `2px solid ${cfg.border}`,
-            borderRadius: "0 6px 6px 0",
-            fontSize: 11, color: "#94a3b8",
-            fontFamily: "'DM Mono', monospace", lineHeight: 1.5,
-            marginBottom: 8,
-          }}>
-            {injury.injury_description}
+              <svg width="6" height="6" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3" fill={cfg.text} /></svg>
+              {cfg.label}
+            </span>
+            <span style={{
+              fontSize: 15, fontWeight: 700, color: "#e8d48b",
+              fontFamily: "'Barlow Condensed', sans-serif", textTransform: "uppercase",
+            }}>{injury.full_name}</span>
+            <ReturnBadge estimate={injury.return_estimate} />
           </div>
-        )}
 
-        {/* Footer */}
-        <div style={{ fontSize: 9, color: "#2e3748", fontFamily: "'DM Mono', monospace", textAlign: "right" }}>
-          Updated {new Date(injury.last_updated).toLocaleTimeString("en-US", {
-            hour: "2-digit", minute: "2-digit", month: "short", day: "numeric"
-          })}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 11, color: "#4a5568", fontFamily: "'DM Mono', monospace" }}>
+            <span style={{ padding: "1px 7px", borderRadius: 4, background: "#141820", border: "1px solid #1e2530", color: "#94a3b8", fontWeight: 600 }}>
+              {injury.team_abbreviation}
+            </span>
+            {injury.position && <span>{injury.position}</span>}
+            {injury.injury_type && <><span style={{ color: "#2e3748" }}>•</span><span style={{ color: cfg.text }}>{injury.injury_type}</span></>}
+            {injury.injury_side && <span>({injury.injury_side})</span>}
+          </div>
         </div>
+        {hasLong && (
+          <span style={{ color: "#2e3748", fontSize: 14, marginLeft: 8, transition: "transform 0.15s", transform: expanded ? "rotate(180deg)" : "rotate(0)", display: "inline-block" }}>▾</span>
+        )}
+      </div>
+
+      {injury.injury_description && (
+        <div style={{ marginTop: 10, padding: "8px 12px", background: `${cfg.bg}60`, borderLeft: `2px solid ${cfg.border}`, borderRadius: "0 6px 6px 0", fontSize: 11, color: "#94a3b8", fontFamily: "'DM Mono', monospace", lineHeight: 1.6 }}>
+          {injury.injury_description}
+        </div>
+      )}
+
+      {expanded && hasLong && (
+        <div style={{ marginTop: 6, padding: "8px 12px", background: "#060a0f", borderLeft: `2px solid ${cfg.border}40`, borderRadius: "0 6px 6px 0", fontSize: 11, color: "#64748b", fontFamily: "'DM Mono', monospace", lineHeight: 1.6 }}>
+          {injury.long_description}
+        </div>
+      )}
+
+      <div style={{ marginTop: 8, fontSize: 9, color: "#2e3748", fontFamily: "'DM Mono', monospace", textAlign: "right" }}>
+        {new Date(injury.last_updated).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
       </div>
     </div>
   );
 }
 
-// ─── Team Group ───────────────────────────────────────────────────────────────
-function TeamGroup({ team, injuries }: { team: string; injuries: Injury[] }) {
-  const [collapsed, setCollapsed] = useState(false);
-  const worstStatus = injuries.sort((a, b) =>
-    (STATUS_CONFIG[a.injury_status]?.priority || 99) - (STATUS_CONFIG[b.injury_status]?.priority || 99)
-  )[0]?.injury_status;
-  const cfg = getStatusConfig(worstStatus || 'questionable');
-
+function StatPill({ count, label, color, onClick, active }: any) {
   return (
-    <div style={{ marginBottom: 20 }}>
-      <button
-        onClick={() => setCollapsed(!collapsed)}
-        style={{
-          display: "flex", alignItems: "center", gap: 10,
-          width: "100%", padding: "8px 12px", marginBottom: 10,
-          background: "#0a0e14", border: "1px solid #1a2030",
-          borderRadius: 8, cursor: "pointer", textAlign: "left",
-        }}
-      >
-        <span style={{
-          padding: "2px 10px", borderRadius: 4,
-          background: "#1a1200", border: "1px solid #c8970a40",
-          color: "#f5bc2f", fontSize: 13, fontWeight: 800,
-          fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: "0.08em",
-        }}>
-          {team}
-        </span>
-        <span style={{ fontSize: 11, color: "#4a5568", fontFamily: "'DM Mono', monospace" }}>
-          {injuries.length} player{injuries.length !== 1 ? 's' : ''}
-        </span>
-        <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
-          {['out', 'doubtful', 'questionable', 'probable'].map(s => {
-            const count = injuries.filter(i => i.injury_status === s).length;
-            if (!count) return null;
-            const c = STATUS_CONFIG[s];
-            return (
-              <span key={s} style={{
-                padding: "1px 6px", borderRadius: 3,
-                background: c.bg, border: `1px solid ${c.border}`,
-                color: c.text, fontSize: 9, fontFamily: "'DM Mono', monospace",
-              }}>
-                {count} {s.toUpperCase()}
-              </span>
-            );
-          })}
-        </div>
-        <span style={{ color: "#2e3748", fontSize: 12 }}>{collapsed ? "▶" : "▼"}</span>
-      </button>
-
-      {!collapsed && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {injuries.map(inj => <InjuryCard key={inj.id} injury={inj} />)}
-        </div>
-      )}
-    </div>
+    <button onClick={onClick} style={{
+      padding: "6px 14px", borderRadius: 8, cursor: "pointer",
+      border: `1px solid ${active ? color : "#1e2530"}`,
+      background: active ? `${color}20` : "#0d1117",
+      color: active ? color : "#4a5568",
+      fontSize: 12, fontWeight: 700, fontFamily: "'DM Mono', monospace",
+      transition: "all 0.15s ease",
+    }}>
+      {count} {label}
+    </button>
   );
 }
 
-// ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function InjuryReport() {
-  const [injuries, setInjuries]     = useState<Injury[]>([]);
-  const [loading, setLoading]       = useState(true);
-  const [scraping, setScraping]     = useState(false);
-  const [filterStatus, setFilter]   = useState("all");
-  const [groupBy, setGroupBy]       = useState<"team" | "status">("status");
-  const [searchTerm, setSearch]     = useState("");
-  const [lastUpdated, setLastUpdated] = useState("");
-  const [statusMsg, setStatusMsg]   = useState("");
+  const [injuries, setInjuries]   = useState<Injury[]>([]);
+  const [loading, setLoading]     = useState(true);
+  const [scraping, setScraping]   = useState(false);
+  const [filterStatus, setFilter] = useState("all");
+  const [filterTeam, setTeam]     = useState("all");
+  const [search, setSearch]       = useState("");
+  const [lastUpdated, setLast]    = useState("");
+  const [statusMsg, setMsg]       = useState("");
+  const [error, setError]         = useState<string | null>(null);
 
-  // ── Fetch from DB ───────────────────────────────────────────────────────────
-  async function fetchInjuries() {
-    setLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from("injuries")
-        .select("*")
-        .eq("sport", "nba")
-        .order("last_updated", { ascending: false });
-
-      if (error) throw error;
-
-      if (!data?.length) {
-        // Auto-trigger scraper if empty
-        await runScraper();
-        return;
-      }
-
-      setInjuries(data);
-      setLastUpdated(new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }));
-    } catch (e: any) {
-      console.error("Fetch error:", e);
-    } finally {
-      setLoading(false);
-    }
+  async function loadFromDB() {
+    const { data, error: e } = await supabase
+      .from("injuries").select("*").eq("sport", "nba")
+      .order("injury_status").order("team_abbreviation").order("full_name");
+    if (e) throw e;
+    return data || [];
   }
 
-  // ── Trigger scraper ─────────────────────────────────────────────────────────
   async function runScraper() {
     setScraping(true);
-    setStatusMsg("⏳ Fetching injury report...");
+    setMsg("⏳ Fetching from ESPN...");
     try {
-      const { data, error } = await supabase.functions.invoke("nba-injury-scraper", { body: {} });
-      if (error) throw new Error(error.message);
-
-      setStatusMsg(`✅ ${data.total_stored} injured players loaded (NBA official: ${data.nba_official}, Today inactive: ${data.inactive_today})`);
-
-      // Re-fetch from DB
-      const { data: fresh } = await supabase
-        .from("injuries").select("*").eq("sport", "nba")
-        .order("last_updated", { ascending: false });
-      setInjuries(fresh || []);
-      setLastUpdated(new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }));
+      const { data, error: e } = await supabase.functions.invoke("nba-injury-scraper", { body: {} });
+      if (e) throw new Error(e.message);
+      setMsg(`✅ ${data.stored} injuries loaded from ESPN`);
+      const fresh = await loadFromDB();
+      setInjuries(fresh);
+      setLast(new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }));
     } catch (e: any) {
-      setStatusMsg(`❌ ${e.message}`);
+      setError(`Scraper failed: ${e.message}`);
     } finally {
       setScraping(false);
       setLoading(false);
     }
   }
 
+  async function fetchInjuries() {
+    setLoading(true); setError(null); setMsg("");
+    try {
+      const data = await loadFromDB();
+      if (data.length === 0) { await runScraper(); return; }
+      setInjuries(data);
+      setLast(new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }));
+    } catch (e: any) { setError(e.message); }
+    finally { setLoading(false); }
+  }
+
   useEffect(() => {
     fetchInjuries();
-    const interval = setInterval(fetchInjuries, 10 * 60 * 1000);
-    return () => clearInterval(interval);
+    const t = setInterval(fetchInjuries, 10 * 60 * 1000);
+    return () => clearInterval(t);
   }, []);
 
-  // ── Filter + search ─────────────────────────────────────────────────────────
+  const teams = [...new Set(injuries.map(i => i.team_abbreviation))].sort();
+  const priorityOrder: Record<string, number> = { out: 1, doubtful: 2, questionable: 3, probable: 4 };
+
   const filtered = injuries
     .filter(i => filterStatus === "all" || i.injury_status === filterStatus)
-    .filter(i => !searchTerm || i.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      i.team_abbreviation.toLowerCase().includes(searchTerm.toLowerCase()))
-    .sort((a, b) =>
-      (STATUS_CONFIG[a.injury_status]?.priority || 99) - (STATUS_CONFIG[b.injury_status]?.priority || 99)
-    );
+    .filter(i => filterTeam === "all" || i.team_abbreviation === filterTeam)
+    .filter(i => !search || i.full_name.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => (priorityOrder[a.injury_status] || 5) - (priorityOrder[b.injury_status] || 5));
 
-  // ── Counts ──────────────────────────────────────────────────────────────────
   const counts = {
-    out:          injuries.filter(i => i.injury_status === 'out').length,
-    suspended:    injuries.filter(i => i.injury_status === 'suspended').length,
-    doubtful:     injuries.filter(i => i.injury_status === 'doubtful').length,
-    dayToDay:     injuries.filter(i => i.injury_status === 'day-to-day').length,
-    questionable: injuries.filter(i => i.injury_status === 'questionable').length,
-    probable:     injuries.filter(i => i.injury_status === 'probable').length,
+    out:          injuries.filter(i => i.injury_status === "out").length,
+    doubtful:     injuries.filter(i => i.injury_status === "doubtful").length,
+    questionable: injuries.filter(i => i.injury_status === "questionable").length,
+    probable:     injuries.filter(i => i.injury_status === "probable").length,
   };
-
-  // ── Group by team ───────────────────────────────────────────────────────────
-  const byTeam = filtered.reduce((acc: Record<string, Injury[]>, inj) => {
-    const t = inj.team_abbreviation || 'UNK';
-    if (!acc[t]) acc[t] = [];
-    acc[t].push(inj);
-    return acc;
-  }, {});
 
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700;800;900&family=DM+Mono:wght@400;500;600&display=swap');
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background: #060a0f; }
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-track { background: #0a0e14; }
-        ::-webkit-scrollbar-thumb { background: #1e2530; border-radius: 2px; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        select, input { outline: none; }
-        select option { background: #0d1117; }
+        @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800;900&family=DM+Mono:wght@400;500;600&display=swap');
+        *{box-sizing:border-box;margin:0;padding:0}body{background:#060a0f}
+        ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:#0a0e14}::-webkit-scrollbar-thumb{background:#1e2530;border-radius:2px}
+        @keyframes spin{to{transform:rotate(360deg)}}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+        input:focus{outline:none;border-color:#c8970a !important}
       `}</style>
 
       <div style={{ minHeight: "100vh", background: "#060a0f", padding: "32px 24px", fontFamily: "'DM Mono', monospace" }}>
@@ -347,123 +216,70 @@ export default function InjuryReport() {
           {/* Header */}
           <div style={{ marginBottom: 24, display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
             <div>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff4444" strokeWidth="2.5">
                   <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                  <line x1="12" y1="9" x2="12" y2="13"/>
-                  <line x1="12" y1="17" x2="12.01" y2="17"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
                 </svg>
-                <span style={{ fontSize: 10, color: "#ff4444", fontWeight: 700, letterSpacing: "0.2em" }}>
-                  NBA INJURY REPORT
-                </span>
+                <span style={{ fontSize: 10, color: "#ff4444", fontWeight: 700, letterSpacing: "0.2em" }}>NBA INJURY REPORT</span>
               </div>
               <div style={{ fontSize: 26, fontWeight: 900, color: "#e8d48b", fontFamily: "'Barlow Condensed', sans-serif" }}>
                 {new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }).toUpperCase()}
               </div>
-
-              {/* Status counts */}
-              <div style={{ display: "flex", gap: 12, marginTop: 8, flexWrap: "wrap" }}>
-                {[
-                  { label: "OUT", count: counts.out + counts.suspended, color: "#ff4444" },
-                  { label: "DOUBTFUL", count: counts.doubtful, color: "#ff8800" },
-                  { label: "DAY-TO-DAY", count: counts.dayToDay, color: "#f5bc2f" },
-                  { label: "QUESTIONABLE", count: counts.questionable, color: "#f5bc2f" },
-                  { label: "PROBABLE", count: counts.probable, color: "#22c55e" },
-                ].map(({ label, count, color }) => (
-                  <span key={label} style={{ fontSize: 11, color, fontFamily: "'DM Mono', monospace" }}>
-                    {count} {label}
-                  </span>
-                ))}
-              </div>
             </div>
-
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {lastUpdated && <span style={{ fontSize: 10, color: "#2e3748" }}>Updated {lastUpdated}</span>}
               <button onClick={fetchInjuries} disabled={loading || scraping} style={{
-                padding: "6px 14px", borderRadius: 8,
-                border: "1px solid #1e2530", background: "#0d1117",
-                color: "#4a5568", fontSize: 11, fontWeight: 700,
+                padding: "6px 14px", borderRadius: 8, border: "1px solid #1e2530",
+                background: "#0d1117", color: "#4a5568", fontSize: 11, fontWeight: 700,
                 cursor: "pointer", fontFamily: "'DM Mono', monospace",
                 display: "flex", alignItems: "center", gap: 6,
               }}>
-                <span style={{ animation: (loading || scraping) ? "spin 1s linear infinite" : "none", display: "inline-block" }}>↻</span>
-                {scraping ? "Fetching..." : "Refresh"}
+                <span style={{ display: "inline-block", animation: (loading || scraping) ? "spin 1s linear infinite" : "none" }}>↻</span>
+                {scraping ? "Scraping..." : "Refresh"}
               </button>
-              <button onClick={runScraper} disabled={scraping || loading} style={{
-                padding: "6px 14px", borderRadius: 8,
-                border: "1px solid #ff444440", background: "#200000",
-                color: "#ff4444", fontSize: 11, fontWeight: 700,
+              <button onClick={runScraper} disabled={scraping} style={{
+                padding: "6px 14px", borderRadius: 8, border: "1px solid #8b000060",
+                background: "#200000", color: "#ff4444", fontSize: 11, fontWeight: 700,
                 cursor: "pointer", fontFamily: "'DM Mono', monospace",
-              }}>
-                ⚡ Pull Data
-              </button>
+              }}>⚡ Pull ESPN</button>
             </div>
           </div>
 
-          {/* Status message */}
-          {statusMsg && (
-            <div style={{
-              marginBottom: 16, padding: "10px 14px",
-              background: statusMsg.startsWith('✅') ? "#001a00" : "#200000",
-              border: `1px solid ${statusMsg.startsWith('✅') ? "#166534" : "#8b0000"}`,
-              borderRadius: 8,
-              color: statusMsg.startsWith('✅') ? "#22c55e" : "#ff4444",
-              fontSize: 11, fontFamily: "'DM Mono', monospace",
-            }}>
-              {statusMsg}
-            </div>
-          )}
+          {error && <div style={{ marginBottom: 16, padding: "10px 14px", background: "#200000", border: "1px solid #8b0000", borderRadius: 8, color: "#ff4444", fontSize: 11 }}>❌ {error}</div>}
+          {statusMsg && !error && <div style={{ marginBottom: 16, padding: "10px 14px", background: "#001a00", border: "1px solid #16a34a", borderRadius: 8, color: "#22c55e", fontSize: 11 }}>{statusMsg}</div>}
 
-          {/* Controls */}
-          <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
-            {/* Search */}
-            <input
-              placeholder="Search player or team..."
-              value={searchTerm}
-              onChange={e => setSearch(e.target.value)}
-              style={{
-                padding: "7px 12px", borderRadius: 8,
-                background: "#0d1117", border: "1px solid #1e2530",
-                color: "#cbd5e1", fontSize: 11, fontFamily: "'DM Mono', monospace",
-                width: 200,
-              }}
-            />
+          {/* Status pills */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+            <StatPill count={injuries.length} label="Total"        color="#94a3b8" active={filterStatus === "all"}          onClick={() => setFilter("all")} />
+            <StatPill count={counts.out}          label="Out"          color="#ff4444" active={filterStatus === "out"}          onClick={() => setFilter("out")} />
+            <StatPill count={counts.doubtful}     label="Doubtful"     color="#ff6600" active={filterStatus === "doubtful"}     onClick={() => setFilter("doubtful")} />
+            <StatPill count={counts.questionable} label="Questionable" color="#f5bc2f" active={filterStatus === "questionable"} onClick={() => setFilter("questionable")} />
+            <StatPill count={counts.probable}     label="Probable"     color="#22c55e" active={filterStatus === "probable"}     onClick={() => setFilter("probable")} />
+          </div>
 
-            {/* Status filter */}
-            <select value={filterStatus} onChange={e => setFilter(e.target.value)} style={{
-              padding: "7px 12px", borderRadius: 8,
+          {/* Search + team filter */}
+          <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
+            <input placeholder="Search player..." value={search} onChange={e => setSearch(e.target.value)} style={{
+              flex: 1, minWidth: 160, padding: "8px 12px", borderRadius: 8,
               background: "#0d1117", border: "1px solid #1e2530",
-              color: "#cbd5e1", fontSize: 11, fontFamily: "'DM Mono', monospace", cursor: "pointer",
+              color: "#cbd5e1", fontSize: 12, fontFamily: "'DM Mono', monospace",
+            }} />
+            <select value={filterTeam} onChange={e => setTeam(e.target.value)} style={{
+              padding: "8px 12px", borderRadius: 8,
+              background: "#0d1117", border: "1px solid #1e2530",
+              color: "#cbd5e1", fontSize: 12, fontFamily: "'DM Mono', monospace", cursor: "pointer",
             }}>
-              <option value="all">All Statuses ({injuries.length})</option>
-              <option value="out">Out ({counts.out})</option>
-              <option value="doubtful">Doubtful ({counts.doubtful})</option>
-              <option value="day-to-day">Day-To-Day ({counts.dayToDay})</option>
-              <option value="questionable">Questionable ({counts.questionable})</option>
-              <option value="probable">Probable ({counts.probable})</option>
+              <option value="all">All Teams</option>
+              {teams.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
-
-            {/* Group by */}
-            <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
-              {(['status', 'team'] as const).map(g => (
-                <button key={g} onClick={() => setGroupBy(g)} style={{
-                  padding: "5px 12px", borderRadius: 6,
-                  border: `1px solid ${groupBy === g ? "#c8970a" : "#1e2530"}`,
-                  background: groupBy === g ? "#1a1200" : "#0d1117",
-                  color: groupBy === g ? "#f5bc2f" : "#4a5568",
-                  fontSize: 10, fontWeight: 700, cursor: "pointer",
-                  fontFamily: "'DM Mono', monospace", letterSpacing: "0.06em",
-                }}>
-                  BY {g.toUpperCase()}
-                </button>
-              ))}
-            </div>
           </div>
 
           {/* Loading */}
           {(loading || scraping) && injuries.length === 0 && (
             <div style={{ textAlign: "center", padding: "60px 20px", color: "#4a5568" }}>
-              <div style={{ width: 36, height: 36, borderRadius: "50%", border: "2px solid #1e2530", borderTopColor: "#ff4444", animation: "spin 1s linear infinite", margin: "0 auto 14px" }} />
-              <div style={{ fontSize: 12 }}>{scraping ? "Fetching injury data..." : "Loading..."}</div>
+              <div style={{ width: 40, height: 40, borderRadius: "50%", border: "2px solid #1e2530", borderTopColor: "#ff4444", animation: "spin 1s linear infinite", margin: "0 auto 16px" }} />
+              <div style={{ animation: "pulse 2s ease infinite" }}>{scraping ? "Fetching from ESPN..." : "Loading injuries..."}</div>
             </div>
           )}
 
@@ -471,37 +287,20 @@ export default function InjuryReport() {
           {!loading && !scraping && filtered.length === 0 && (
             <div style={{ textAlign: "center", padding: "60px 20px", color: "#4a5568" }}>
               <div style={{ fontSize: 14, marginBottom: 8 }}>No injuries found</div>
-              <div style={{ fontSize: 11, color: "#2e3748" }}>Click ⚡ Pull Data to fetch from NBA.com</div>
+              <div style={{ fontSize: 11, color: "#2e3748" }}>Click ⚡ Pull ESPN to fetch latest data</div>
             </div>
           )}
 
-          {/* Injury list — grouped by team */}
-          {!loading && groupBy === "team" && Object.entries(byTeam)
-            .sort(([a], [b]) => a.localeCompare(b))
-            .map(([team, teamInjuries]) => (
-              <TeamGroup key={team} team={team} injuries={teamInjuries} />
-            ))
-          }
-
-          {/* Injury list — grouped by status */}
-          {!loading && groupBy === "status" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {filtered.map(inj => <InjuryCard key={inj.id} injury={inj} />)}
-            </div>
-          )}
+          {/* List */}
+          {filtered.map(i => <InjuryCard key={i.id} injury={i} />)}
 
           {/* Footer */}
-          {lastUpdated && (
-            <div style={{
-              marginTop: 24, padding: "10px 14px",
-              background: "#0a0e14", border: "1px solid #1a2030",
-              borderRadius: 8, fontSize: 9, color: "#2e3748",
-              fontFamily: "'DM Mono', monospace", textAlign: "center",
-            }}>
-              Last updated: {lastUpdated} • Auto-refreshes every 10 min • pg_cron runs every 2 hours
+          {filtered.length > 0 && (
+            <div style={{ marginTop: 16, padding: "12px 16px", background: "#0a0e14", borderRadius: 8, border: "1px solid #1a2030", fontSize: 10, color: "#2e3748", fontFamily: "'DM Mono', monospace", display: "flex", justifyContent: "space-between" }}>
+              <span>Showing {filtered.length} of {injuries.length} injuries</span>
+              <span>Source: ESPN • Click a card to expand details</span>
             </div>
           )}
-
         </div>
       </div>
     </>
