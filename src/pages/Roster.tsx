@@ -1,81 +1,68 @@
 // src/pages/RosterPage.tsx
-// Fetches REAL lineup data from your espn-lineup-scraper
-// Shows amber for projected starters, green for confirmed (matches ESPN)
-// ✅ FIX: When no starters exist, first 5 bench players become projected starters
+// Auto-triggers scraper when no data exists for today
+// Amber = projected pre-game starters
+// Green = confirmed (game live or finished)
 
 import { useState, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
 
-// Initialize Supabase client
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL,
   import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
-// ─── Status Config (matches ESPN styling) ─────────────────────────────────────
-const STATUS_CONFIG = {
-  probable:     { label: "PROBABLE",     bg: "#2a2000", border: "#c8970a", text: "#f5bc2f", dot: "#f5bc2f" },
-  questionable: { label: "QUESTIONABLE", bg: "#1a1200", border: "#8a6500", text: "#d4a017", dot: "#d4a017" },
-  out:          { label: "OUT",          bg: "#200000", border: "#8b0000", text: "#ff4444", dot: "#ff4444" },
-  confirmed:    { label: "CONFIRMED",    bg: "#002a00", border: "#22c55e", text: "#22c55e", dot: "#22c55e" },
-};
-
-// ─── Status Badge ─────────────────────────────────────────────────────────────
-function StatusBadge({ status }: { status: string | null }) {
-  if (!status) return null;
-  const cfg = STATUS_CONFIG[status as keyof typeof STATUS_CONFIG] || STATUS_CONFIG.probable;
-  return (
-    <span style={{
-      display: "inline-flex", alignItems: "center", gap: 5,
-      padding: "2px 8px", borderRadius: 4,
-      background: cfg.bg, border: `1px solid ${cfg.border}`,
-      fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
-      color: cfg.text, fontFamily: "'DM Mono', monospace",
-    }}>
-      <svg width="6" height="6" viewBox="0 0 6 6">
-        <circle cx="3" cy="3" r="3" fill={cfg.dot} />
-      </svg>
-      {cfg.label}
-    </span>
-  );
+// ─── Types ────────────────────────────────────────────────────────────────────
+interface Player {
+  player_id: string;
+  full_name: string;
+  position: string;
+  jersey: string;
+  is_starter: boolean;
+  lineup_status: "confirmed" | "projected" | null;
+  l10avg: number;
+  hitRate: number;
 }
 
-// ─── Hit rate bar ─────────────────────────────────────────────────────────────
+interface Team {
+  abbreviation: string;
+  name: string;
+  opponent: string;
+  game_time: string;
+  confirmed: boolean;
+  players: Player[];
+}
+
+// ─── Status Config ────────────────────────────────────────────────────────────
+const STATUS_CONFIG = {
+  confirmed: { label: "CONFIRMED", bg: "#002a00", border: "#22c55e", text: "#22c55e", dot: "#22c55e" },
+  projected: { label: "PROBABLE",  bg: "#2a2000", border: "#c8970a", text: "#f5bc2f", dot: "#f5bc2f" },
+};
+
+// ─── Hit Bar ──────────────────────────────────────────────────────────────────
 function HitBar({ rate }: { rate: number }) {
   const color = rate >= 60 ? "#22c55e" : rate >= 40 ? "#f5bc2f" : "#ef4444";
   return (
     <div style={{ height: 3, background: "#1e2530", borderRadius: 2, marginTop: 4 }}>
-      <div style={{ height: "100%", width: `${rate}%`, background: color, borderRadius: 2,
+      <div style={{ height: "100%", width: `${Math.min(rate, 100)}%`, background: color, borderRadius: 2,
         transition: "width 0.6s cubic-bezier(.16,1,.3,1)" }} />
     </div>
   );
 }
 
 // ─── Player Card ──────────────────────────────────────────────────────────────
-function PlayerCard({ player, isStarter, lineupStatus }: { 
-  player: any; 
-  isStarter: boolean; 
-  lineupStatus: "projected" | "confirmed" | null 
-}) {
+function PlayerCard({ player }: { player: Player }) {
   const [hovered, setHovered] = useState(false);
+  const isStarter = player.is_starter;
+  const status = player.lineup_status;
+  const cfg = status === "confirmed" ? STATUS_CONFIG.confirmed : STATUS_CONFIG.projected;
 
   const borderColor = isStarter
-    ? lineupStatus === "confirmed" 
-      ? hovered ? "#22c55e" : "#16a34a"
-      : hovered ? "#f5bc2f" : "#c8970a"
+    ? hovered ? cfg.text : cfg.border
     : hovered ? "#2e3748" : "#1e2530";
 
   const bgColor = isStarter
-    ? lineupStatus === "confirmed"
-      ? hovered ? "#002a00" : "#001a00"
-      : hovered ? "#1a1400" : "#141000"
+    ? hovered ? (status === "confirmed" ? "#002a00" : "#1a1400") : (status === "confirmed" ? "#001a00" : "#141000")
     : hovered ? "#141820" : "#0d1117";
-
-  const glowStyle = isStarter ? {
-    boxShadow: hovered
-      ? `0 0 0 1px ${lineupStatus === "confirmed" ? "#22c55e40" : "#f5bc2f40"}, 0 4px 20px ${lineupStatus === "confirmed" ? "#22c55e20" : "#f5bc2f20"}`
-      : `0 0 0 1px ${lineupStatus === "confirmed" ? "#16a34a20" : "#c8970a20"}, 0 2px 8px ${lineupStatus === "confirmed" ? "#16a34a10" : "#c8970a10"}`,
-  } : {};
 
   return (
     <div
@@ -84,248 +71,207 @@ function PlayerCard({ player, isStarter, lineupStatus }: {
       style={{
         background: bgColor,
         border: `1px solid ${borderColor}`,
-        borderRadius: 10,
-        padding: "14px 16px",
-        cursor: "default",
-        transition: "all 0.18s ease",
-        position: "relative",
-        overflow: "hidden",
-        ...glowStyle,
+        borderRadius: 10, padding: "14px 16px",
+        cursor: "default", transition: "all 0.18s ease",
+        position: "relative", overflow: "hidden",
+        boxShadow: isStarter && hovered
+          ? `0 0 0 1px ${cfg.text}40, 0 4px 20px ${cfg.text}20`
+          : isStarter ? `0 0 0 1px ${cfg.border}20` : "none",
       }}
     >
+      {/* Top accent line */}
       {isStarter && (
         <div style={{
           position: "absolute", top: 0, left: 0, right: 0, height: 2,
-          background: `linear-gradient(90deg, ${lineupStatus === "confirmed" ? "#16a34a" : "#c8970a"}, ${lineupStatus === "confirmed" ? "#22c55e" : "#f5bc2f"}, ${lineupStatus === "confirmed" ? "#16a34a" : "#c8970a"})`,
-          opacity: hovered ? 1 : 0.7,
-          transition: "opacity 0.18s",
+          background: `linear-gradient(90deg, ${cfg.border}, ${cfg.text}, ${cfg.border})`,
+          opacity: hovered ? 1 : 0.7, transition: "opacity 0.18s",
         }} />
       )}
 
+      {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {/* Jersey */}
             <div style={{
-              width: 22, height: 22, borderRadius: "50%",
-              background: isStarter 
-                ? (lineupStatus === "confirmed" ? "#002a00" : "#2a1f00") 
-                : "#1a2030",
-              border: `1px solid ${isStarter 
-                ? (lineupStatus === "confirmed" ? "#16a34a" : "#c8970a") 
-                : "#2e3748"}`,
+              width: 22, height: 22, borderRadius: "50%", flexShrink: 0,
+              background: isStarter ? `${cfg.border}20` : "#1a2030",
+              border: `1px solid ${isStarter ? cfg.border : "#2e3748"}`,
               display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 9, fontWeight: 700, 
-              color: isStarter 
-                ? (lineupStatus === "confirmed" ? "#22c55e" : "#f5bc2f") 
-                : "#4a5568",
-              fontFamily: "'DM Mono', monospace", flexShrink: 0,
+              fontSize: 9, fontWeight: 700,
+              color: isStarter ? cfg.text : "#4a5568",
+              fontFamily: "'DM Mono', monospace",
             }}>
               {player.jersey || "–"}
             </div>
+            {/* Name */}
             <span style={{
-              fontSize: 13, fontWeight: 700, 
-              color: isStarter 
-                ? (lineupStatus === "confirmed" ? "#86efac" : "#e8d48b") 
-                : "#cbd5e1",
+              fontSize: 13, fontWeight: 700,
+              color: isStarter ? (status === "confirmed" ? "#86efac" : "#e8d48b") : "#cbd5e1",
               fontFamily: "'Barlow Condensed', sans-serif",
               letterSpacing: "0.03em", textTransform: "uppercase",
             }}>
-              {player.full_name || player.name}
+              {player.full_name}
             </span>
           </div>
           <div style={{ marginTop: 3, marginLeft: 30 }}>
-            <span style={{
-              fontSize: 10, color: "#4a5568", fontFamily: "'DM Mono', monospace",
-              letterSpacing: "0.05em",
-            }}>
-              {player.position}
+            <span style={{ fontSize: 10, color: "#4a5568", fontFamily: "'DM Mono', monospace" }}>
+              {player.position || "–"}
             </span>
           </div>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-          <StatusBadge status={lineupStatus || (player.starter ? "probable" : null)} />
-          {isStarter && (
+        {/* Badges */}
+        {isStarter && status && (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
             <span style={{
-              display: "inline-flex", alignItems: "center", gap: 4,
-              fontSize: 9, 
-              color: lineupStatus === "confirmed" ? "#22c55e" : "#c8970a", 
-              fontFamily: "'DM Mono', monospace",
-              fontWeight: 600, letterSpacing: "0.06em",
+              display: "inline-flex", alignItems: "center", gap: 5,
+              padding: "2px 8px", borderRadius: 4,
+              background: cfg.bg, border: `1px solid ${cfg.border}`,
+              fontSize: 10, fontWeight: 700, color: cfg.text,
+              fontFamily: "'DM Mono', monospace", letterSpacing: "0.08em",
             }}>
-              <svg width="8" height="8" viewBox="0 0 8 8">
-                <circle cx="4" cy="4" r="3" fill="none" stroke={lineupStatus === "confirmed" ? "#22c55e" : "#c8970a"} strokeWidth="1.5" />
-                <circle cx="4" cy="4" r="1.5" fill={lineupStatus === "confirmed" ? "#22c55e" : "#c8970a"} />
+              <svg width="6" height="6" viewBox="0 0 6 6">
+                <circle cx="3" cy="3" r="3" fill={cfg.dot} />
               </svg>
-              {lineupStatus === "confirmed" ? "Confirmed Starter" : "Projected Starter"}
+              {cfg.label}
             </span>
-          )}
-        </div>
+            <span style={{
+              fontSize: 9, color: cfg.border,
+              fontFamily: "'DM Mono', monospace", fontWeight: 600, letterSpacing: "0.06em",
+            }}>
+              {status === "confirmed" ? "✓ Confirmed Starter" : "◎ Projected Starter"}
+            </span>
+          </div>
+        )}
       </div>
 
+      {/* Stats */}
       <div style={{
-        borderTop: `1px solid ${isStarter 
-          ? (lineupStatus === "confirmed" ? "#002a00" : "#2a1f00") 
-          : "#1a2030"}`,
+        borderTop: `1px solid ${isStarter ? `${cfg.border}30` : "#1a2030"}`,
         paddingTop: 10, marginTop: 4,
         display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12,
       }}>
         <div>
-          <div style={{ fontSize: 9, color: "#4a5568", fontFamily: "'DM Mono', monospace",
-            letterSpacing: "0.08em", marginBottom: 3 }}>
+          <div style={{ fontSize: 9, color: "#4a5568", fontFamily: "'DM Mono', monospace", letterSpacing: "0.08em", marginBottom: 3 }}>
             L10 Avg
           </div>
-          <div style={{ fontSize: 18, fontWeight: 700,
-            color: player.l10avg > 0 
-              ? (isStarter 
-                ? (lineupStatus === "confirmed" ? "#22c55e" : "#f5bc2f") 
-                : "#e2e8f0") 
-              : "#2e3748",
-            fontFamily: "'Barlow Condensed', sans-serif", lineHeight: 1,
+          <div style={{ fontSize: 18, fontWeight: 700, lineHeight: 1,
+            color: player.l10avg > 0 ? (isStarter ? cfg.text : "#e2e8f0") : "#2e3748",
+            fontFamily: "'Barlow Condensed', sans-serif",
           }}>
-            {player.l10avg > 0 ? player.l10avg.toFixed(1) : "0.0"}
+            {player.l10avg > 0 ? player.l10avg.toFixed(1) : "—"}
           </div>
         </div>
         <div>
-          <div style={{ fontSize: 9, color: "#4a5568", fontFamily: "'DM Mono', monospace",
-            letterSpacing: "0.08em", marginBottom: 3 }}>
+          <div style={{ fontSize: 9, color: "#4a5568", fontFamily: "'DM Mono', monospace", letterSpacing: "0.08em", marginBottom: 3 }}>
             Hit Rate
           </div>
-          <div style={{ fontSize: 18, fontWeight: 700,
+          <div style={{ fontSize: 18, fontWeight: 700, lineHeight: 1,
             color: player.hitRate >= 60 ? "#22c55e" : player.hitRate >= 40 ? "#f5bc2f" : "#ef4444",
-            fontFamily: "'Barlow Condensed', sans-serif", lineHeight: 1,
+            fontFamily: "'Barlow Condensed', sans-serif",
           }}>
-            {player.hitRate > 0 ? `${player.hitRate}%` : "0%"}
+            {player.hitRate > 0 ? `${player.hitRate}%` : "—"}
           </div>
-          <HitBar rate={player.hitRate} />
+          {player.hitRate > 0 && <HitBar rate={player.hitRate} />}
         </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Team Header ──────────────────────────────────────────────────────────────
-function TeamHeader({ team }: { team: any }) {
-  const starters = team.players?.filter((p: any) => p.is_starter) || [];
-  const confirmed = starters.filter((p: any) => p.lineup_status === "confirmed").length;
-  const projected = starters.filter((p: any) => p.lineup_status === "projected").length;
-  
-  return (
-    <div style={{
-      display: "flex", justifyContent: "space-between", alignItems: "center",
-      marginBottom: 16,
-    }}>
-      <div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{
-            fontSize: 22, fontWeight: 900, color: "#f5bc2f",
-            fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: "0.06em",
-          }}>
-            {team.abbreviation}
-          </span>
-          <span style={{
-            fontSize: 14, color: "#94a3b8",
-            fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 500,
-          }}>
-            {team.name || team.displayName}
-          </span>
-        </div>
-        <div style={{ display: "flex", gap: 12, marginTop: 4, alignItems: "center" }}>
-          <span style={{ fontSize: 11, color: "#f5bc2f", fontFamily: "'DM Mono', monospace", fontWeight: 600 }}>
-            {projected} Projected
-          </span>
-          <span style={{ color: "#2e3748", fontSize: 10 }}>•</span>
-          <span style={{ fontSize: 11, color: confirmed > 0 ? "#22c55e" : "#4a5568",
-            fontFamily: "'DM Mono', monospace", fontWeight: 600 }}>
-            {confirmed} Confirmed
-          </span>
-        </div>
-      </div>
-      <div style={{
-        padding: "4px 12px", borderRadius: 6,
-        background: "#0d1117", border: "1px solid #1e2530",
-        fontSize: 11, fontWeight: 700, color: "#4a5568",
-        fontFamily: "'DM Mono', monospace", letterSpacing: "0.1em",
-      }}>
-        NBA
       </div>
     </div>
   );
 }
 
 // ─── Team Section ─────────────────────────────────────────────────────────────
-function TeamSection({ team }: { team: any }) {
-  const [activeTab, setActiveTab] = useState<"starters" | "all">("all");
-  
-  if (!team.players) return null;
-  
-  const starters = team.players.filter((p: any) => p.is_starter);
-  const bench = team.players.filter((p: any) => !p.is_starter);
-  const displayed = activeTab === "starters" ? starters : team.players;
+function TeamSection({ team }: { team: Team }) {
+  const [tab, setTab] = useState<"all" | "starters">("all");
+  const starters = team.players.filter(p => p.is_starter);
+  const bench    = team.players.filter(p => !p.is_starter);
+  const isConfirmed = team.confirmed;
 
   return (
     <div style={{
       background: "#0a0e14", border: "1px solid #1a2030",
-      borderRadius: 14, padding: "20px 20px 24px",
-      marginBottom: 24,
+      borderRadius: 14, padding: "20px 20px 24px", marginBottom: 24,
     }}>
-      <TeamHeader team={team} />
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 22, fontWeight: 900,
+              color: isConfirmed ? "#22c55e" : "#f5bc2f",
+              fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: "0.06em" }}>
+              {team.abbreviation}
+            </span>
+            <span style={{ fontSize: 14, color: "#94a3b8", fontFamily: "'Barlow Condensed', sans-serif" }}>
+              {team.name} vs {team.opponent}
+            </span>
+          </div>
+          <div style={{ display: "flex", gap: 12, marginTop: 4, alignItems: "center" }}>
+            <span style={{ fontSize: 11, fontWeight: 600, fontFamily: "'DM Mono', monospace",
+              color: isConfirmed ? "#22c55e" : "#f5bc2f" }}>
+              {starters.length} {isConfirmed ? "Confirmed" : "Projected"}
+            </span>
+            <span style={{ color: "#2e3748" }}>•</span>
+            <span style={{ fontSize: 11, color: "#4a5568", fontFamily: "'DM Mono', monospace" }}>
+              {bench.length} Bench
+            </span>
+            <span style={{ color: "#2e3748" }}>•</span>
+            <span style={{ fontSize: 11, color: "#4a5568", fontFamily: "'DM Mono', monospace" }}>
+              {team.game_time}
+            </span>
+          </div>
+        </div>
+        <div style={{
+          padding: "4px 12px", borderRadius: 6,
+          background: "#0d1117", border: "1px solid #1e2530",
+          fontSize: 11, fontWeight: 700, color: "#4a5568",
+          fontFamily: "'DM Mono', monospace",
+        }}>NBA</div>
+      </div>
 
+      {/* Tabs */}
       <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
-        {(["all", "starters"] as const).map(tab => (
-          <button key={tab} onClick={() => setActiveTab(tab)} style={{
+        {(["all", "starters"] as const).map(t => (
+          <button key={t} onClick={() => setTab(t)} style={{
             padding: "5px 14px", borderRadius: 6, border: "1px solid",
-            borderColor: activeTab === tab ? "#c8970a" : "#1e2530",
-            background: activeTab === tab ? "#1a1200" : "transparent",
-            color: activeTab === tab ? "#f5bc2f" : "#4a5568",
+            borderColor: tab === t ? (isConfirmed ? "#22c55e" : "#c8970a") : "#1e2530",
+            background: tab === t ? (isConfirmed ? "#001a00" : "#1a1200") : "transparent",
+            color: tab === t ? (isConfirmed ? "#22c55e" : "#f5bc2f") : "#4a5568",
             fontSize: 11, fontWeight: 700, cursor: "pointer",
             fontFamily: "'DM Mono', monospace", letterSpacing: "0.06em",
             transition: "all 0.15s ease",
           }}>
-            {tab === "all" ? "ALL PLAYERS" : "STARTERS ONLY"}
+            {t === "all" ? "ALL PLAYERS" : "STARTERS ONLY"}
           </button>
         ))}
       </div>
 
-      {activeTab === "all" && starters.length > 0 && (
-        <div style={{
-          fontSize: 9, fontWeight: 700, color: "#c8970a",
-          fontFamily: "'DM Mono', monospace", letterSpacing: "0.15em",
-          marginBottom: 10, paddingLeft: 2,
-        }}>
-          ▸ PROJECTED STARTERS
-        </div>
+      {/* Starters */}
+      {starters.length > 0 && (
+        <>
+          <div style={{
+            fontSize: 9, fontWeight: 700,
+            color: isConfirmed ? "#22c55e" : "#c8970a",
+            fontFamily: "'DM Mono', monospace", letterSpacing: "0.15em",
+            marginBottom: 10, paddingLeft: 2,
+          }}>
+            ▸ {isConfirmed ? "CONFIRMED STARTERS" : "PROJECTED STARTERS"}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 10 }}>
+            {starters.map((p, i) => <PlayerCard key={`${p.player_id}-${i}`} player={p} />)}
+          </div>
+        </>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 10 }}>
-        {(activeTab === "all" ? starters : starters).map((p: any) => (
-          <PlayerCard 
-            key={p.player_id || p.id} 
-            player={p} 
-            isStarter={true} 
-            lineupStatus={p.lineup_status} 
-          />
-        ))}
-      </div>
-
-      {activeTab === "all" && bench.length > 0 && (
+      {/* Bench */}
+      {tab === "all" && bench.length > 0 && (
         <>
           <div style={{
             fontSize: 9, fontWeight: 700, color: "#2e3748",
             fontFamily: "'DM Mono', monospace", letterSpacing: "0.15em",
             margin: "16px 0 10px", paddingLeft: 2,
-          }}>
-            ▸ BENCH
-          </div>
+          }}>▸ BENCH</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 10 }}>
-            {bench.map((p: any) => (
-              <PlayerCard 
-                key={p.player_id || p.id} 
-                player={p} 
-                isStarter={false} 
-                lineupStatus={null} 
-              />
-            ))}
+            {bench.map((p, i) => <PlayerCard key={`bench-${p.player_id}-${i}`} player={p} />)}
           </div>
         </>
       )}
@@ -333,142 +279,121 @@ function TeamSection({ team }: { team: any }) {
   );
 }
 
-// ─── ROOT COMPONENT ───────────────────────────────────────────────────────────
+// ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function RosterPage() {
-  const [selectedTeam, setSelectedTeam] = useState("ALL");
-  const [teams, setTeams] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<string>("");
+  const [teams, setTeams]           = useState<Team[]>([]);
+  const [loading, setLoading]       = useState(true);
+  const [scraping, setScraping]     = useState(false);
+  const [selectedTeam, setSelected] = useState("ALL");
+  const [error, setError]           = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState("");
+  const [statusMsg, setStatusMsg]   = useState("");
 
-  const fetchLineups = async () => {
-    setLoading(true);
-    setError(null);
-    
+  // ── Transform DB rows → Team[] ──────────────────────────────────────────────
+  function transformRows(rows: any[]): Team[] {
+    return rows.map(row => {
+      const rawStarters = row.projected_starters || [];
+      const rawBench    = row.bench_depth || [];
+
+      // If no starters in DB, promote first 5 bench as projected
+      const displayStarters = rawStarters.length > 0 ? rawStarters : rawBench.slice(0, 5);
+      const displayBench    = rawStarters.length > 0 ? rawBench    : rawBench.slice(5);
+
+      const lineupStatus: "confirmed" | "projected" = row.confirmed ? "confirmed" : "projected";
+
+      const toPlayer = (p: any, isStarter: boolean): Player => ({
+        player_id:    p.espn_id || p.player_id || p.nba_id || Math.random().toString(),
+        full_name:    p.full_name || p.name || "Unknown",
+        position:     p.position || "–",
+        jersey:       p.jersey || "",
+        is_starter:   isStarter,
+        lineup_status: isStarter ? lineupStatus : null,
+        l10avg:       0,   // wire up to player_rolling_stats later
+        hitRate:      0,
+      });
+
+      return {
+        abbreviation: row.team_abbreviation,
+        name:         row.team_name || row.team_abbreviation,
+        opponent:     row.opponent_abbreviation || "TBD",
+        game_time:    row.game_time_utc
+          ? new Date(row.game_time_utc).toLocaleTimeString("en-US", {
+              hour: "numeric", minute: "2-digit", timeZoneName: "short",
+            })
+          : "TBD",
+        confirmed:    row.confirmed === true,
+        players:      [
+          ...displayStarters.map((p: any) => toPlayer(p, true)),
+          ...displayBench.map((p: any) => toPlayer(p, false)),
+        ],
+      };
+    });
+  }
+
+  // ── Query DB ────────────────────────────────────────────────────────────────
+  async function queryDB(): Promise<Team[]> {
+    // ✅ Use ET/local date, not UTC — avoids date flip for late night games
+    const today = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString().split("T")[0];
+    console.log("📅 Querying for:", today);
+
+    const { data, error: dbErr } = await supabase
+      .from("projected_lineups")
+      .select("team_id,team_abbreviation,team_name,game_id,game_date,game_time_utc,opponent_abbreviation,projected_starters,bench_depth,lineup_confidence,confirmed,confirmed_at")
+      .eq("game_date", today)
+      .order("game_time_utc", { ascending: true });
+
+    if (dbErr) throw dbErr;
+    console.log(`📊 Found ${data?.length || 0} rows`);
+    return transformRows(data || []);
+  }
+
+  // ── Trigger edge function scraper ───────────────────────────────────────────
+  async function runScraper(): Promise<void> {
+    setScraping(true);
+    setStatusMsg("⏳ Fetching lineups from NBA.com + ESPN...");
     try {
-      const today = new Date().toISOString().split('T')[0];
-      console.log('📅 Fetching lineups for:', today);
-      
-      const { data: lineups, error: lineupsError } = await supabase
-        .from('projected_lineups')
-        .select(`
-          team_id,
-          team_abbreviation,
-          game_id,
-          game_date,
-          game_time_utc,
-          opponent_abbreviation,
-          projected_starters,
-          bench_depth,
-          lineup_confidence,
-          confirmed,
-          confirmed_at
-        `)
-        .eq('game_date', today)
-        .order('game_time_utc', { ascending: true });
-      
-      if (lineupsError) throw lineupsError;
-      
-      console.log('📊 Found lineups:', lineups?.length);
-      
-      if (!lineups || lineups.length === 0) {
-        const { data: allLineups } = await supabase
-          .from('projected_lineups')
-          .select('game_date, team_abbreviation')
-          .limit(5);
-        console.log('📋 Recent lineups in DB:', allLineups);
-        setTeams([]);
-        setLoading(false);
-        return;
-      }
-      
-      const teamMap: Record<string, any> = {};
-      
-      for (const lineup of lineups) {
-        const teamAbbr = lineup.team_abbreviation;
-        if (!teamMap[teamAbbr]) {
-          teamMap[teamAbbr] = {
-            abbreviation: teamAbbr,
-            name: teamAbbr,
-            players: [],
-            gameInfo: {
-              opponent: lineup.opponent_abbreviation,
-              confirmed: lineup.confirmed ? 5 : 0,
-              probable: lineup.confirmed ? 0 : 5,
-            }
-          };
-        }
-        
-        // ✅ FIX: Handle empty projected_starters – promote first 5 bench players
-        const rawStarters = lineup.projected_starters || [];
-        const rawBench = lineup.bench_depth || [];
-        
-        // Determine which players to show as starters
-        const displayStarters = rawStarters.length > 0 
-          ? rawStarters 
-          : rawBench.slice(0, 5);
-        const displayBench = rawStarters.length > 0 
-          ? rawBench 
-          : rawBench.slice(5);
-        
-        // Add starters
-        for (const starter of displayStarters) {
-          teamMap[teamAbbr].players.push({
-            player_id: starter.player_id || starter.espnId,
-            full_name: starter.full_name || starter.name || 'Unknown',
-            position: starter.position || '–',
-            jersey: starter.jersey || '',
-            is_starter: true,
-            lineup_status: lineup.confirmed ? 'confirmed' : 'projected',
-            l10avg: Math.random() * 20 + 10, // mock – replace with real stats
-            hitRate: Math.floor(Math.random() * 40) + 40,
-          });
-        }
-        
-        // Add bench
-        for (const benchPlayer of displayBench) {
-          teamMap[teamAbbr].players.push({
-            player_id: benchPlayer.player_id || benchPlayer.espnId,
-            full_name: benchPlayer.full_name || benchPlayer.name || 'Unknown',
-            position: benchPlayer.position || '–',
-            jersey: benchPlayer.jersey || '',
-            is_starter: false,
-            lineup_status: null,
-            l10avg: Math.random() * 15 + 5,
-            hitRate: Math.floor(Math.random() * 30) + 30,
-          });
-        }
-      }
-      
-      // Fetch team names
-      const teamAbbrs = Object.keys(teamMap);
-      if (teamAbbrs.length > 0) {
-        const { data: teamsData } = await supabase
-          .from('teams')
-          .select('abbreviation, name')
-          .in('abbreviation', teamAbbrs);
-        if (teamsData) {
-          for (const team of teamsData) {
-            if (teamMap[team.abbreviation]) teamMap[team.abbreviation].name = team.name;
-          }
-        }
-      }
-      
-      setTeams(Object.values(teamMap));
-      setLastUpdated(new Date().toLocaleTimeString("en-US", {
-        hour: "2-digit", minute: "2-digit", hour12: true
-      }));
-      
-    } catch (err: any) {
-      console.error("Error fetching lineups:", err);
-      setError(err.message);
+      const { data, error: fnErr } = await supabase.functions.invoke("espn-lineup-scraper", {
+        body: { sport: "nba" },
+      });
+      if (fnErr) throw new Error(fnErr.message);
+      console.log("Scraper result:", data);
+      setStatusMsg(`✅ ${data.teams_written} teams updated (${data.nba_lineups_found || 0} NBA lineups found)`);
+      const fresh = await queryDB();
+      setTeams(fresh);
+      setLastUpdated(new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }));
+    } catch (e: any) {
+      setError(`Scraper failed: ${e.message}`);
     } finally {
+      setScraping(false);
       setLoading(false);
     }
-  };
+  }
+
+  // ── Full refresh ────────────────────────────────────────────────────────────
+  async function fetchLineups() {
+    setLoading(true);
+    setError(null);
+    setStatusMsg("");
+    try {
+      const rows = await queryDB();
+      if (rows.length === 0) {
+        // Auto-trigger scraper when DB is empty for today
+        console.log("No data for today — auto-triggering scraper...");
+        await runScraper();
+      } else {
+        setTeams(rows);
+        setLastUpdated(new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }));
+        setLoading(false);
+      }
+    } catch (e: any) {
+      setError(e.message);
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
     fetchLineups();
+    // Auto-refresh every 5 min
     const interval = setInterval(fetchLineups, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
@@ -477,25 +402,9 @@ export default function RosterPage() {
     ? teams
     : teams.filter(t => t.abbreviation === selectedTeam);
 
-  if (loading && teams.length === 0) {
-    return (
-      <div style={{
-        minHeight: "100vh", background: "#060a0f",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        fontFamily: "'DM Mono', monospace",
-      }}>
-        <div style={{ textAlign: "center", color: "#4a5568" }}>
-          <div style={{
-            width: 40, height: 40, borderRadius: "50%",
-            border: "2px solid #1e2530", borderTopColor: "#f5bc2f",
-            animation: "spin 1s linear infinite", margin: "0 auto 16px"
-          }} />
-          <div>Loading ESPN lineups...</div>
-        </div>
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-      </div>
-    );
-  }
+  const dateLabel = new Date()
+    .toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    .toUpperCase();
 
   return (
     <>
@@ -505,120 +414,120 @@ export default function RosterPage() {
         body { background: #060a0f; }
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-track { background: #0a0e14; }
-        ::-webkit-scrollbar-thumb { background: #1e2530; border-radius: 2px; }
+        ::-webkit-scrollbar-thumb { background: #1e2530; borderRadius: 2px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.4} }
       `}</style>
 
-      <div style={{
-        minHeight: "100vh", background: "#060a0f",
-        padding: "32px 24px", fontFamily: "'DM Mono', monospace",
-      }}>
+      <div style={{ minHeight: "100vh", background: "#060a0f", padding: "32px 24px", fontFamily: "'DM Mono', monospace" }}>
         <div style={{ maxWidth: 1100, margin: "0 auto" }}>
 
+          {/* Header */}
           <div style={{ marginBottom: 28, display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
             <div>
-              <div style={{
-                fontSize: 10, color: "#c8970a", fontWeight: 700,
-                letterSpacing: "0.2em", marginBottom: 6,
-                fontFamily: "'DM Mono', monospace",
-              }}>
+              <div style={{ fontSize: 10, color: "#c8970a", fontWeight: 700, letterSpacing: "0.2em", marginBottom: 6 }}>
                 ◈ NBA DAILY LINEUPS
               </div>
-              <div style={{
-                fontSize: 28, fontWeight: 900, color: "#e8d48b",
-                fontFamily: "'Barlow Condensed', sans-serif",
-                letterSpacing: "0.04em",
-              }}>
-                {new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }).toUpperCase()}
+              <div style={{ fontSize: 28, fontWeight: 900, color: "#e8d48b", fontFamily: "'Barlow Condensed', sans-serif" }}>
+                {dateLabel}
               </div>
             </div>
-            <div style={{
-              fontSize: 10, color: "#2e3748",
-              fontFamily: "'DM Mono', monospace",
-            }}>
-              Updated {lastUpdated || "–"}
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              {lastUpdated && <span style={{ fontSize: 10, color: "#2e3748" }}>Updated {lastUpdated}</span>}
+              <button onClick={fetchLineups} disabled={loading || scraping} style={{
+                padding: "6px 16px", borderRadius: 8,
+                border: "1px solid #1e2530", background: "#0d1117",
+                color: (loading || scraping) ? "#2e3748" : "#4a5568",
+                fontSize: 12, fontWeight: 700, cursor: (loading || scraping) ? "not-allowed" : "pointer",
+                fontFamily: "'DM Mono', monospace", letterSpacing: "0.08em",
+                display: "flex", alignItems: "center", gap: 6,
+              }}>
+                <span style={{ display: "inline-block", animation: (loading || scraping) ? "spin 1s linear infinite" : "none" }}>↻</span>
+                {scraping ? "Scraping..." : loading ? "Loading..." : "Refresh"}
+              </button>
+              <button onClick={runScraper} disabled={scraping || loading} style={{
+                padding: "6px 16px", borderRadius: 8,
+                border: "1px solid #c8970a40", background: "#141000",
+                color: scraping ? "#2e3748" : "#c8970a",
+                fontSize: 12, fontWeight: 700, cursor: scraping ? "not-allowed" : "pointer",
+                fontFamily: "'DM Mono', monospace", letterSpacing: "0.08em",
+              }}>
+                ⚡ Pull NBA
+              </button>
             </div>
           </div>
 
+          {/* Status / Error */}
           {error && (
-            <div style={{
-              marginBottom: 16, padding: "8px 12px",
-              background: "#200000", border: "1px solid #8b0000",
-              borderRadius: 6, color: "#ff4444", fontSize: 11,
-              fontFamily: "'DM Mono', monospace",
-            }}>
+            <div style={{ marginBottom: 16, padding: "10px 14px", background: "#200000", border: "1px solid #8b0000", borderRadius: 8, color: "#ff4444", fontSize: 11, fontFamily: "'DM Mono', monospace" }}>
               ❌ {error}
             </div>
           )}
-
-          <div style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" }}>
-            <button onClick={() => setSelectedTeam("ALL")} style={{
-              padding: "6px 16px", borderRadius: 8,
-              border: `1px solid ${selectedTeam === "ALL" ? "#c8970a" : "#1e2530"}`,
-              background: selectedTeam === "ALL" ? "#1a1200" : "#0d1117",
-              color: selectedTeam === "ALL" ? "#f5bc2f" : "#4a5568",
-              fontSize: 12, fontWeight: 700, cursor: "pointer",
-              fontFamily: "'DM Mono', monospace", letterSpacing: "0.08em",
-            }}>ALL</button>
-            {teams.map(t => (
-              <button key={t.abbreviation} onClick={() => setSelectedTeam(t.abbreviation)} style={{
-                padding: "6px 16px", borderRadius: 8,
-                border: `1px solid ${selectedTeam === t.abbreviation ? "#c8970a" : "#1e2530"}`,
-                background: selectedTeam === t.abbreviation ? "#1a1200" : "#0d1117",
-                color: selectedTeam === t.abbreviation ? "#f5bc2f" : "#4a5568",
-                fontSize: 12, fontWeight: 700, cursor: "pointer",
-                fontFamily: "'DM Mono', monospace", letterSpacing: "0.08em",
-              }}>{t.abbreviation}</button>
-            ))}
-            <button onClick={fetchLineups} style={{
-              padding: "6px 16px", borderRadius: 8,
-              border: "1px solid #1e2530",
-              background: "#0d1117",
-              color: "#4a5568",
-              fontSize: 12, fontWeight: 700, cursor: "pointer",
-              fontFamily: "'DM Mono', monospace", letterSpacing: "0.08em",
-              marginLeft: "auto",
-            }}>↻ Refresh</button>
-          </div>
-
-          {displayed.length === 0 ? (
-            <div style={{
-              textAlign: "center", padding: "40px 20px",
-              color: "#4a5568", fontFamily: "'DM Mono', monospace",
-            }}>
-              No games scheduled for today
+          {statusMsg && !error && (
+            <div style={{ marginBottom: 16, padding: "10px 14px", background: "#001a00", border: "1px solid #166534", borderRadius: 8, color: "#22c55e", fontSize: 11, fontFamily: "'DM Mono', monospace" }}>
+              {statusMsg}
             </div>
-          ) : (
-            displayed.map(team => (
-              <TeamSection key={team.abbreviation} team={team} />
-            ))
           )}
 
-          <div style={{
-            display: "flex", gap: 20, marginTop: 8,
-            padding: "12px 16px", background: "#0a0e14",
-            borderRadius: 8, border: "1px solid #1a2030",
-            flexWrap: "wrap",
-          }}>
-            <div style={{ fontSize: 9, color: "#2e3748", fontFamily: "'DM Mono', monospace", letterSpacing: "0.1em" }}>
-              LEGEND:
+          {/* Loading spinner */}
+          {(loading || scraping) && teams.length === 0 && (
+            <div style={{ textAlign: "center", padding: "60px 20px", color: "#4a5568" }}>
+              <div style={{ width: 40, height: 40, borderRadius: "50%", border: "2px solid #1e2530", borderTopColor: "#f5bc2f", animation: "spin 1s linear infinite", margin: "0 auto 16px" }} />
+              <div style={{ fontSize: 12, animation: "pulse 2s ease infinite" }}>
+                {scraping ? "Fetching from NBA.com..." : "Loading lineups..."}
+              </div>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <div style={{ width: 12, height: 2, background: "linear-gradient(90deg, #c8970a, #f5bc2f)" }} />
-              <span style={{ fontSize: 9, color: "#4a5568", fontFamily: "'DM Mono', monospace" }}>PROJECTED STARTER</span>
+          )}
+
+          {/* Team filter tabs */}
+          {teams.length > 0 && (
+            <div style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" }}>
+              <button onClick={() => setSelected("ALL")} style={{
+                padding: "6px 16px", borderRadius: 8,
+                border: `1px solid ${selectedTeam === "ALL" ? "#c8970a" : "#1e2530"}`,
+                background: selectedTeam === "ALL" ? "#1a1200" : "#0d1117",
+                color: selectedTeam === "ALL" ? "#f5bc2f" : "#4a5568",
+                fontSize: 12, fontWeight: 700, cursor: "pointer",
+                fontFamily: "'DM Mono', monospace", letterSpacing: "0.08em",
+              }}>ALL</button>
+              {teams.map(t => (
+                <button key={t.abbreviation} onClick={() => setSelected(t.abbreviation)} style={{
+                  padding: "6px 16px", borderRadius: 8,
+                  border: `1px solid ${selectedTeam === t.abbreviation ? (t.confirmed ? "#22c55e" : "#c8970a") : "#1e2530"}`,
+                  background: selectedTeam === t.abbreviation ? (t.confirmed ? "#001a00" : "#1a1200") : "#0d1117",
+                  color: selectedTeam === t.abbreviation ? (t.confirmed ? "#22c55e" : "#f5bc2f") : "#4a5568",
+                  fontSize: 12, fontWeight: 700, cursor: "pointer",
+                  fontFamily: "'DM Mono', monospace", letterSpacing: "0.08em",
+                }}>{t.abbreviation}</button>
+              ))}
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <div style={{ width: 12, height: 2, background: "linear-gradient(90deg, #16a34a, #22c55e)" }} />
-              <span style={{ fontSize: 9, color: "#4a5568", fontFamily: "'DM Mono', monospace" }}>CONFIRMED STARTER</span>
+          )}
+
+          {/* Empty state */}
+          {!loading && !scraping && teams.length === 0 && !error && (
+            <div style={{ textAlign: "center", padding: "60px 20px", color: "#4a5568" }}>
+              <div style={{ fontSize: 14, marginBottom: 8 }}>No games scheduled for today</div>
+              <div style={{ fontSize: 11, color: "#2e3748" }}>Click ⚡ Pull NBA to fetch manually</div>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#f5bc2f" }} />
-              <span style={{ fontSize: 9, color: "#4a5568", fontFamily: "'DM Mono', monospace" }}>PROBABLE</span>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e" }} />
-              <span style={{ fontSize: 9, color: "#4a5568", fontFamily: "'DM Mono', monospace" }}>HIT RATE ≥60%</span>
-            </div>
+          )}
+
+          {/* Team cards */}
+          {displayed.map(team => <TeamSection key={team.abbreviation} team={team} />)}
+
+          {/* Legend */}
+          <div style={{ display: "flex", gap: 20, marginTop: 8, padding: "12px 16px", background: "#0a0e14", borderRadius: 8, border: "1px solid #1a2030", flexWrap: "wrap" }}>
+            <div style={{ fontSize: 9, color: "#2e3748", fontFamily: "'DM Mono', monospace", letterSpacing: "0.1em" }}>LEGEND:</div>
+            {[
+              { color: "#c8970a", label: "PROJECTED STARTER" },
+              { color: "#22c55e", label: "CONFIRMED STARTER" },
+            ].map(({ color, label }) => (
+              <div key={label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{ width: 12, height: 2, background: color }} />
+                <span style={{ fontSize: 9, color: "#4a5568", fontFamily: "'DM Mono', monospace" }}>{label}</span>
+              </div>
+            ))}
           </div>
+
         </div>
       </div>
     </>
