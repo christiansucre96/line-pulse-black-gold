@@ -1,10 +1,15 @@
 // src/components/AppLayout.tsx
-// Sidebar nav — wraps all protected pages
-// Matches your existing scanner dark theme
-
 import { useNavigate, useLocation } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth"; // adjust path if different
 
-const NAV = [
+interface NavItem {
+  path: string;
+  label: string;
+  adminOnly?: boolean;
+  icon: React.ReactNode;
+}
+
+const NAV: NavItem[] = [
   {
     path: "/scanner",
     label: "Scanner",
@@ -70,6 +75,17 @@ const NAV = [
       </svg>
     ),
   },
+  {
+    path: "/admin",
+    label: "Admin",
+    adminOnly: true,
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+      </svg>
+    ),
+  },
 ]
 
 interface Props { children: React.ReactNode }
@@ -78,10 +94,22 @@ export default function AppLayout({ children }: Props) {
   const navigate = useNavigate()
   const location = useLocation()
 
+  // Try to get user role — if useAuth doesn't expose role, admin link shows for all
+  // Adjust this based on your actual useAuth hook shape
+  let isAdmin = false
+  try {
+    const auth = useAuth()
+    isAdmin = (auth as any)?.user?.role === 'admin' ||
+              (auth as any)?.profile?.role === 'admin' ||
+              (auth as any)?.isAdmin === true
+  } catch { isAdmin = true } // fallback: show admin if hook errors
+
+  const visibleNav = NAV.filter(item => !item.adminOnly || isAdmin)
+
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "#060a0f" }}>
 
-      {/* ── Sidebar ── */}
+      {/* ── Sidebar ─────────────────────────────────────────────────────── */}
       <aside style={{
         width: 56,
         background: "#0a0e14",
@@ -112,16 +140,21 @@ export default function AppLayout({ children }: Props) {
           LP
         </div>
 
-        {/* Nav items */}
+        {/* Nav links */}
         <div style={{ display: "flex", flexDirection: "column", gap: 2, width: "100%", flex: 1 }}>
-          {NAV.map((item) => {
-            const active = location.pathname === item.path
+          {visibleNav.map((item) => {
+            const active   = location.pathname === item.path
             const isInjury = item.path === "/injuries"
-            const activeColor = isInjury ? "#ff4444" : "#f5bc2f"
-            const activeBg    = isInjury ? "#1a000018" : "#1a120018"
+            const isAdminLink = item.path === "/admin"
+            const activeColor = isInjury ? "#ff4444" : isAdminLink ? "#a855f7" : "#f5bc2f"
+            const activeBg    = isInjury ? "#1a000018" : isAdminLink ? "#1a001a18" : "#1a120018"
 
             return (
-              <div key={item.path} className="nav-item-wrapper" style={{ position: "relative" }}>
+              <div
+                key={item.path}
+                style={{ position: "relative", width: "100%" }}
+                className="lp-nav-item"
+              >
                 <button
                   onClick={() => navigate(item.path)}
                   title={item.label}
@@ -154,8 +187,8 @@ export default function AppLayout({ children }: Props) {
                   {item.icon}
                 </button>
 
-                {/* Hover tooltip */}
-                <div className="nav-tooltip" style={{
+                {/* Tooltip */}
+                <div className="lp-tooltip" style={{
                   position: "absolute",
                   left: 62, top: "50%",
                   transform: "translateY(-50%)",
@@ -179,7 +212,7 @@ export default function AppLayout({ children }: Props) {
           })}
         </div>
 
-        {/* Bottom: logout */}
+        {/* Bottom: sign out */}
         <button
           onClick={() => navigate("/auth")}
           title="Sign out"
@@ -201,13 +234,13 @@ export default function AppLayout({ children }: Props) {
         </button>
       </aside>
 
-      {/* ── Page content ── */}
+      {/* ── Page content ──────────────────────────────────────────────────── */}
       <main style={{ marginLeft: 56, flex: 1, minWidth: 0 }}>
         {children}
       </main>
 
       <style>{`
-        .nav-item-wrapper:hover .nav-tooltip { opacity: 1 !important; }
+        .lp-nav-item:hover .lp-tooltip { opacity: 1 !important; }
       `}</style>
     </div>
   )
