@@ -236,3 +236,16 @@ export function toLegacyRollingStats(rs: PlayerRollingStats | null | undefined):
     is_complete:    rs.pts_l20.games >= 20,
   }
 }
+
+// ─── Helper: get friendly message for L20 completion status ───────────────────
+/**
+ * Returns a message indicating L20 window progress.
+ * - If games_l20 >= 20: returns null (fully built, no message needed)
+ * - Otherwise: returns "L{games_l20} (building history...)"
+ */
+export function getL20Message(games_l20: number): string | null {
+  if (games_l20 < 20) {
+    return `L${games_l20} (building history...)`
+  }
+  return null
+}
