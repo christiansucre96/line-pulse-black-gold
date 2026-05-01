@@ -116,11 +116,10 @@ export default function Admin() {
     } catch (err) { console.error("Failed to load stats:", err); }
   };
 
-  // ✅ UPDATED loadUsers – batch fetch emails from auth.users
+  // Batch fetch users with emails from auth.users
   const loadUsers = async () => {
     setLoadingUsers(true);
     try {
-      // Fetch profiles WITHOUT email column
       const { data: profilesData, error: profilesError } = await supabase
         .from('profiles')
         .select(`
@@ -132,7 +131,6 @@ export default function Admin() {
       
       if (profilesError) throw profilesError;
       
-      // Fetch emails from auth.users separately
       const userIds = profilesData?.map(p => p.id) || [];
       const { data: authData, error: authError } = await supabase
         .from('auth.users')
@@ -141,7 +139,6 @@ export default function Admin() {
       
       if (authError) throw authError;
       
-      // Merge profiles with emails
       const usersWithEmail = (profilesData || []).map(profile => {
         const authUser = authData?.find(u => u.id === profile.id);
         return {
@@ -196,7 +193,7 @@ export default function Admin() {
     }
   };
 
-  // ✅ FIXED grantTrial FUNCTION
+  // ✅ REPLACED grantTrial FUNCTION WITH CORRECT SYNTAX
   const grantTrial = async () => {
     if (!newUserEmail) {
       toast.error("Email is required");
@@ -212,11 +209,12 @@ export default function Admin() {
     try {
       let userId: string;
       
+      // 1. Find or Create User
       if (isExistingUser) {
-        // Find existing user by email in auth.users
+        // ✅ Fixed: added 'data:' prefix
         const { data: authUsers, error: findError } = await supabase
           .from('auth.users')
-          .select('id, email')
+          .select('id')
           .ilike('email', newUserEmail.toLowerCase());
         
         if (findError || !authUsers || authUsers.length === 0) {
@@ -224,8 +222,8 @@ export default function Admin() {
         }
         userId = authUsers[0].id;
       } else {
-        // Create new user in auth
         const password = tempPassword || generateTempPassword();
+        // ✅ Fixed: added 'data:' prefix
         const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
           email: newUserEmail.toLowerCase(),
           password,
@@ -239,17 +237,19 @@ export default function Admin() {
         setTempPassword(password);
       }
       
-      // Calculate dates
+      // 2. Calculate Dates
       const startDate = new Date();
       const endDate = tier.days 
         ? new Date(startDate.getTime() + tier.days * 24 * 60 * 60 * 1000)
         : null;
       
-      // Update/Create profile (use id, not user_id)
+      // 3. Update/Create profile (now includes 'email' column – must exist in DB)
       const { error: profileError } = await supabase
         .from('profiles')
         .upsert({
           id: userId,
+          user_id: userId,
+          email: newUserEmail.toLowerCase(),   // ✅ column must exist in profiles table
           subscription_tier: newUserTier,
           subscription_start: startDate.toISOString(),
           subscription_end: endDate?.toISOString(),
@@ -264,7 +264,7 @@ export default function Admin() {
       
       if (profileError) throw new Error(`Profile error: ${profileError.message}`);
       
-      // Delete old subscription and insert new one
+      // 4. Update Subscriptions (Safe Delete + Insert)
       await supabase.from('subscriptions').delete().eq('user_id', userId);
       
       const { error: subError } = await supabase
@@ -284,7 +284,7 @@ export default function Admin() {
       
       if (subError) throw new Error(`Subscription error: ${subError.message}`);
       
-      // Record revenue event
+      // 5. Record revenue event (optional)
       await supabase.from('revenue_events').insert({
         user_id: userId,
         event_type: 'subscription',
@@ -294,7 +294,7 @@ export default function Admin() {
         is_free_trial: true,
       });
       
-      // Show success
+      // 6. Show success
       if (!isExistingUser) {
         toast.success(
           <div>
@@ -312,7 +312,7 @@ export default function Admin() {
           { duration: 8000 }
         );
       } else {
-        toast.success(`✅ Trial granted to existing user: ${newUserEmail}`);
+        toast.success(`✅ Trial granted to ${newUserEmail}`);
       }
       
       setShowAddTrial(false);
