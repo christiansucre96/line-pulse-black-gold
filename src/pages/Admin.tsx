@@ -116,10 +116,12 @@ export default function Admin() {
     } catch (err) { console.error("Failed to load stats:", err); }
   };
 
+  // ✅ UPDATED loadUsers – batch fetch emails from auth.users
   const loadUsers = async () => {
     setLoadingUsers(true);
     try {
-      const { data: usersData, error } = await supabase
+      // Fetch profiles WITHOUT email column
+      const { data: profilesData, error: profilesError } = await supabase
         .from('profiles')
         .select(`
           id, created_at, last_login,
@@ -128,27 +130,29 @@ export default function Admin() {
         `)
         .order('created_at', { ascending: false });
       
-      if (error) throw error;
+      if (profilesError) throw profilesError;
       
-      // Fetch emails from auth.users for each profile
-      const usersWithEmail = await Promise.all(
-        (usersData || []).map(async (profile) => {
-          const { data: authData } = await supabase
-            .from('auth.users')
-            .select('email')
-            .eq('id', profile.id)
-            .single();
-          
-          return {
-            ...profile,
-            email: authData?.email || 'unknown'
-          };
-        })
-      );
+      // Fetch emails from auth.users separately
+      const userIds = profilesData?.map(p => p.id) || [];
+      const { data: authData, error: authError } = await supabase
+        .from('auth.users')
+        .select('id, email')
+        .in('id', userIds);
+      
+      if (authError) throw authError;
+      
+      // Merge profiles with emails
+      const usersWithEmail = (profilesData || []).map(profile => {
+        const authUser = authData?.find(u => u.id === profile.id);
+        return {
+          ...profile,
+          email: authUser?.email || 'unknown'
+        };
+      });
       
       setUsers(usersWithEmail);
       
-      const trials = (usersWithEmail || []).filter(u => u.is_free_trial);
+      const trials = usersWithEmail.filter(u => u.is_free_trial);
       const now = new Date();
       
       setTrialStats({
