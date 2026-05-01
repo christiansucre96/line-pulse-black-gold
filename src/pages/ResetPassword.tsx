@@ -15,12 +15,11 @@ export default function ResetPassword() {
 
   useEffect(() => {
     const handleRecovery = async () => {
-      // Check for recovery token in URL
       const type = searchParams.get("type");
       const accessToken = searchParams.get("access_token");
       
       if (type === "recovery" && accessToken) {
-        // Set session from the URL token
+        // Set session from URL token
         const { error: sessionError } = await supabase.auth.setSession({
           access_token: accessToken,
           refresh_token: "",
@@ -28,22 +27,11 @@ export default function ResetPassword() {
         
         if (sessionError) {
           console.error("Session error:", sessionError);
-          setError("Invalid or expired reset link");
-          toast.error("Reset link expired. Request a new one.");
-        }
-      } else if (type === "recovery" && !accessToken) {
-        // Try to get session from hash (fallback)
-        const hash = window.location.hash;
-        if (hash.includes("access_token")) {
-          const { error: hashError } = await supabase.auth.getSession();
-          if (hashError) {
-            setError("Invalid reset link");
-          }
-        } else {
-          setError("No reset token found. Please request a new password reset.");
+          setError("Invalid or expired reset link. Please request a new one.");
+          toast.error("Reset link expired");
         }
       } else {
-        setError("Invalid URL. Please use the link from your email.");
+        setError("Invalid URL. Please use the password reset link from your email.");
       }
     };
 
@@ -78,9 +66,8 @@ export default function ResetPassword() {
       setSuccess(true);
       toast.success("Password updated successfully!");
       
-      // Redirect after 3 seconds
       setTimeout(() => {
-        navigate("/auth"); // or "/login" depending on your route
+        navigate("/auth");
       }, 3000);
     }
 
