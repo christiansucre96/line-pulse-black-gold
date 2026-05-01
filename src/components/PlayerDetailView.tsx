@@ -1,9 +1,16 @@
 // src/components/PlayerDetailView.tsx
 // LinePulse — Black & Gold brand
-// Fixed: L15, L20 buttons always visible + clear feedback for insufficient data
+// FIXED: Team stats now query games_data directly via Supabase
+// FIXED: Injury position JSON cleaned up
 
 import { useEffect, useState, useMemo } from "react";
 import { ArrowLeft, ChevronRight } from "lucide-react";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL!,
+  import.meta.env.VITE_SUPABASE_ANON_KEY!
+);
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
@@ -55,7 +62,6 @@ const STAT_TABS: Record<string, { key: string; label: string; components?: strin
     { key: "home_runs", label: "HR" },
     { key: "total_bases", label: "TB" },
     { key: "strikeouts_pitching", label: "K" },
-    { key: "hits_allowed", label: "HA" },
     { key: "combo_hrr", label: "H+R+RBI", components: ["hits", "runs", "rbi"] },
   ],
   nhl: [
@@ -77,7 +83,6 @@ const STAT_TABS: Record<string, { key: string; label: string; components?: strin
   ],
 };
 
-// ── GAMELOG TABLE COLUMNS ─────────────────────────────────────
 const GAMELOG_COLS: Record<string, { key: string; label: string; combo?: string[] }[]> = {
   nba: [
     { key: "points", label: "Pts" },
@@ -85,7 +90,6 @@ const GAMELOG_COLS: Record<string, { key: string; label: string; combo?: string[
     { key: "assists", label: "Asts" },
     { key: "pa", label: "PA", combo: ["points", "assists"] },
     { key: "pr", label: "PR", combo: ["points", "rebounds"] },
-    { key: "ra", label: "RA", combo: ["rebounds", "assists"] },
     { key: "pra", label: "PRA", combo: ["points", "rebounds", "assists"] },
     { key: "blocks", label: "Blks" },
     { key: "steals", label: "St" },
@@ -130,33 +134,76 @@ function getVal(log: any, key: string, combo?: string[]): number {
   if (combo) return combo.reduce((s, k) => s + (Number(log[k]) || 0), 0);
   return Number(log[key]) || 0;
 }
-
 function hitRate(vals: number[], line: number): number {
   if (!vals.length) return 0;
   return Math.round((vals.filter(v => v >= line).length / vals.length) * 100);
 }
-
 function avg(vals: number[]): number {
   if (!vals.length) return 0;
   return vals.reduce((a, b) => a + b, 0) / vals.length;
 }
-
-function roundHalf(n: number) {
-  return Math.round(n / 0.5) * 0.5;
-}
-
+function roundHalf(n: number) { return Math.round(n / 0.5) * 0.5; }
 function getInitials(name: string) {
   return (name || "??").split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
 }
-
 function fmtDate(d: string) {
   if (!d) return "—";
+  try { const [, m, day] = d.split("-"); return `${m}-${day}`; } catch { return d; }
+}
+
+// ── FETCH TEAM GAMES FROM games_data ─────────────────────────
+async function fetchTeamGames(teamId: string): Promise<any[]> {
+  if (!teamId) return [];
+
   try {
-    const [, m, day] = d.split("-");
-    return `${m}-${day}`;
-  } catch {
-    return d;
+    // Get games where this team is home or away, with final scores
+    const { data, error } = await supabase
+      .from('games_data')
+      .select(`
+        id, game_date, home_score, away_score, status,
+        home_team_id, away_team_id
+      `)
+      .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`)
+      .not('home_score', 'eq', 0)
+      .order('game_date', { ascending: false })
+      .limit(25);
+
+    if (error || !data?.length) {
+      // Fallback: also try status=final
+      const { data: data2 } = await supabase
+        .from('games_data')
+        .select('id, game_date, home_score, away_score, status, home_team_id, away_team_id')
+        .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`)
+        .in('status', ['final', 'Final', 'STATUS_FINAL', 'completed'])
+        .order('game_date', { ascending: false })
+        .limit(25);
+      if (!data2?.length) return [];
+      return formatTeamGames(data2, teamId);
+    }
+
+    return formatTeamGames(data, teamId);
+  } catch (e: any) {
+    console.error('fetchTeamGames error:', e.message);
+    return [];
   }
+}
+
+function formatTeamGames(games: any[], teamId: string): any[] {
+  return games.map(g => {
+    const isHome = g.home_team_id === teamId;
+    const teamScore = isHome ? Number(g.home_score) : Number(g.away_score);
+    const oppScore  = isHome ? Number(g.away_score)  : Number(g.home_score);
+    return {
+      game_date:  g.game_date,
+      team_score: teamScore,
+      opp_score:  oppScore,
+      opponent:   isHome ? 'vs OPP' : '@ OPP', // will enhance with team names
+      score:      teamScore,
+      opp:        oppScore,
+      margin:     teamScore - oppScore,
+      total:      teamScore + oppScore,
+    };
+  }).filter(g => g.team_score > 0 || g.opp_score > 0);
 }
 
 // ── HIT RATE BOX ─────────────────────────────────────────────
@@ -186,22 +233,13 @@ function TabBar({ tabs, active, onSelect }: { tabs: { key: string; label: string
   return (
     <div className="flex gap-0 overflow-x-auto scrollbar-none border-b" style={{ borderColor: BORDER }}>
       {tabs.map(t => (
-        <button
-          key={t.key}
-          onClick={() => onSelect(t.key)}
+        <button key={t.key} onClick={() => onSelect(t.key)}
           className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider whitespace-nowrap transition-all flex-shrink-0"
-          style={{
-            color: active === t.key ? GOLD_BRIGHT : "#6b7280",
-            borderBottom: active === t.key ? `2px solid ${GOLD_BRIGHT}` : "2px solid transparent",
-            background: "transparent",
-          }}
-        >
+          style={{ color: active === t.key ? GOLD_BRIGHT : "#6b7280", borderBottom: active === t.key ? `2px solid ${GOLD_BRIGHT}` : "2px solid transparent", background: "transparent" }}>
           {t.label}
         </button>
       ))}
-      <div className="flex items-center px-2 text-gray-600 flex-shrink-0">
-        <ChevronRight className="w-3.5 h-3.5" />
-      </div>
+      <div className="flex items-center px-2 text-gray-600 flex-shrink-0"><ChevronRight className="w-3.5 h-3.5" /></div>
     </div>
   );
 }
@@ -209,9 +247,7 @@ function TabBar({ tabs, active, onSelect }: { tabs: { key: string; label: string
 // ── STACKED BAR CHART ─────────────────────────────────────────
 function BarChart({ gameLogs, tab, line }: { gameLogs: any[]; tab: { key: string; label: string; components?: string[] }; line: number }) {
   const logs = [...gameLogs].reverse();
-  if (!logs.length) {
-    return <div className="h-52 flex items-center justify-center text-gray-600 text-sm">No game data available — run data pipeline first</div>;
-  }
+  if (!logs.length) return <div className="h-52 flex items-center justify-center text-gray-600 text-sm">No game data available</div>;
 
   const isCombo = !!tab.components?.length;
   const components = tab.components || [];
@@ -227,32 +263,22 @@ function BarChart({ gameLogs, tab, line }: { gameLogs: any[]; tab: { key: string
           const isOver = total >= line;
           const barH = Math.max(4, Math.round((total / maxVal) * chartH));
           const lineY = Math.round((line / maxVal) * chartH);
-
           let segments: { val: number; col: string }[] = [];
           if (isCombo && components.length > 1) {
             const [k1, k2, k3] = components;
             const v1 = Number(g[k1]) || 0;
             const v2 = Number(g[k2]) || 0;
             const v3 = k3 ? Number(g[k3]) || 0 : 0;
-            segments = [
-              { val: v3, col: GREEN_LIGHT },
-              { val: v2, col: "#86efac" },
-              { val: v1, col: isOver ? GREEN_DARK : RED },
-            ].filter(s => s.val > 0);
+            segments = [{ val: v3, col: GREEN_LIGHT }, { val: v2, col: "#86efac" }, { val: v1, col: isOver ? GREEN_DARK : RED }].filter(s => s.val > 0);
           }
-
           return (
             <div key={i} className="flex-1 flex flex-col items-center" style={{ minWidth: 0 }}>
-              <span className="text-[9px] font-bold mb-0.5" style={{ color: isOver ? GREEN : RED }}>
-                {total > 0 ? total : ""}
-              </span>
+              <span className="text-[9px] font-bold mb-0.5" style={{ color: isOver ? GREEN : RED }}>{total > 0 ? total : ""}</span>
               <div className="relative w-full flex flex-col justify-end" style={{ height: chartH - 16 }}>
                 <div className="absolute left-0 right-0 border-t border-dashed" style={{ bottom: lineY, borderColor: `${GOLD}80` }} />
                 {isCombo && segments.length > 1 ? (
                   <div className="w-full flex flex-col" style={{ height: barH }}>
-                    {segments.map((seg, si) => (
-                      <div key={si} className="w-full rounded-sm" style={{ flex: seg.val, background: seg.col, marginBottom: si < segments.length - 1 ? 1 : 0 }} />
-                    ))}
+                    {segments.map((seg, si) => <div key={si} className="w-full rounded-sm" style={{ flex: seg.val, background: seg.col, marginBottom: si < segments.length - 1 ? 1 : 0 }} />)}
                   </div>
                 ) : (
                   <div className="w-full rounded-sm" style={{ height: barH, background: isOver ? GREEN_DARK : RED }} />
@@ -267,24 +293,9 @@ function BarChart({ gameLogs, tab, line }: { gameLogs: any[]; tab: { key: string
         })}
       </div>
       <div className="flex gap-3 mt-3 flex-wrap">
-        <div className="flex items-center gap-1">
-          <div className="w-2.5 h-2.5 rounded-sm" style={{ background: GREEN_DARK }} />
-          <span className="text-[10px] text-gray-500">Over line</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <div className="w-2.5 h-2.5 rounded-sm" style={{ background: RED }} />
-          <span className="text-[10px] text-gray-500">Under line</span>
-        </div>
-        {isCombo && (
-          <div className="flex items-center gap-1">
-            <div className="w-2.5 h-2.5 rounded-sm" style={{ background: GREEN_LIGHT }} />
-            <span className="text-[10px] text-gray-500">Components</span>
-          </div>
-        )}
-        <div className="flex items-center gap-1 ml-auto">
-          <div className="w-5 h-0 border-t border-dashed" style={{ borderColor: GOLD }} />
-          <span className="text-[10px] text-gray-500">Line {line.toFixed(1)}</span>
-        </div>
+        <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-sm" style={{ background: GREEN_DARK }} /><span className="text-[10px] text-gray-500">Over line</span></div>
+        <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-sm" style={{ background: RED }} /><span className="text-[10px] text-gray-500">Under line</span></div>
+        <div className="flex items-center gap-1 ml-auto"><div className="w-5 h-0 border-t border-dashed" style={{ borderColor: GOLD }} /><span className="text-[10px] text-gray-500">Line {line.toFixed(1)}</span></div>
       </div>
     </div>
   );
@@ -301,21 +312,12 @@ function LineAdjuster({ value, onChange }: { value: number; onChange: (v: number
   );
 }
 
-// ── PERIODS (including L15, L20) ─────────────────────────────
-const PERIODS = [
-  { label: "L5", n: 5 },
-  { label: "L10", n: 10 },
-  { label: "L15", n: 15 },
-  { label: "L20", n: 20 },
-];
+const PERIODS = [{ label: "L5", n: 5 }, { label: "L10", n: 10 }, { label: "L15", n: 15 }, { label: "L20", n: 20 }];
 
 // ── PLAYER STATS SECTION ─────────────────────────────────────
 function PlayerStatSection({ title, tabs, gameLogs, sport, defaultTab }: {
-  title: string;
-  tabs: { key: string; label: string; components?: string[] }[];
-  gameLogs: any[];
-  sport: string;
-  defaultTab: string;
+  title: string; tabs: { key: string; label: string; components?: string[] }[];
+  gameLogs: any[]; sport: string; defaultTab: string;
 }) {
   const [activeTab, setActiveTab] = useState(defaultTab);
   const [activePeriod, setActivePeriod] = useState(10);
@@ -323,15 +325,8 @@ function PlayerStatSection({ title, tabs, gameLogs, sport, defaultTab }: {
 
   const tab = tabs.find(t => t.key === activeTab) || tabs[0];
   const allVals = gameLogs.map(g => getVal(g, tab.key, tab.components));
-  const slices = {
-    5: allVals.slice(0, 5),
-    10: allVals.slice(0, 10),
-    15: allVals.slice(0, 15),
-    20: allVals.slice(0, 20),
-  };
-  const a5 = avg(slices[5]);
-  const a10 = avg(slices[10]);
-  const a20 = avg(slices[20]);
+  const slices: Record<number, number[]> = { 5: allVals.slice(0, 5), 10: allVals.slice(0, 10), 15: allVals.slice(0, 15), 20: allVals.slice(0, 20) };
+  const a5 = avg(slices[5]); const a10 = avg(slices[10]); const a20 = avg(slices[20]);
   const proj = slices[5].length >= 3 ? a5 * 0.5 + a10 * 0.3 + a20 * 0.2 : a10;
   const defaultLine = roundHalf(proj);
   const line = customLines[tab.key] ?? defaultLine;
@@ -340,8 +335,6 @@ function PlayerStatSection({ title, tabs, gameLogs, sport, defaultTab }: {
   const activeHitRate = hitRate(activeSlice, line);
   const actualGames = activeSlice.length;
   const chartKey = `${tab.key}-${activePeriod}-${line}-${actualGames}`;
-
-  // If the selected period asks for more games than available, show a warning
   const insufficientData = activePeriod > gameLogs.length;
 
   return (
@@ -353,7 +346,7 @@ function PlayerStatSection({ title, tabs, gameLogs, sport, defaultTab }: {
       <div className="p-4 space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-[10px] text-gray-500 mb-1.5 uppercase tracking-wider font-semibold">{tab.label} &nbsp;·&nbsp; Line</p>
+            <p className="text-[10px] text-gray-500 mb-1.5 uppercase tracking-wider font-semibold">{tab.label} · Line</p>
             <LineAdjuster value={line} onChange={v => setCustomLines(prev => ({ ...prev, [tab.key]: v }))} />
           </div>
           <div className="flex gap-1.5 flex-wrap">
@@ -366,24 +359,10 @@ function PlayerStatSection({ title, tabs, gameLogs, sport, defaultTab }: {
               const bg = hr >= 80 ? GREEN_DARK : hr >= 60 ? "#92400e" : "#7f1d1d";
               const fg = hr >= 80 ? "#bbf7d0" : hr >= 60 ? "#fde68a" : "#fecaca";
               const activeBorder = hr >= 80 ? "#22c55e" : hr >= 60 ? GOLD_BRIGHT : RED;
-              // Dim button if not enough games
-              const opacity = hasEnoughGames ? 1 : 0.5;
               return (
-                <button
-                  key={n}
-                  onClick={() => hasEnoughGames && setActivePeriod(n)}
+                <button key={n} onClick={() => hasEnoughGames && setActivePeriod(n)}
                   className="px-2.5 py-1.5 rounded-lg text-center transition-all"
-                  style={{
-                    background: bg,
-                    border: `2px solid ${isActive ? activeBorder : "transparent"}`,
-                    outline: isActive ? `1px solid ${activeBorder}44` : "none",
-                    minWidth: 64,
-                    boxShadow: isActive ? `0 0 8px ${activeBorder}55` : "none",
-                    transform: isActive ? "scale(1.05)" : "scale(1)",
-                    opacity,
-                    cursor: hasEnoughGames ? "pointer" : "not-allowed",
-                  }}
-                >
+                  style={{ background: bg, border: `2px solid ${isActive ? activeBorder : "transparent"}`, minWidth: 64, boxShadow: isActive ? `0 0 8px ${activeBorder}55` : "none", transform: isActive ? "scale(1.05)" : "scale(1)", opacity: hasEnoughGames ? 1 : 0.5, cursor: hasEnoughGames ? "pointer" : "not-allowed" }}>
                   <p className="text-[10px] font-bold" style={{ color: fg }}>{label}</p>
                   <p className="text-[11px] font-bold" style={{ color: fg }}>HR {sl.length ? hr : 0}%</p>
                   <p className="text-[10px] opacity-80" style={{ color: fg }}>Avg {sl.length ? av.toFixed(1) : "—"}</p>
@@ -403,7 +382,7 @@ function PlayerStatSection({ title, tabs, gameLogs, sport, defaultTab }: {
         </div>
         {insufficientData ? (
           <div className="h-52 flex items-center justify-center text-gray-500 text-sm border rounded-lg" style={{ borderColor: BORDER }}>
-            Not enough games for L{activePeriod} (only {gameLogs.length} available)
+            Showing {gameLogs.length} available games (building towards L{activePeriod})
           </div>
         ) : (
           <BarChart key={chartKey} gameLogs={gameLogs.slice(0, activePeriod)} tab={tab} line={line} />
@@ -414,59 +393,79 @@ function PlayerStatSection({ title, tabs, gameLogs, sport, defaultTab }: {
 }
 
 // ── TEAM STATS SECTION ───────────────────────────────────────
-function TeamStatsSection({ teamGameLogs, sport, playerTeamName }: { teamGameLogs: any[]; sport: string; playerTeamName?: string }) {
+function TeamStatsSection({ teamGameLogs, sport, playerTeamName, loadingTeam }: {
+  teamGameLogs: any[]; sport: string; playerTeamName?: string; loadingTeam: boolean;
+}) {
   const [activeTab, setActiveTab] = useState("score");
   const [activePeriod, setActivePeriod] = useState(10);
   const [customLines, setCustomLines] = useState<Record<string, number>>({});
 
   const TEAM_TABS = [
     { key: "score", label: "PTS" },
-    { key: "opp_score", label: "OPP" },
+    { key: "opp", label: "OPP" },
     { key: "margin", label: "MARGIN" },
     { key: "total", label: "TOTAL" },
   ];
+
   const tab = TEAM_TABS.find(t => t.key === activeTab) || TEAM_TABS[0];
+
+  // Map tab key to game log field
   const vals = teamGameLogs.map(g => {
-    if (tab.key === "score") return Number(g.team_score || g.home_score || 0);
-    if (tab.key === "opp_score") return Number(g.opp_score || g.away_score || 0);
-    if (tab.key === "margin") return (Number(g.team_score || g.home_score || 0) - Number(g.opp_score || g.away_score || 0));
-    if (tab.key === "total") return (Number(g.team_score || g.home_score || 0) + Number(g.opp_score || g.away_score || 0));
+    if (tab.key === "score")  return Number(g.team_score) || 0;
+    if (tab.key === "opp")    return Number(g.opp_score)  || 0;
+    if (tab.key === "margin") return Number(g.margin)     || 0;
+    if (tab.key === "total")  return Number(g.total)      || 0;
     return 0;
   });
-  const slices = {
-    5: vals.slice(0, 5),
+
+  const slices: Record<number, number[]> = {
+    5:  vals.slice(0, 5),
     10: vals.slice(0, 10),
     15: vals.slice(0, 15),
     20: vals.slice(0, 20),
   };
+
   const a10 = avg(slices[10]);
-  const defaultLine = roundHalf(a10);
+  const defaultLine = roundHalf(a10 || 110); // fallback to 110 for NBA
   const line = customLines[tab.key] ?? defaultLine;
   const activeSlice = slices[activePeriod] || slices[10];
   const activeAvg = avg(activeSlice);
   const activeHitRate = hitRate(activeSlice, line);
   const actualGames = activeSlice.length;
+
   const chartLogs = teamGameLogs.slice(0, activePeriod).map(g => ({
-    opponent: g.opponent || g.opp_abbr || "—",
+    opponent: g.opponent || "—",
     game_date: g.game_date || "",
-    [tab.key]: tab.key === "score" ? Number(g.team_score || g.home_score || 0)
-            : tab.key === "opp_score" ? Number(g.opp_score || g.away_score || 0)
-            : tab.key === "margin" ? (Number(g.team_score || g.home_score || 0) - Number(g.opp_score || g.away_score || 0))
-            : (Number(g.team_score || g.home_score || 0) + Number(g.opp_score || g.away_score || 0)),
+    [tab.key]: tab.key === "score"  ? Number(g.team_score)
+             : tab.key === "opp"    ? Number(g.opp_score)
+             : tab.key === "margin" ? Number(g.margin)
+             : Number(g.total),
   }));
+
   const chartKey = `${tab.key}-${activePeriod}-${line}-${actualGames}`;
   const insufficientData = activePeriod > teamGameLogs.length;
+
+  if (loadingTeam) {
+    return (
+      <div className="rounded-xl border overflow-hidden" style={{ background: BG_CARD, borderColor: BORDER }}>
+        <div className="px-4 py-2.5 border-b" style={{ borderColor: BORDER }}>
+          <span className="font-bold text-sm" style={{ color: GOLD }}>🏟 Team Stats</span>
+        </div>
+        <div className="p-8 text-center text-gray-500 text-sm">Loading team game data...</div>
+      </div>
+    );
+  }
 
   if (!teamGameLogs.length) {
     return (
       <div className="rounded-xl border overflow-hidden" style={{ background: BG_CARD, borderColor: BORDER }}>
         <div className="px-4 py-2.5 border-b flex items-center justify-between" style={{ borderColor: BORDER }}>
           <span className="font-bold text-sm" style={{ color: GOLD }}>🏟 Team Stats</span>
-          <span className="text-[10px] text-gray-600">No team game data yet</span>
+          <span className="text-[10px] text-gray-600">No completed game data yet</span>
         </div>
         <div className="p-8 text-center text-gray-500 text-sm">
-          Team stats will appear once the data pipeline is run for this team.<br />
-          {playerTeamName && `Team: ${playerTeamName}`}
+          Team game scores will appear once games complete.<br />
+          {playerTeamName && <span className="text-gray-600 text-xs">Team: {playerTeamName}</span>}
         </div>
       </div>
     );
@@ -476,13 +475,13 @@ function TeamStatsSection({ teamGameLogs, sport, playerTeamName }: { teamGameLog
     <div className="rounded-xl overflow-hidden border" style={{ background: BG_CARD, borderColor: BORDER }}>
       <div className="px-4 py-2.5 border-b flex items-center justify-between" style={{ borderColor: BORDER }}>
         <span className="font-bold text-sm" style={{ color: GOLD }}>🏟 Team Stats</span>
-        <span className="text-[10px] text-gray-600">More team stats (rebounds, assists) coming soon</span>
+        <span className="text-[10px] text-gray-500">{teamGameLogs.length} games loaded</span>
       </div>
       <TabBar tabs={TEAM_TABS} active={activeTab} onSelect={setActiveTab} />
       <div className="p-4 space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-[10px] text-gray-500 mb-1.5 uppercase tracking-wider font-semibold">{tab.label} &nbsp;·&nbsp; Line</p>
+            <p className="text-[10px] text-gray-500 mb-1.5 uppercase tracking-wider font-semibold">{tab.label} · Line</p>
             <LineAdjuster value={line} onChange={v => setCustomLines(prev => ({ ...prev, [tab.key]: v }))} />
           </div>
           <div className="flex gap-1.5 flex-wrap">
@@ -495,23 +494,10 @@ function TeamStatsSection({ teamGameLogs, sport, playerTeamName }: { teamGameLog
               const bg = hr >= 80 ? GREEN_DARK : hr >= 60 ? "#92400e" : "#7f1d1d";
               const fg = hr >= 80 ? "#bbf7d0" : hr >= 60 ? "#fde68a" : "#fecaca";
               const activeBorder = hr >= 80 ? "#22c55e" : hr >= 60 ? GOLD_BRIGHT : RED;
-              const opacity = hasEnoughGames ? 1 : 0.5;
               return (
-                <button
-                  key={n}
-                  onClick={() => hasEnoughGames && setActivePeriod(n)}
+                <button key={n} onClick={() => hasEnoughGames && setActivePeriod(n)}
                   className="px-2.5 py-1.5 rounded-lg text-center transition-all"
-                  style={{
-                    background: bg,
-                    border: `2px solid ${isActive ? activeBorder : "transparent"}`,
-                    outline: isActive ? `1px solid ${activeBorder}44` : "none",
-                    minWidth: 64,
-                    boxShadow: isActive ? `0 0 8px ${activeBorder}55` : "none",
-                    transform: isActive ? "scale(1.05)" : "scale(1)",
-                    opacity,
-                    cursor: hasEnoughGames ? "pointer" : "not-allowed",
-                  }}
-                >
+                  style={{ background: bg, border: `2px solid ${isActive ? activeBorder : "transparent"}`, minWidth: 64, boxShadow: isActive ? `0 0 8px ${activeBorder}55` : "none", transform: isActive ? "scale(1.05)" : "scale(1)", opacity: hasEnoughGames ? 1 : 0.5, cursor: hasEnoughGames ? "pointer" : "not-allowed" }}>
                   <p className="text-[10px] font-bold" style={{ color: fg }}>{label}</p>
                   <p className="text-[11px] font-bold" style={{ color: fg }}>HR {sl.length ? hr : 0}%</p>
                   <p className="text-[10px] opacity-80" style={{ color: fg }}>Avg {sl.length ? av.toFixed(1) : "—"}</p>
@@ -522,7 +508,7 @@ function TeamStatsSection({ teamGameLogs, sport, playerTeamName }: { teamGameLog
         </div>
         <div className="flex items-center gap-2 text-[11px]">
           <span className="px-2 py-0.5 rounded-full font-bold" style={{ background: `${GOLD_DIM}30`, color: GOLD, border: `1px solid ${GOLD_DIM}` }}>
-            Showing {actualGames === activePeriod ? `Last ${activePeriod} games` : `Last ${activePeriod} (${actualGames} available)`}
+            {actualGames === activePeriod ? `Last ${activePeriod} games` : `Last ${activePeriod} (${actualGames} available)`}
           </span>
           <span className="text-gray-500">
             Avg <span className="font-bold" style={{ color: GOLD_BRIGHT }}>{activeAvg.toFixed(1)}</span>
@@ -531,7 +517,7 @@ function TeamStatsSection({ teamGameLogs, sport, playerTeamName }: { teamGameLog
         </div>
         {insufficientData ? (
           <div className="h-52 flex items-center justify-center text-gray-500 text-sm border rounded-lg" style={{ borderColor: BORDER }}>
-            Not enough team games for L{activePeriod} (only {teamGameLogs.length} available)
+            Showing {teamGameLogs.length} available games (building towards L{activePeriod})
           </div>
         ) : (
           <BarChart key={chartKey} gameLogs={chartLogs} tab={{ key: tab.key, label: tab.label }} line={line} />
@@ -550,17 +536,18 @@ interface Props {
 }
 
 export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props) {
-  const [player, setPlayer] = useState<any>(null);
-  const [gameLogs, setGameLogs] = useState<any[]>([]);
+  const [player, setPlayer]           = useState<any>(null);
+  const [gameLogs, setGameLogs]       = useState<any[]>([]);
   const [teamGameLogs, setTeamGameLogs] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading]         = useState(true);
+  const [loadingTeam, setLoadingTeam] = useState(false);
+  const [error, setError]             = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
-      setLoading(true);
-      setError(null);
+      setLoading(true); setError(null);
       try {
+        // Fetch player details + game logs from clever-action
         const res = await fetch(EDGE_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -568,25 +555,23 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
         });
         const data = await res.json();
         if (!data.success) throw new Error(data.error || "Failed to load");
+
         setPlayer(data.player);
         const logs = data.player.game_logs || [];
         setGameLogs(logs);
-        console.log(`[PlayerDetail] Loaded ${logs.length} game logs for ${data.player.full_name}`); // Debug
+        console.log(`[PlayerDetail] ${logs.length} game logs for ${data.player.full_name}`);
 
+        // Fetch team games directly from games_data via Supabase
         if (data.player.team_id) {
-          const teamRes = await fetch(EDGE_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ operation: "get_team_games", sport, team_id: data.player.team_id }),
-          });
-          const teamData = await teamRes.json();
-          if (teamData.success && teamData.games?.length) {
-            setTeamGameLogs(teamData.games);
-          } else {
-            const fallbackGames = logs
-              .filter((g: any) => g.team_score !== undefined || g.opp_score !== undefined)
-              .map((g: any) => ({ game_date: g.game_date, opponent: g.opponent || "—", team_score: g.team_score ?? null, opp_score: g.opp_score ?? null }));
-            setTeamGameLogs(fallbackGames);
+          setLoadingTeam(true);
+          try {
+            const teamGames = await fetchTeamGames(data.player.team_id);
+            console.log(`[TeamStats] ${teamGames.length} team games found`);
+            setTeamGameLogs(teamGames);
+          } catch (te: any) {
+            console.warn('Team games fetch failed:', te.message);
+          } finally {
+            setLoadingTeam(false);
           }
         }
       } catch (e: any) {
@@ -599,22 +584,15 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
 
   const tabs = STAT_TABS[sport] || STAT_TABS.nba;
   const glCols = GAMELOG_COLS[sport] || GAMELOG_COLS.nba;
+
   const maxStats = useMemo(() => {
     if (!gameLogs.length) return {};
     const maxOf = (k: string) => Math.max(...gameLogs.map(g => Number(g[k]) || 0));
-    if (sport === "nba") {
-      return { Points: maxOf("points"), Rebounds: maxOf("rebounds"), Assists: maxOf("assists"), Steals: maxOf("steals"), Blocks: maxOf("blocks"), Turnovers: maxOf("turnovers"), "3 Pointer Made": maxOf("three_pointers_made") };
-    }
-    if (sport === "nfl") {
-      return { "Pass Yards": maxOf("passing_yards"), "Rush Yards": maxOf("rushing_yards"), "Rec Yards": maxOf("receiving_yards"), "Pass TDs": maxOf("passing_tds") };
-    }
-    if (sport === "mlb") {
-      return { Hits: maxOf("hits"), Runs: maxOf("runs"), RBI: maxOf("rbi"), "Home Runs": maxOf("home_runs"), "Total Bases": maxOf("total_bases") };
-    }
-    if (sport === "nhl") {
-      return { Goals: maxOf("goals"), Assists: maxOf("assists_hockey"), "Shots on Goal": maxOf("shots_on_goal"), Blocked: maxOf("blocked_shots") };
-    }
-    return { Goals: maxOf("goals_soccer"), Assists: maxOf("assists_soccer"), Shots: maxOf("shots_soccer"), SOT: maxOf("shots_on_target") };
+    if (sport === "nba") return { Points: maxOf("points"), Rebounds: maxOf("rebounds"), Assists: maxOf("assists"), Steals: maxOf("steals"), Blocks: maxOf("blocks"), "3PM": maxOf("three_pointers_made") };
+    if (sport === "nfl") return { "Pass Yds": maxOf("passing_yards"), "Rush Yds": maxOf("rushing_yards"), "Rec Yds": maxOf("receiving_yards"), "Pass TDs": maxOf("passing_tds") };
+    if (sport === "mlb") return { Hits: maxOf("hits"), Runs: maxOf("runs"), RBI: maxOf("rbi"), HR: maxOf("home_runs"), TB: maxOf("total_bases") };
+    if (sport === "nhl") return { Goals: maxOf("goals"), Assists: maxOf("assists_hockey"), SOG: maxOf("shots_on_goal"), Blocked: maxOf("blocked_shots") };
+    return { Goals: maxOf("goals_soccer"), Assists: maxOf("assists_soccer"), Shots: maxOf("shots_soccer") };
   }, [gameLogs, sport]);
 
   const name = player?.full_name || playerName || "Player";
@@ -658,13 +636,15 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
         {/* Left column */}
         <div className="flex-1 space-y-4 min-w-0">
           <PlayerStatSection title="⚡ Player Stats" tabs={tabs} gameLogs={gameLogs} sport={sport} defaultTab={tabs[1]?.key || tabs[0]?.key} />
-          <TeamStatsSection teamGameLogs={teamGameLogs} sport={sport} playerTeamName={player?.team} />
+          <TeamStatsSection teamGameLogs={teamGameLogs} sport={sport} playerTeamName={player?.team} loadingTeam={loadingTeam} />
+
+          {/* Game log table */}
           <div className="rounded-xl border overflow-hidden" style={{ background: BG_CARD, borderColor: BORDER }}>
             <div className="px-4 py-2.5 border-b flex items-center gap-2" style={{ borderColor: BORDER }}>
               <span className="font-bold text-sm" style={{ color: GOLD }}>Gamelog — Last {Math.min(15, avail)} Games</span>
             </div>
             {gameLogs.length === 0 ? (
-              <div className="p-8 text-center text-gray-600 text-sm">No game logs — run the data pipeline for this sport</div>
+              <div className="p-8 text-center text-gray-600 text-sm">No game logs available</div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -721,7 +701,7 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
             <div className="mt-4 rounded-lg p-3 text-center" style={{ background: `${GOLD_DIM}20`, border: `1px solid ${GOLD_DIM}40` }}>
               <div className="flex items-center justify-center gap-2 mb-1">
                 <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: `${GOLD_DIM}40`, border: `1px solid ${GOLD_DIM}` }}><span className="text-[10px]">🎯</span></div>
-                <p className="text-[10px] text-gray-400 font-medium">Match Played</p>
+                <p className="text-[10px] text-gray-400 font-medium">Games Played</p>
               </div>
               <p className="text-2xl font-bold" style={{ color: GOLD_BRIGHT }}>{avail}</p>
             </div>
