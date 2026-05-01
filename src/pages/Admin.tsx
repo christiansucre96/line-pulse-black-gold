@@ -180,6 +180,7 @@ export default function Admin() {
     }
   };
 
+  // ✅ REPLACED grantTrial FUNCTION
   const grantTrial = async () => {
     if (!newUserEmail) {
       toast.error("Email is required");
@@ -195,18 +196,21 @@ export default function Admin() {
     try {
       let userId: string;
       
+      // 1. Find or create the user
       if (isExistingUser) {
-        const { data: existingUser, error: findError } = await supabase
-          .from('profiles')
+        // Look up existing user by email in auth.users
+        const { data: authUser, error: authError } = await supabase
+          .from('auth.users')
           .select('id, email')
           .eq('email', newUserEmail.toLowerCase())
           .single();
         
-        if (findError || !existingUser) {
+        if (authError || !authUser) {
           throw new Error("User not found. Create new user instead.");
         }
-        userId = existingUser.id;
+        userId = authUser.id;
       } else {
+        // Create new user in auth
         const password = tempPassword || generateTempPassword();
         const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
           email: newUserEmail.toLowerCase(),
@@ -221,42 +225,62 @@ export default function Admin() {
         setTempPassword(password);
       }
       
+      // 2. Calculate dates
       const startDate = new Date();
-      const endDate = new Date(startDate.getTime() + tier.days * 24 * 60 * 60 * 1000);
+      const endDate = tier.days 
+        ? new Date(startDate.getTime() + tier.days * 24 * 60 * 60 * 1000)
+        : null;
       
+      // 3. Update/Create profile (FIXED: No 'email' column, use id/user_id)
       const { error: profileError } = await supabase
         .from('profiles')
         .upsert({
-          id: userId,
-          email: newUserEmail.toLowerCase(),
+          id: userId,              // Primary key
+          user_id: userId,         // Required foreign key
           subscription_tier: newUserTier,
           subscription_start: startDate.toISOString(),
-          subscription_end: endDate.toISOString(),
+          subscription_end: endDate?.toISOString(),
           is_active: true,
           is_free_trial: true,
           trial_reason: trialReason || `Influencer trial - ${newUserTier}`,
           trial_granted_by: user?.id,
-        }, { onConflict: 'id' });
+          updated_at: new Date().toISOString(),
+        }, { 
+          onConflict: 'id',  // Match primary key constraint
+          ignoreDuplicates: false 
+        });
       
-      if (profileError) throw profileError;
+      if (profileError) {
+        console.error("Profile error:", profileError);
+        throw new Error(`Profile update failed: ${profileError.message}`);
+      }
+      
+      // 4. Create subscription record (FIXED: Simple insert after delete)
+      // First delete any existing record to avoid conflicts
+      await supabase.from('subscriptions').delete().eq('user_id', userId);
       
       const { error: subError } = await supabase
         .from('subscriptions')
         .insert({
           user_id: userId,
           tier: newUserTier,
-          amount: 0,
+          amount: 0,  // FREE
           currency: 'USDT',
           status: 'active',
           start_date: startDate.toISOString(),
-          end_date: endDate.toISOString(),
+          end_date: endDate?.toISOString(),
           is_free_trial: true,
           granted_by: user?.id,
           trial_reason: trialReason,
+          created_at: new Date().toISOString(),
         });
       
-      if (subError) throw subError;
+      if (subError) {
+        console.error("Subscription error:", subError);
+        throw new Error(`Subscription failed: ${subError.message}`);
+      }
       
+      // 5. Record revenue event (free)
       await supabase.from('revenue_events').insert({
         user_id: userId,
         event_type: 'subscription',
@@ -264,8 +288,10 @@ export default function Admin() {
         currency: 'USDT',
         description: `FREE trial granted: ${tier.label} - ${trialReason || 'Influencer access'}`,
         is_free_trial: true,
+        created_at: new Date().toISOString(),
       });
       
+      // 6. Show success
       if (!isExistingUser) {
         toast.success(
           <div>
@@ -286,6 +312,7 @@ export default function Admin() {
         toast.success(`✅ Trial granted to existing user: ${newUserEmail}`);
       }
       
+      // Reset form and refresh
       setShowAddTrial(false);
       setNewUserEmail('');
       setTempPassword('');
@@ -632,7 +659,7 @@ export default function Admin() {
                       <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">Ends</th>
                       <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">Reason</th>
                       <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">Actions</th>
-                    </tr>
+                    </td>
                   </thead>
                   <tbody>
                     {users.filter(u => u.is_free_trial).map((u) => {
