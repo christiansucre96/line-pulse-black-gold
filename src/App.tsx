@@ -2,7 +2,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { useEffect, lazy, Suspense } from "react";
-import { AuthProvider } from "@/hooks/useAuth";
+import { AuthProvider } from "@/context/AuthContext";   // ✅ corrected import
 import { Toaster as Sonner } from "sonner";
 import AppLayout from "@/components/AppLayout";
 
@@ -30,7 +30,6 @@ const queryClient = new QueryClient({
   },
 });
 
-// ── Loading spinner ───────────────────────────────────────────────────────────
 function PageLoader() {
   return (
     <div className="h-screen w-full flex items-center justify-center bg-gray-950">
@@ -42,7 +41,6 @@ function PageLoader() {
   )
 }
 
-// ── App ───────────────────────────────────────────────────────────────────────
 function App() {
   useEffect(() => {
     const hash = window.location.hash;
@@ -58,41 +56,21 @@ function App() {
         <AuthProvider>
           <Suspense fallback={<PageLoader />}>
             <Routes>
-
-              {/* ── Public routes (no sidebar) ── */}
               <Route path="/"               element={<Index />} />
               <Route path="/auth"           element={<Auth />} />
               <Route path="/reset-password" element={<ResetPassword />} />
 
-              {/* ── Protected routes (with sidebar) ── */}
-              <Route path="/scanner" element={
-                <AppLayout><Scanner /></AppLayout>
-              } />
-              <Route path="/parlay" element={
-                <AppLayout><ParlayBuilder /></AppLayout>
-              } />
-              <Route path="/leaderboard" element={
-                <AppLayout><Leaderboard /></AppLayout>
-              } />
-              <Route path="/top-picks" element={
-                <AppLayout><TopPicks /></AppLayout>
-              } />
-              <Route path="/roster" element={
-                <AppLayout><Roster /></AppLayout>
-              } />
-              <Route path="/injuries" element={
-                <AppLayout><Injuries /></AppLayout>
-              } />
-              <Route path="/profile" element={
-                <AppLayout><Profile /></AppLayout>
-              } />
+              <Route path="/scanner" element={<AppLayout><Scanner /></AppLayout>} />
+              <Route path="/parlay" element={<AppLayout><ParlayBuilder /></AppLayout>} />
+              <Route path="/leaderboard" element={<AppLayout><Leaderboard /></AppLayout>} />
+              <Route path="/top-picks" element={<AppLayout><TopPicks /></AppLayout>} />
+              <Route path="/roster" element={<AppLayout><Roster /></AppLayout>} />
+              <Route path="/injuries" element={<AppLayout><Injuries /></AppLayout>} />
+              <Route path="/profile" element={<AppLayout><Profile /></AppLayout>} />
 
-              {/* ── Admin (no sidebar) ── */}
               <Route path="/admin" element={<Admin />} />
 
-              {/* ── 404 ── */}
               <Route path="*" element={<NotFound />} />
-
             </Routes>
           </Suspense>
         </AuthProvider>
