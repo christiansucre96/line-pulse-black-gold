@@ -180,7 +180,7 @@ export default function Admin() {
     }
   };
 
-  // ✅ REPLACED grantTrial FUNCTION
+  // ✅ CORRECTED grantTrial FUNCTION – uses profiles table, not auth.users
   const grantTrial = async () => {
     if (!newUserEmail) {
       toast.error("Email is required");
@@ -198,17 +198,17 @@ export default function Admin() {
       
       // 1. Find or create the user
       if (isExistingUser) {
-        // Look up existing user by email in auth.users
-        const { data: authUser, error: authError } = await supabase
-          .from('auth.users')
-          .select('id, email')
+        // Look up existing user by email in profiles table
+        const { data: existingProfile, error: findError } = await supabase
+          .from('profiles')
+          .select('user_id')
           .eq('email', newUserEmail.toLowerCase())
           .single();
         
-        if (authError || !authUser) {
+        if (findError || !existingProfile) {
           throw new Error("User not found. Create new user instead.");
         }
-        userId = authUser.id;
+        userId = existingProfile.user_id;
       } else {
         // Create new user in auth
         const password = tempPassword || generateTempPassword();
@@ -231,12 +231,13 @@ export default function Admin() {
         ? new Date(startDate.getTime() + tier.days * 24 * 60 * 60 * 1000)
         : null;
       
-      // 3. Update/Create profile (FIXED: No 'email' column, use id/user_id)
+      // 3. Update/Create profile
       const { error: profileError } = await supabase
         .from('profiles')
         .upsert({
-          id: userId,              // Primary key
-          user_id: userId,         // Required foreign key
+          id: userId,
+          user_id: userId,
+          email: newUserEmail.toLowerCase(),
           subscription_tier: newUserTier,
           subscription_start: startDate.toISOString(),
           subscription_end: endDate?.toISOString(),
@@ -246,7 +247,7 @@ export default function Admin() {
           trial_granted_by: user?.id,
           updated_at: new Date().toISOString(),
         }, { 
-          onConflict: 'id',  // Match primary key constraint
+          onConflict: 'id',
           ignoreDuplicates: false 
         });
       
@@ -255,8 +256,7 @@ export default function Admin() {
         throw new Error(`Profile update failed: ${profileError.message}`);
       }
       
-      // 4. Create subscription record (FIXED: Simple insert after delete)
-      // First delete any existing record to avoid conflicts
+      // 4. Create subscription record (delete old first)
       await supabase.from('subscriptions').delete().eq('user_id', userId);
       
       const { error: subError } = await supabase
@@ -264,7 +264,7 @@ export default function Admin() {
         .insert({
           user_id: userId,
           tier: newUserTier,
-          amount: 0,  // FREE
+          amount: 0,
           currency: 'USDT',
           status: 'active',
           start_date: startDate.toISOString(),
@@ -659,7 +659,7 @@ export default function Admin() {
                       <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">Ends</th>
                       <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">Reason</th>
                       <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">Actions</th>
-                    </td>
+                    </tr>
                   </thead>
                   <tbody>
                     {users.filter(u => u.is_free_trial).map((u) => {
