@@ -43,6 +43,29 @@ function cleanPosition(pos: string): string {
   }
 }
 
+// ─── NEW: Clean any field that might contain JSON ────────────────────────────
+function cleanField(value: string | null | undefined): string {
+  if (!value) return ''
+  
+  // If it's JSON, try to extract useful data
+  if (value.includes('{')) {
+    try {
+      const parsed = JSON.parse(value)
+      // Return the most useful field
+      return parsed.description || 
+             parsed.name || 
+             parsed.abbreviation || 
+             parsed.text || 
+             ''
+    } catch {
+      // Invalid JSON - return empty
+      return ''
+    }
+  }
+  
+  return value
+}
+
 // ─── Nav ──────────────────────────────────────────────────────────────────────
 function Nav() {
   const navigate = useNavigate()
@@ -121,8 +144,15 @@ function ReturnChip({ estimate }: { estimate: string }) {
 function InjuryCard({ injury }: { injury: Injury }) {
   const [open, setOpen] = useState(false)
   const c = cfg(injury.injury_status)
-  const pos = cleanPosition(injury.position)
-  const hasMore = injury.long_description && injury.long_description !== injury.injury_description
+  
+  // ✅ Clean all fields before display
+  const pos = cleanField(cleanPosition(injury.position))
+  const injuryType = cleanField(injury.injury_type)
+  const injurySide = cleanField(injury.injury_side)
+  const description = cleanField(injury.injury_description)
+  const longDesc = cleanField(injury.long_description)
+  
+  const hasMore = longDesc && longDesc !== description
 
   return (
     <div style={{
@@ -148,7 +178,7 @@ function InjuryCard({ injury }: { injury: Injury }) {
               }}>
                 {injury.full_name}
               </span>
-              <ReturnChip estimate={injury.return_estimate} />
+              <ReturnChip estimate={cleanField(injury.return_estimate)} />
             </div>
 
             {/* Meta row */}
@@ -167,18 +197,18 @@ function InjuryCard({ injury }: { injury: Injury }) {
                 </span>
               )}
 
-              {injury.injury_type && (
+              {injuryType && (
                 <>
                   <span style={{ color: '#1e2530' }}>·</span>
                   <span style={{ fontSize: 11, color: c.text, fontFamily: "'DM Mono', monospace" }}>
-                    {injury.injury_type}
+                    {injuryType}
                   </span>
                 </>
               )}
 
-              {injury.injury_side && (
+              {injurySide && (
                 <span style={{ fontSize: 11, color: '#2e3748', fontFamily: "'DM Mono', monospace" }}>
-                  ({injury.injury_side})
+                  ({injurySide})
                 </span>
               )}
             </div>
@@ -205,8 +235,8 @@ function InjuryCard({ injury }: { injury: Injury }) {
           </div>
         </div>
 
-        {/* Short description */}
-        {injury.injury_description && (
+        {/* Short description - now clean */}
+        {description && (
           <div style={{
             marginTop: 10,
             paddingLeft: 12,
@@ -214,7 +244,7 @@ function InjuryCard({ injury }: { injury: Injury }) {
             fontSize: 11, color: '#94a3b8',
             fontFamily: "'DM Mono', monospace", lineHeight: 1.6,
           }}>
-            {injury.injury_description}
+            {description}
           </div>
         )}
       </div>
@@ -228,7 +258,7 @@ function InjuryCard({ injury }: { injury: Injury }) {
           fontSize: 11, color: '#64748b',
           fontFamily: "'DM Mono', monospace", lineHeight: 1.7,
         }}>
-          {injury.long_description}
+          {longDesc}
         </div>
       )}
     </div>
