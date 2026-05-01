@@ -1,6 +1,5 @@
 // src/pages/Admin.tsx
 // 🎁 Purpose: Grant FREE trial access to influencers & VIP users
-// Tiers: 7 Days, 1 Month, 3 Months, 1 Year (all FREE via admin)
 
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
@@ -9,8 +8,7 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { toast } from "sonner";
 import { 
   Shield, Database, RefreshCw, Loader2, Users, Gift, 
-  Calendar, TrendingUp, UserPlus, Key, Trash2, CheckCircle, 
-  XCircle, Clock, Crown, Activity, Copy, ExternalLink
+  Clock, Key, CheckCircle, XCircle, ExternalLink, Copy
 } from "lucide-react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -38,10 +36,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 const SPORTS = ["nba", "nfl", "mlb", "nhl", "soccer"];
 
-// ════════════════════════════════════════════════════════════════════════════
-// 💰 PRICING CONFIGURATION (For Reference Only - Admin Grants Are FREE)
-// Reference Rate: 1 Month = 150.00 USDT (for paid user context)
-// ════════════════════════════════════════════════════════════════════════════
+// 💰 PRICING CONFIGURATION
 const PRICING: Record<string, { label: string; days: number; referencePrice: number; note: string }> = {
   '7day': { 
     label: '7 Days', 
@@ -127,16 +122,33 @@ export default function Admin() {
       const { data: usersData, error } = await supabase
         .from('profiles')
         .select(`
-          id, email, created_at, last_login,
+          id, created_at, last_login,
           subscription_tier, subscription_start, subscription_end,
           is_active, is_free_trial, trial_reason, revenue_generated
         `)
         .order('created_at', { ascending: false });
       
       if (error) throw error;
-      setUsers(usersData || []);
       
-      const trials = (usersData || []).filter(u => u.is_free_trial);
+      // Fetch emails from auth.users for each profile
+      const usersWithEmail = await Promise.all(
+        (usersData || []).map(async (profile) => {
+          const { data: authData } = await supabase
+            .from('auth.users')
+            .select('email')
+            .eq('id', profile.id)
+            .single();
+          
+          return {
+            ...profile,
+            email: authData?.email || 'unknown'
+          };
+        })
+      );
+      
+      setUsers(usersWithEmail);
+      
+      const trials = (usersWithEmail || []).filter(u => u.is_free_trial);
       const now = new Date();
       
       setTrialStats({
@@ -180,7 +192,7 @@ export default function Admin() {
     }
   };
 
-  // ✅ CORRECTED grantTrial FUNCTION – uses profiles table, not auth.users
+  // ✅ FIXED grantTrial FUNCTION
   const grantTrial = async () => {
     if (!newUserEmail) {
       toast.error("Email is required");
@@ -196,19 +208,17 @@ export default function Admin() {
     try {
       let userId: string;
       
-      // 1. Find or create the user
       if (isExistingUser) {
-        // Look up existing user by email in profiles table
-        const { data: existingProfile, error: findError } = await supabase
-          .from('profiles')
-          .select('user_id')
-          .eq('email', newUserEmail.toLowerCase())
-          .single();
+        // Find existing user by email in auth.users
+        const { data: authUsers, error: findError } = await supabase
+          .from('auth.users')
+          .select('id, email')
+          .ilike('email', newUserEmail.toLowerCase());
         
-        if (findError || !existingProfile) {
+        if (findError || !authUsers || authUsers.length === 0) {
           throw new Error("User not found. Create new user instead.");
         }
-        userId = existingProfile.user_id;
+        userId = authUsers[0].id;
       } else {
         // Create new user in auth
         const password = tempPassword || generateTempPassword();
@@ -225,19 +235,17 @@ export default function Admin() {
         setTempPassword(password);
       }
       
-      // 2. Calculate dates
+      // Calculate dates
       const startDate = new Date();
       const endDate = tier.days 
         ? new Date(startDate.getTime() + tier.days * 24 * 60 * 60 * 1000)
         : null;
       
-      // 3. Update/Create profile
+      // Update/Create profile (use id, not user_id)
       const { error: profileError } = await supabase
         .from('profiles')
         .upsert({
           id: userId,
-          user_id: userId,
-          email: newUserEmail.toLowerCase(),
           subscription_tier: newUserTier,
           subscription_start: startDate.toISOString(),
           subscription_end: endDate?.toISOString(),
@@ -247,16 +255,12 @@ export default function Admin() {
           trial_granted_by: user?.id,
           updated_at: new Date().toISOString(),
         }, { 
-          onConflict: 'id',
-          ignoreDuplicates: false 
+          onConflict: 'id'
         });
       
-      if (profileError) {
-        console.error("Profile error:", profileError);
-        throw new Error(`Profile update failed: ${profileError.message}`);
-      }
+      if (profileError) throw new Error(`Profile error: ${profileError.message}`);
       
-      // 4. Create subscription record (delete old first)
+      // Delete old subscription and insert new one
       await supabase.from('subscriptions').delete().eq('user_id', userId);
       
       const { error: subError } = await supabase
@@ -272,26 +276,21 @@ export default function Admin() {
           is_free_trial: true,
           granted_by: user?.id,
           trial_reason: trialReason,
-          created_at: new Date().toISOString(),
         });
       
-      if (subError) {
-        console.error("Subscription error:", subError);
-        throw new Error(`Subscription failed: ${subError.message}`);
-      }
+      if (subError) throw new Error(`Subscription error: ${subError.message}`);
       
-      // 5. Record revenue event (free)
+      // Record revenue event
       await supabase.from('revenue_events').insert({
         user_id: userId,
         event_type: 'subscription',
         amount: 0,
         currency: 'USDT',
-        description: `FREE trial granted: ${tier.label} - ${trialReason || 'Influencer access'}`,
+        description: `FREE trial: ${tier.label}`,
         is_free_trial: true,
-        created_at: new Date().toISOString(),
       });
       
-      // 6. Show success
+      // Show success
       if (!isExistingUser) {
         toast.success(
           <div>
@@ -312,7 +311,6 @@ export default function Admin() {
         toast.success(`✅ Trial granted to existing user: ${newUserEmail}`);
       }
       
-      // Reset form and refresh
       setShowAddTrial(false);
       setNewUserEmail('');
       setTempPassword('');
@@ -328,7 +326,7 @@ export default function Admin() {
     }
   };
 
-  const extendTrial = async (userId: string, currentTier: string, additionalDays: number) => {
+  const extendTrial = async (userId: string, additionalDays: number) => {
     try {
       const currentEnd = new Date();
       const newEnd = new Date(currentEnd.getTime() + additionalDays * 24 * 60 * 60 * 1000);
@@ -486,7 +484,7 @@ export default function Admin() {
               </DialogTitle>
               <DialogDescription className="text-gray-400">
                 Grant complimentary access to influencers, partners, or VIP users. 
-                Reference pricing: 1 month = {REFERENCE_MONTHLY_RATE.toFixed(2)} USDT.
+                Reference: 1 month = {REFERENCE_MONTHLY_RATE.toFixed(2)} USDT.
               </DialogDescription>
             </DialogHeader>
             
@@ -558,9 +556,7 @@ export default function Admin() {
                       </Button>
                     )}
                   </div>
-                  <p className="text-xs text-gray-500">
-                    User will be prompted to change password on first login
-                  </p>
+                  <p className="text-xs text-gray-500">User will change password on first login</p>
                 </div>
               )}
               
@@ -575,9 +571,7 @@ export default function Admin() {
                       <SelectItem key={key} value={key}>
                         <div className="flex justify-between items-center w-full gap-4">
                           <span className="font-medium">{value.label}</span>
-                          <span className="text-xs text-gray-500">
-                            ({value.days} days)
-                          </span>
+                          <span className="text-xs text-gray-500">({value.days} days)</span>
                         </div>
                         <div className="text-xs text-gray-500 mt-0.5">
                           {value.note} • Ref: {value.referencePrice.toFixed(2)} USDT
@@ -592,7 +586,7 @@ export default function Admin() {
                 <Label htmlFor="reason" className="text-gray-300">Trial Reason (Optional)</Label>
                 <Textarea
                   id="reason"
-                  placeholder="e.g., YouTube influencer partnership, Twitter promo, VIP access..."
+                  placeholder="e.g., YouTube influencer, Twitter promo, VIP access..."
                   value={trialReason}
                   onChange={(e) => setTrialReason(e.target.value)}
                   className="bg-[#1e293b] border-gray-700 text-white min-h-[80px]"
@@ -623,7 +617,7 @@ export default function Admin() {
                 <Users className="w-5 h-5" /> Trial Users
               </CardTitle>
               <CardDescription className="text-gray-400">
-                Manage free trial access for influencers & partners
+                Manage free trial access
               </CardDescription>
             </div>
             <Button onClick={() => setShowAddTrial(true)} className="bg-yellow-500 hover:bg-yellow-600 text-black font-semibold">
@@ -679,9 +673,7 @@ export default function Admin() {
                               <Badge variant="outline" className="border-yellow-500/50 text-yellow-400">
                                 {tier?.label || u.subscription_tier}
                               </Badge>
-                              <span className="text-xs text-gray-500">
-                                ({tier?.days} days)
-                              </span>
+                              <span className="text-xs text-gray-500">({tier?.days} days)</span>
                             </div>
                             <div className="text-xs text-gray-600 mt-1">
                               Ref: {tier?.referencePrice.toFixed(2)} USDT
@@ -704,11 +696,7 @@ export default function Admin() {
                           </td>
                           <td className="py-3 px-4 text-sm text-gray-400">
                             {u.subscription_end 
-                              ? new Date(u.subscription_end).toLocaleDateString('en-US', { 
-                                  month: 'short', 
-                                  day: 'numeric',
-                                  year: 'numeric'
-                                })
+                              ? new Date(u.subscription_end).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
                               : '∞'
                             }
                           </td>
@@ -720,9 +708,7 @@ export default function Admin() {
                           <td className="py-3 px-4">
                             <div className="flex justify-end gap-2">
                               {!expired && u.is_active && (
-                                <Select
-                                  onValueChange={(days) => extendTrial(u.id, u.subscription_tier, parseInt(days))}
-                                >
+                                <Select onValueChange={(days) => extendTrial(u.id, parseInt(days))}>
                                   <SelectTrigger className="w-24 bg-[#1e293b] border-gray-700 text-xs">
                                     <SelectValue placeholder="Extend" />
                                   </SelectTrigger>
@@ -812,9 +798,8 @@ export default function Admin() {
           <strong>💡 How This Works:</strong><br />
           • This panel grants <strong>FREE trial access</strong> to influencers & VIPs<br />
           • Reference pricing (1 month = {REFERENCE_MONTHLY_RATE.toFixed(2)} USDT) is for context only<br />
-          • New users receive a temporary password and must change it on first login<br />
-          • Extend or revoke trials anytime from the table above<br />
-          • Paid subscriptions are handled separately via payment integration
+          • New users receive a temporary password<br />
+          • Extend or revoke trials anytime from the table above
         </div>
       </div>
     </DashboardLayout>
