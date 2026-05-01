@@ -109,7 +109,7 @@ export default function AppLayout({ children }: Props) {
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "#060a0f" }}>
 
-      {/* ── Sidebar ─────────────────────────────────────────────────────── */}
+      {/* Sidebar */}
       <aside style={{
         width: 56,
         background: "#0a0e14",
@@ -234,7 +234,7 @@ export default function AppLayout({ children }: Props) {
         </button>
       </aside>
 
-      {/* ── Page content ──────────────────────────────────────────────────── */}
+      {/* Page content */}
       <main style={{ marginLeft: 56, flex: 1, minWidth: 0 }}>
         {children}
       </main>
