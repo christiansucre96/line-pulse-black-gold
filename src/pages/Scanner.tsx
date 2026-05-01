@@ -2,7 +2,7 @@
 // ✅ FIXED: Only shows players from today's games (via projected_lineups table)
 // ✅ FIXED: Game dropdown reads from projected_lineups not clever-action
 // ✅ KEPT: All existing features (market line, hit rates, sorting, trends)
-
+import React from "react";
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/DashboardLayout";
