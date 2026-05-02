@@ -14,9 +14,15 @@ export default function Auth() {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  // Redirect if already logged in
+  // ✅ Redirect based on admin role
   useEffect(() => {
-    if (user) navigate("/scanner");
+    if (!user) return;
+
+    if (user.profile?.is_admin || user.profile?.role === "admin") {
+      navigate("/admin");
+    } else {
+      navigate("/scanner");
+    }
   }, [user, navigate]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -25,26 +31,23 @@ export default function Auth() {
 
     try {
       if (isLogin) {
-        // 🔐 LOGIN – with profile fetch and admin routing
-        const { data, error } = await supabase.auth.signInWithPassword({
+        // 🔐 LOGIN – fetch user and profile after signIn
+        const { error } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
-
         if (error) throw error;
 
-        // ✅ FETCH PROFILE AFTER LOGIN
-        const { data: profile, error: profileError } = await supabase
+        // ✅ Get the fresh user object
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (!authUser) throw new Error("User not found after login");
+
+        // ✅ Fetch profile
+        const { data: profile } = await supabase
           .from("profiles")
           .select("*")
-          .eq("id", data.user.id)
+          .eq("id", authUser.id)
           .maybeSingle();
-
-        console.log("PROFILE:", profile);
-
-        if (profileError) {
-          console.error(profileError);
-        }
 
         toast.success("Welcome back!");
 
@@ -56,43 +59,34 @@ export default function Auth() {
         }
 
       } else {
-        // 🆕 SIGNUP
+        // 🆕 SIGNUP (unchanged)
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: {
-            data: {
-              display_name: displayName,
-            },
+            data: { display_name: displayName },
             emailRedirectTo: `${window.location.origin}/reset-password`,
           },
         });
-
         if (error) throw error;
 
-        // 📧 EMAIL CONFIRMATION CHECK
         if (data.user && !data.session) {
           toast.success("Check your email to confirm your account!");
         } else {
           toast.success("Account created!");
         }
 
-        // 👤 CREATE PROFILE SAFELY – UPDATED UPSERT
         if (data.user) {
           const { error: profileError } = await supabase
             .from("profiles")
             .upsert({
-              id: data.user.id,          // ✅ Use id (matches primary key)
-              email: email,              // ✅ Store email in profile
+              id: data.user.id,
+              email: email,
               display_name: displayName,
             });
-
-          if (profileError) {
-            console.error("Profile error:", profileError.message);
-          }
+          if (profileError) console.error("Profile error:", profileError.message);
         }
 
-        // Reset form
         setIsLogin(true);
         setPassword("");
       }
@@ -105,42 +99,27 @@ export default function Auth() {
 
   const handleForgotPassword = async () => {
     if (!email) return toast.error("Enter your email first");
-
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/reset-password`,
     });
-
-    if (error) {
-      toast.error(error.message);
-    } else {
-      toast.success("Password reset email sent!");
-    }
+    if (error) toast.error(error.message);
+    else toast.success("Password reset email sent!");
   };
 
-  // ✨ NEW: Send Magic Link (no password required)
   const sendMagicLink = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email) return toast.error("Enter your email first");
-
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: {
-        emailRedirectTo: window.location.origin,
-      },
+      options: { emailRedirectTo: window.location.origin },
     });
-
-    if (error) {
-      toast.error(error.message);
-    } else {
-      toast.success("✨ Magic link sent! Check your email.");
-    }
+    if (error) toast.error(error.message);
+    else toast.success("✨ Magic link sent! Check your email.");
   };
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-
-        {/* LOGO */}
         <div className="text-center mb-8">
           <div className="w-16 h-16 rounded-full bg-gradient-gold flex items-center justify-center mx-auto mb-4">
             <span className="text-2xl font-bold">LP</span>
@@ -151,9 +130,7 @@ export default function Auth() {
           </p>
         </div>
 
-        {/* FORM */}
         <form onSubmit={handleSubmit} className="space-y-4 bg-card border border-border rounded-xl p-6">
-
           {!isLogin && (
             <div>
               <label className="block text-sm mb-1">Display Name</label>
@@ -220,7 +197,6 @@ export default function Auth() {
           </button>
         </form>
 
-        {/* SWITCH */}
         <p className="text-center text-sm text-muted-foreground mt-4">
           {isLogin ? "Don't have an account?" : "Already have an account?"}{" "}
           <button
@@ -230,7 +206,6 @@ export default function Auth() {
             {isLogin ? "Sign Up" : "Sign In"}
           </button>
         </p>
-
       </div>
     </div>
   );
