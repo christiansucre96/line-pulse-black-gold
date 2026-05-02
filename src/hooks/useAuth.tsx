@@ -43,15 +43,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Check admin role
+  // ✅ REPLACED admin check – uses metadata first, then profiles table
   useEffect(() => {
     if (!user) {
       setIsAdmin(false);
       return;
     }
-    supabase.rpc("has_role", { _user_id: user.id, _role: "admin" }).then(({ data }) => {
-      setIsAdmin(!!data);
-    });
+
+    const checkAdmin = async () => {
+      try {
+        // 1. Check metadata first (fast)
+        const metaAdmin = user.user_metadata?.is_admin === true;
+        if (metaAdmin) {
+          setIsAdmin(true);
+          return;
+        }
+
+        // 2. Fallback: Check profiles table (where we just set it)
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('is_admin')
+          .eq('id', user.id)
+          .single();
+
+        if (!error && data) {
+          setIsAdmin(data.is_admin === true);
+        } else {
+          setIsAdmin(false);
+        }
+      } catch {
+        setIsAdmin(false);
+      }
+    };
+
+    checkAdmin();
   }, [user]);
 
   const signOut = async () => {
