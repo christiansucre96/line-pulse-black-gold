@@ -3,8 +3,19 @@ import { createContext, useContext, useEffect, useState, ReactNode } from "react
 import { supabase } from "@/integrations/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
 
+// Extend User type to include profile (or use a custom interface)
+interface Profile {
+  id: string;
+  email: string;
+  display_name: string;
+  is_admin?: boolean;
+  role?: string;
+  // add other profile fields as needed
+}
+
 interface AuthContextType {
   user: User | null;
+  profile: Profile | null;
   session: Session | null;
   loading: boolean;
   isAdmin: boolean;
@@ -13,6 +24,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
+  profile: null,
   session: null,
   loading: true,
   isAdmin: false,
@@ -21,69 +33,73 @@ const AuthContext = createContext<AuthContextType>({
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
 
+  // Fetch profile for a given user ID
+  const fetchProfile = async (userId: string) => {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (error || !data) {
+      console.warn("Profile not found", error);
+      return null;
+    }
+    return data as Profile;
+  };
+
   useEffect(() => {
     // Listen to auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
+      
+      if (session?.user) {
+        const profileData = await fetchProfile(session.user.id);
+        setProfile(profileData);
+        // Admin check using profile
+        setIsAdmin(profileData?.is_admin === true || profileData?.role === "admin");
+      } else {
+        setProfile(null);
+        setIsAdmin(false);
+      }
       setLoading(false);
     });
 
     // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
+      
+      if (session?.user) {
+        const profileData = await fetchProfile(session.user.id);
+        setProfile(profileData);
+        setIsAdmin(profileData?.is_admin === true || profileData?.role === "admin");
+      } else {
+        setProfile(null);
+        setIsAdmin(false);
+      }
       setLoading(false);
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  // ✅ Updated admin check – uses metadata first, then profiles table
-  useEffect(() => {
-    if (!user) {
-      setIsAdmin(false);
-      return;
-    }
-
-    const checkAdmin = async () => {
-      try {
-        // 1. Quick check: metadata
-        if (user.user_metadata?.is_admin === true) {
-          setIsAdmin(true);
-          return;
-        }
-
-        // 2. Fallback: Query profiles table (this is where we set is_admin = true)
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('is_admin')
-          .eq('id', user.id)
-          .single();
-
-        if (!error && data?.is_admin === true) {
-          setIsAdmin(true);
-        } else {
-          setIsAdmin(false);
-        }
-      } catch {
-        setIsAdmin(false);
-      }
-    };
-
-    checkAdmin();
-  }, [user]);
-
   const signOut = async () => {
     await supabase.auth.signOut();
+    setUser(null);
+    setProfile(null);
+    setSession(null);
+    setIsAdmin(false);
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, isAdmin, signOut }}>
+    <AuthContext.Provider value={{ user, profile, session, loading, isAdmin, signOut }}>
       {children}
     </AuthContext.Provider>
   );
