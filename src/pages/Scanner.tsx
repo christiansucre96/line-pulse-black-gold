@@ -1,7 +1,4 @@
 // src/pages/Scanner.tsx
-// ✅ FIXED: Only shows players from today's games (via projected_lineups table)
-// ✅ FIXED: Game dropdown reads from projected_lineups not clever-action
-// ✅ KEPT: All existing features (market line, hit rates, sorting, trends)
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -9,7 +6,6 @@ import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Search, RefreshCw, Calendar, ChevronLeft, ChevronRight } from "lucide-react";
-import { fetchPlayersWithRollingStats, type PlayerWithRollingStats } from '@/services/playerService';
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -19,12 +15,10 @@ const supabase = createClient(
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
-// ET date — avoids UTC flip for late-night games
 function etToday(): string {
   return new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString().split('T')[0];
 }
 
-// ─── Hit Rate Box ─────────────────────────────────────────────────────────────
 function HRBox({ value }: { value: number | null }) {
   if (value === null || value === undefined)
     return <div className="w-9 h-6 rounded bg-gray-800 text-gray-600 text-[10px] font-bold flex items-center justify-center">—</div>;
@@ -33,82 +27,119 @@ function HRBox({ value }: { value: number | null }) {
 }
 
 const SPORTS = [
-  { value: "nba", label: "🏀 NBA" },
-  { value: "nfl", label: "🏈 NFL" },
-  { value: "mlb", label: "⚾ MLB" },
-  { value: "nhl", label: "🏒 NHL" },
+  { value: "nba",    label: "🏀 NBA" },
+  { value: "nfl",    label: "🏈 NFL" },
+  { value: "mlb",    label: "⚾ MLB" },
+  { value: "nhl",    label: "🏒 NHL" },
   { value: "soccer", label: "⚽ Soccer" },
 ];
 
 const SPORT_PROPS: Record<string, { id: string; label: string }[]> = {
   nba: [
-    { id: "points", label: "Points" }, { id: "rebounds", label: "Rebounds" },
-    { id: "assists", label: "Assists" }, { id: "three_pointers_made", label: "3PM" },
-    { id: "steals", label: "Steals" }, { id: "blocks", label: "Blocks" },
-    { id: "combo_pra", label: "PRA" }, { id: "combo_pr", label: "P+R" },
-    { id: "combo_pa", label: "P+A" }, { id: "turnovers", label: "TOV" },
+    { id: "points",              label: "Points" },
+    { id: "rebounds",            label: "Rebounds" },
+    { id: "assists",             label: "Assists" },
+    { id: "three_pointers_made", label: "3PM" },
+    { id: "steals",              label: "Steals" },
+    { id: "blocks",              label: "Blocks" },
+    { id: "combo_pra",           label: "PRA" },
+    { id: "combo_pr",            label: "P+R" },
+    { id: "combo_pa",            label: "P+A" },
+    { id: "turnovers",           label: "TOV" },
   ],
   nfl: [
-    { id: "passing_yards", label: "Pass Yds" }, { id: "rushing_yards", label: "Rush Yds" },
-    { id: "receiving_yards", label: "Rec Yds" }, { id: "passing_tds", label: "Pass TDs" },
-    { id: "receptions", label: "Receptions" },
+    { id: "passing_yards",   label: "Pass Yds" },
+    { id: "rushing_yards",   label: "Rush Yds" },
+    { id: "receiving_yards", label: "Rec Yds" },
+    { id: "passing_tds",     label: "Pass TDs" },
+    { id: "receptions",      label: "Receptions" },
+    { id: "tackles",         label: "Tackles" },
+    { id: "combo_pass_rush", label: "Pass+Rush Yds" },
+    { id: "combo_rush_rec",  label: "Rush+Rec Yds" },
   ],
   mlb: [
-    { id: "hits", label: "Hits" }, { id: "runs", label: "Runs" }, { id: "rbi", label: "RBI" },
-    { id: "home_runs", label: "HR" }, { id: "strikeouts_pitching", label: "K (P)" },
+    { id: "hits",                 label: "Hits" },
+    { id: "runs",                 label: "Runs" },
+    { id: "rbi",                  label: "RBI" },
+    { id: "home_runs",            label: "HR" },
+    { id: "total_bases",          label: "Total Bases" },
+    { id: "strikeouts_pitching",  label: "K (Pitcher)" },
+    { id: "strikeouts_batting",   label: "K (Batter)" },
+    { id: "stolen_bases",         label: "Stolen Bases" },
+    { id: "combo_hrr",            label: "H+R+RBI" },
+    { id: "combo_tb_hits",        label: "TB+Hits" },
   ],
   nhl: [
-    { id: "goals", label: "Goals" }, { id: "assists_hockey", label: "Assists" },
-    { id: "shots_on_goal", label: "SOG" }, { id: "combo_ga", label: "G+A" },
+    { id: "goals",           label: "Goals" },
+    { id: "assists_hockey",  label: "Assists" },
+    { id: "shots_on_goal",   label: "SOG" },
+    { id: "time_on_ice",     label: "TOI" },
+    { id: "hits_hockey",     label: "Hits" },
+    { id: "blocked_shots",   label: "Blocks" },
+    { id: "saves",           label: "Saves" },
+    { id: "goals_allowed",   label: "Goals Allowed" },
+    { id: "combo_ga",        label: "G+A" },
+    { id: "combo_pts_sog",   label: "Pts+SOG" },
+    { id: "combo_sog_hits",  label: "SOG+Hits" },
+    { id: "combo_sv_ga",     label: "SV+GA" },
   ],
   soccer: [
-    { id: "goals_soccer", label: "Goals" }, { id: "assists_soccer", label: "Assists" },
-    { id: "shots_soccer", label: "Shots" }, { id: "shots_on_target", label: "SOT" },
+    { id: "goals",               label: "Goals" },
+    { id: "assists",             label: "Assists" },
+    { id: "shots",               label: "Shots" },
+    { id: "shots_on_target",     label: "SOT" },
+    { id: "key_passes",          label: "Key Passes" },
+    { id: "tackles",             label: "Tackles" },
+    { id: "saves",               label: "Saves" },
+    { id: "combo_goals_assists", label: "G+A" },
+    { id: "combo_shots_sot",     label: "Shots+SOT" },
+    { id: "combo_tkl_int",       label: "Tkl+Int" },
   ],
+};
+
+const DEFAULT_PROP: Record<string, string> = {
+  nba: "points", nfl: "passing_yards", mlb: "hits", nhl: "goals", soccer: "goals",
 };
 
 function getInitials(name: string) {
   return (name || "??").split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
 }
 
-interface ScannerPlayer extends PlayerWithRollingStats {
-  all_props?: Record<string, any>;
-  name?: string;
-  team_abbr?: string;
-  position?: string;
-  opponent?: string;
-  game_date?: string;
-  player_id?: string;
-}
-
 interface GameOption {
   game_id: string;
   label: string;
   time: string;
-  confirmed: boolean;
+}
+
+interface ScannerPlayer {
+  player_id: string;
+  name: string;
+  team_abbr: string;
+  position: string;
+  opponent: string;
+  game_date: string;
+  game_time: string;
+  all_props: Record<string, any>;
+  is_starter: boolean;
 }
 
 export default function Scanner() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  const [sport, setSport]               = useState("nba");
-  const [filterProp, setFilterProp]     = useState("points");
-  const [search, setSearch]             = useState("");
-  const [players, setPlayers]           = useState<ScannerPlayer[]>([]);
-  const [loading, setLoading]           = useState(false);
-  const [error, setError]               = useState<string | null>(null);
-  const [lastRefresh, setLastRefresh]   = useState("");
-  const [sortKey, setSortKey]           = useState("l10");
-  const [sortDir, setSortDir]           = useState<1 | -1>(-1);
-  const [currentPage, setCurrentPage]   = useState(1);
-  const [totalPlayers, setTotalPlayers] = useState(0);
-  const [gameOptions, setGameOptions]   = useState<GameOption[]>([]);
+  const [sport, setSport]             = useState("nba");
+  const [filterProp, setFilterProp]   = useState("points");
+  const [search, setSearch]           = useState("");
+  const [players, setPlayers]         = useState<ScannerPlayer[]>([]);
+  const [loading, setLoading]         = useState(false);
+  const [error, setError]             = useState<string | null>(null);
+  const [lastRefresh, setLastRefresh] = useState("");
+  const [sortKey, setSortKey]         = useState("l10");
+  const [sortDir, setSortDir]         = useState<1 | -1>(-1);
+  const [gameOptions, setGameOptions] = useState<GameOption[]>([]);
   const [selectedGame, setSelectedGame] = useState("all");
-  const [marketLine, setMarketLine]     = useState<number | null>(null);
-  const [noGamesToday, setNoGamesToday] = useState(false);
+  const [marketLine, setMarketLine]   = useState<number | null>(null);
 
-  const PLAYERS_PER_PAGE = 100;
   const playerId = searchParams.get("playerId");
   const urlSport = searchParams.get("sport");
   const today    = etToday();
@@ -117,194 +148,109 @@ export default function Scanner() {
     if (urlSport && urlSport !== sport) setSport(urlSport);
   }, [urlSport]);
 
-  // ── Step 1: Load today's games from projected_lineups ─────────────────────
-  const loadTodayGames = async (): Promise<{
-    gameOptions: GameOption[];
-    lineupsByGame: Map<string, { team: string; opponent: string; time: string; espnIds: string[] }[]>;
-  }> => {
-    const { data, error: e } = await supabase
-      .from('projected_lineups')
-      .select('game_id, team_abbreviation, opponent_abbreviation, game_time_utc, confirmed, projected_starters, bench_depth')
+  // ── Fetch games from games_data for selected sport ────────────────────────
+  const loadGames = async (s: string) => {
+    const { data } = await supabase
+      .from('games_data')
+      .select(`
+        external_id, game_date, start_time, status,
+        home_team:teams!games_data_home_team_id_fkey(abbreviation),
+        away_team:teams!games_data_away_team_id_fkey(abbreviation)
+      `)
+      .eq('sport', s)
       .eq('game_date', today)
-      .order('game_time_utc', { ascending: true });
+      .neq('status', 'finished')
+      .order('start_time', { ascending: true })
 
-    if (e || !data || data.length === 0) {
-      setNoGamesToday(true);
-      return { gameOptions: [], lineupsByGame: new Map() };
-    }
+    const options: GameOption[] = (data || []).map((g: any) => {
+      const home = g.home_team?.abbreviation || '?'
+      const away = g.away_team?.abbreviation || '?'
+      const time = g.start_time
+        ? new Date(g.start_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+        : ''
+      return { game_id: g.external_id, label: `${away} vs ${home}`, time }
+    })
+    setGameOptions(options)
+  }
 
-    setNoGamesToday(false);
-
-    // Build game options (deduplicated)
-    const seenGames = new Map<string, GameOption>();
-    const lineupsByGame = new Map<string, { team: string; opponent: string; time: string; espnIds: string[] }[]>();
-
-    for (const row of data) {
-      // Game option
-      if (!seenGames.has(row.game_id)) {
-        const time = row.game_time_utc
-          ? new Date(row.game_time_utc).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-          : '';
-
-        // Find both teams for this game
-        const bothTeams = data.filter(r => r.game_id === row.game_id);
-        const teamA = bothTeams[0]?.team_abbreviation || '';
-        const teamB = bothTeams[1]?.team_abbreviation || bothTeams[0]?.opponent_abbreviation || '';
-
-        seenGames.set(row.game_id, {
-          game_id: row.game_id,
-          label: `${teamA} vs ${teamB}`,
-          time,
-          confirmed: row.confirmed || false,
-        });
-      }
-
-      // Collect ESPN IDs for this team's lineup
-      const espnIds = [
-        ...(row.projected_starters || []),
-        ...(row.bench_depth || []),
-      ].map((p: any) => p.espn_id || p.espnId || '').filter(Boolean);
-
-      if (!lineupsByGame.has(row.game_id)) lineupsByGame.set(row.game_id, []);
-      lineupsByGame.get(row.game_id)!.push({
-        team: row.team_abbreviation,
-        opponent: row.opponent_abbreviation,
-        time: row.game_time_utc || '',
-        espnIds,
-      });
-    }
-
-    const options = Array.from(seenGames.values());
-    setGameOptions(options);
-    return { gameOptions: options, lineupsByGame };
-  };
-
-  // ── Step 2: Load players for today's lineups ──────────────────────────────
-  const fetchPlayers = async (gameId: string = 'all') => {
+  // ── Fetch players from clever-action ──────────────────────────────────────
+  const fetchPlayers = async (s: string, gameId: string = 'all') => {
     setLoading(true); setError(null);
     try {
-      const { gameOptions: opts, lineupsByGame } = await loadTodayGames();
+      const body: any = { operation: "get_players", sport: s }
+      if (gameId !== 'all') body.game_id = gameId
 
-      if (lineupsByGame.size === 0) {
-        setPlayers([]); setTotalPlayers(0);
-        setLoading(false); return;
-      }
+      const res = await fetch(EDGE_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify(body),
+      })
 
-      // Get relevant lineup rows
-      const relevantGames = gameId === 'all'
-        ? Array.from(lineupsByGame.values()).flat()
-        : (lineupsByGame.get(gameId) || []);
+      const d = await res.json()
+      if (!d.success) throw new Error(d.error || 'Failed to load players')
 
-      // Collect all ESPN IDs + build game info map
-      const allEspnIds: string[] = [];
-      const espnToGame = new Map<string, { team: string; opponent: string; time: string }>();
+      const mapped: ScannerPlayer[] = (d.players || []).map((p: any) => ({
+        player_id: p.player_id,
+        name:      p.name || '',
+        team_abbr: p.team_abbr || '',
+        position:  p.position || '',
+        opponent:  p.opponent || '',
+        game_date: p.game_date || '',
+        game_time: p.game_time || '',
+        all_props: p.all_props || {},
+        is_starter: p.is_starter || false,
+      }))
 
-      for (const row of relevantGames) {
-        for (const espnId of row.espnIds) {
-          if (!espnToGame.has(espnId)) {
-            allEspnIds.push(espnId);
-            espnToGame.set(espnId, { team: row.team, opponent: row.opponent, time: row.time });
-          }
-        }
-      }
-
-      if (allEspnIds.length === 0) {
-        setPlayers([]); setTotalPlayers(0);
-        setLoading(false); return;
-      }
-
-      console.log(`📋 ${allEspnIds.length} players in today's lineups`);
-
-      // Look up players by ESPN external_id
-      const { data: playerRows, error: pe } = await supabase
-        .from('players')
-        .select('id, full_name, external_id, position')
-        .eq('sport', 'nba')
-        .in('external_id', allEspnIds.slice(0, 500));
-
-      if (pe) throw pe;
-
-      // Get rolling stats + props from clever-action
-      let propsMap = new Map<string, any>();
-      try {
-        const res = await fetch(EDGE_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ operation: "get_players", sport, page: 1, limit: 500 }),
-        });
-        if (res.ok) {
-          const d = await res.json();
-          if (d.success) {
-            for (const p of (d.players || [])) {
-              if (p.player_id) propsMap.set(p.player_id, p);
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('Props fetch skipped:', e);
-      }
-
-      // Build final list
-      const finalPlayers: ScannerPlayer[] = (playerRows || []).map(player => {
-        const gameInfo = espnToGame.get(player.external_id || '') || { team: '', opponent: '', time: '' };
-        const propsData = propsMap.get(player.id) || {};
-        const timeStr = gameInfo.time
-          ? new Date(gameInfo.time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-          : '';
-
-        return {
-          ...propsData,
-          player_id: player.id,
-          name:      player.full_name || propsData.name || '',
-          team_abbr: gameInfo.team || propsData.team_abbr || '',
-          position:  player.position || propsData.position || '',
-          opponent:  gameInfo.opponent || propsData.opponent || '',
-          game_date: timeStr,
-          all_props: propsData.all_props || {},
-        };
-      });
-
-      setPlayers(finalPlayers);
-      setTotalPlayers(finalPlayers.length);
-      setCurrentPage(1);
-      setLastRefresh(new Date().toLocaleTimeString());
-      console.log(`✅ ${finalPlayers.length} players ready`);
-
+      setPlayers(mapped)
+      setLastRefresh(new Date().toLocaleTimeString())
+      console.log(`✅ ${mapped.length} players ready`)
     } catch (e: any) {
-      console.error('❌', e);
-      setError(e.message);
+      console.error('❌', e)
+      setError(e.message)
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   useEffect(() => {
-    if (!playerId) fetchPlayers('all');
-  }, [sport]);
+    if (!playerId) {
+      const defaultProp = DEFAULT_PROP[sport] || 'points'
+      setFilterProp(defaultProp)
+      setSelectedGame('all')
+      loadGames(sport)
+      fetchPlayers(sport, 'all')
+    }
+  }, [sport])
 
-  const handleSportChange = (s: string) => { setSport(s); setFilterProp("points"); setSelectedGame("all"); };
-  const handleGameChange  = (g: string) => { setSelectedGame(g); fetchPlayers(g); };
+  const handleSportChange = (s: string) => setSport(s)
+  const handleGameChange  = (g: string) => { setSelectedGame(g); fetchPlayers(sport, g) }
   const handleSort = (key: string) => {
-    if (sortKey === key) setSortDir(d => d === 1 ? -1 : 1);
-    else { setSortKey(key); setSortDir(-1); }
-  };
+    if (sortKey === key) setSortDir(d => d === 1 ? -1 : 1)
+    else { setSortKey(key); setSortDir(-1) }
+  }
 
   const displayPlayers = useMemo(() => {
-    let list = [...players];
-    if (filterProp !== "all") list = list.filter(p => p.all_props?.[filterProp]);
+    let list = [...players]
+
+    if (filterProp !== "all") list = list.filter(p => p.all_props?.[filterProp])
+
     if (search.trim()) {
-      const q = search.toLowerCase();
+      const q = search.toLowerCase()
       list = list.filter(p =>
         (p.name || "").toLowerCase().includes(q) ||
         (p.team_abbr || "").toLowerCase().includes(q) ||
         (p.opponent || "").toLowerCase().includes(q)
-      );
+      )
     }
+
     list.sort((a, b) => {
-      if (sortKey === "name") return sortDir * (a.name || '').localeCompare(b.name || '');
+      if (sortKey === "name") return sortDir * (a.name || '').localeCompare(b.name || '')
       const getV = (p: ScannerPlayer) => {
-        const pd = p.all_props?.[filterProp];
-        if (!pd) return -Infinity;
+        const pd = p.all_props?.[filterProp]
+        if (!pd) return -Infinity
         return sortKey === "line" ? pd.line ?? 0
           : sortKey === "avg"  ? pd.avg_l10 ?? 0
           : sortKey === "l5"   ? pd.l5 ?? 0
@@ -312,24 +258,24 @@ export default function Scanner() {
           : sortKey === "l15"  ? pd.l15 ?? 0
           : sortKey === "l20"  ? pd.l20 ?? 0
           : sortKey === "diff" ? (pd.avg_l10 ?? 0) - (pd.line ?? 0)
-          : 0;
-      };
-      return sortDir * (getV(a) - getV(b));
-    });
-    return list;
-  }, [players, filterProp, search, sortKey, sortDir]);
+          : 0
+      }
+      return sortDir * (getV(a) - getV(b))
+    })
+
+    return list
+  }, [players, filterProp, search, sortKey, sortDir])
 
   const SortTh = ({ label, sk }: { label: string; sk: string }) => (
     <th onClick={() => handleSort(sk)}
       className="p-3 text-left text-[11px] font-semibold text-yellow-400/70 uppercase tracking-wider cursor-pointer select-none hover:text-yellow-400 whitespace-nowrap">
       {label} {sortKey === sk ? (sortDir === -1 ? "↓" : "↑") : ""}
     </th>
-  );
+  )
 
-  if (playerId) return <PlayerDetailView playerId={playerId} sport={sport} onBack={() => navigate("/scanner")} />;
+  if (playerId) return <PlayerDetailView playerId={playerId} sport={sport} onBack={() => navigate("/scanner")} />
 
-  const currentProps = SPORT_PROPS[sport] || SPORT_PROPS.nba;
-  const totalPages = Math.ceil(totalPlayers / PLAYERS_PER_PAGE);
+  const currentProps = SPORT_PROPS[sport] || SPORT_PROPS.nba
 
   return (
     <DashboardLayout>
@@ -344,7 +290,7 @@ export default function Scanner() {
               Players with games today ({today}) · Set your own lines
             </p>
           </div>
-          <button onClick={() => fetchPlayers(selectedGame)} disabled={loading}
+          <button onClick={() => fetchPlayers(sport, selectedGame)} disabled={loading}
             className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm text-gray-300 transition disabled:opacity-50">
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
             {lastRefresh ? `Updated ${lastRefresh}` : "Refresh"}
@@ -354,31 +300,33 @@ export default function Scanner() {
         {/* Controls */}
         <div className="flex flex-wrap gap-2 mb-4">
           <Select value={sport} onValueChange={handleSportChange}>
-            <SelectTrigger className="w-36 bg-gray-900 border-gray-700 text-yellow-400 text-sm"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-36 bg-gray-900 border-gray-700 text-yellow-400 text-sm">
+              <SelectValue />
+            </SelectTrigger>
             <SelectContent className="bg-gray-900 border-gray-700">
               {SPORTS.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
             </SelectContent>
           </Select>
 
-          {/* Game dropdown — from projected_lineups */}
           <Select value={selectedGame} onValueChange={handleGameChange}>
             <SelectTrigger className="w-72 bg-gray-900 border-gray-700 text-gray-300 text-sm">
-              <SelectValue placeholder="Select a game (today only)" />
+              <SelectValue placeholder="All Games (Today only)" />
             </SelectTrigger>
             <SelectContent className="bg-gray-900 border-gray-700 max-h-64 overflow-y-auto">
               <SelectItem value="all">All Games (Today only)</SelectItem>
               {gameOptions.map(g => (
                 <SelectItem key={g.game_id} value={g.game_id}>
-                  {g.label} — {today} {g.time} {g.confirmed ? '✅' : '🟡'}
+                  {g.label} {g.time && `— ${g.time}`}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
 
           <Select value={filterProp} onValueChange={setFilterProp}>
-            <SelectTrigger className="w-36 bg-gray-900 border-gray-700 text-gray-300 text-sm"><SelectValue placeholder="All Props" /></SelectTrigger>
+            <SelectTrigger className="w-40 bg-gray-900 border-gray-700 text-gray-300 text-sm">
+              <SelectValue placeholder="Select prop" />
+            </SelectTrigger>
             <SelectContent className="bg-gray-900 border-gray-700">
-              <SelectItem value="all">All Props</SelectItem>
               {currentProps.map(p => <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>)}
             </SelectContent>
           </Select>
@@ -398,24 +346,15 @@ export default function Scanner() {
             value={marketLine ?? ""}
             onChange={e => setMarketLine(e.target.value ? parseFloat(e.target.value) : null)}
             className="w-24 px-3 py-1.5 bg-gray-800 border border-gray-600 rounded text-white text-sm focus:border-blue-500 focus:outline-none" />
-          {marketLine && <span className="text-xs text-blue-400">Enter the line from Stake/DraftKings → app calculates your edge</span>}
+          {marketLine && <span className="text-xs text-blue-400">Enter the line from your sportsbook → app calculates your edge</span>}
         </div>
-
-        {/* No games banner */}
-        {noGamesToday && !loading && (
-          <div className="mb-4 p-4 bg-yellow-900/20 border border-yellow-800 rounded-lg text-yellow-400 text-sm flex items-center gap-2">
-            ⚠️ No games found for {today}.
-            <button onClick={() => fetchPlayers('all')} className="underline hover:text-yellow-300">Refresh</button>
-            — make sure the lineup scraper has run today.
-          </div>
-        )}
 
         {error && <div className="mb-4 p-3 bg-red-900/20 border border-red-800 rounded-lg text-red-400 text-sm">❌ {error}</div>}
 
         {loading && (
           <div className="text-center py-16">
             <div className="w-8 h-8 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-            <p className="text-gray-500 text-sm">Loading today's players...</p>
+            <p className="text-gray-500 text-sm">Loading {sport.toUpperCase()} players...</p>
           </div>
         )}
 
@@ -424,14 +363,17 @@ export default function Scanner() {
             <div className="text-center py-20 text-gray-600 border border-gray-800 rounded-xl bg-gray-900/20">
               <p className="text-lg">No players found for today</p>
               <p className="text-sm mt-1 text-gray-700">
-                {noGamesToday ? "Run the lineup scraper first" : "Try selecting a specific game or adjusting filters"}
+                Try syncing {sport.toUpperCase()} data from the admin panel first
               </p>
+              <button onClick={() => fetchPlayers(sport, selectedGame)}
+                className="mt-4 px-4 py-2 bg-yellow-500 text-black rounded font-semibold text-sm hover:bg-yellow-600">
+                Retry
+              </button>
             </div>
           ) : (
             <div className="bg-gray-900/30 border border-gray-800 rounded-xl overflow-hidden">
               <div className="px-4 py-2 border-b border-gray-800 text-xs text-gray-600 flex justify-between">
                 <span>{displayPlayers.length} players shown · click any row for all prop details</span>
-                <span>Page {currentPage} of {Math.max(1, totalPages)}</span>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full">
@@ -452,8 +394,11 @@ export default function Scanner() {
                   </thead>
                   <tbody>
                     {displayPlayers.map((p, i) => {
-                      const pd = p.all_props?.[filterProp] || p.all_props?.[Object.keys(p.all_props || {})[0]];
-                      const diff = pd ? ((pd.avg_l10 ?? 0) - (pd.line ?? 0)) : 0;
+                      const pd = p.all_props?.[filterProp] || p.all_props?.[Object.keys(p.all_props || {})[0]]
+                      const diff = pd ? ((pd.avg_l10 ?? 0) - (pd.line ?? 0)) : 0
+                      const gameTime = p.game_time
+                        ? new Date(p.game_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+                        : p.game_date || ''
                       return (
                         <tr key={`${p.player_id}-${i}`}
                           onClick={() => navigate(`/scanner?playerId=${p.player_id}&sport=${sport}`)}
@@ -461,17 +406,20 @@ export default function Scanner() {
                           <td className="p-3">
                             <div className="flex items-center gap-2.5">
                               <div className="w-9 h-9 rounded-full bg-gradient-to-br from-yellow-500 to-yellow-700 flex items-center justify-center text-black text-xs font-bold shrink-0">
-                                {getInitials(p.name || '')}
+                                {getInitials(p.name)}
                               </div>
                               <div>
                                 <p className="font-semibold text-white text-sm leading-tight">{p.name}</p>
-                                <p className="text-[10px] text-gray-500">{p.team_abbr} · {p.position}{pd ? ` · ${pd.label}` : ''}</p>
+                                <p className="text-[10px] text-gray-500">
+                                  {p.team_abbr} · {p.position}{pd ? ` · ${pd.label}` : ''}
+                                  {p.is_starter && <span className="ml-1 text-green-400">★</span>}
+                                </p>
                               </div>
                             </div>
                           </td>
                           <td className="p-3">
                             <p className="text-xs text-gray-400">vs {p.opponent}</p>
-                            <p className="text-[10px] text-gray-600">{p.game_date}</p>
+                            <p className="text-[10px] text-gray-600">{gameTime}</p>
                           </td>
                           <td className="p-3"><span className="text-yellow-400 font-bold text-sm">{pd?.line?.toFixed(1) ?? '—'}</span></td>
                           <td className="p-3 text-gray-300 text-sm">{pd?.avg_l10 ?? '—'}</td>
@@ -496,54 +444,41 @@ export default function Scanner() {
                           <td className="p-3">
                             {(() => {
                               if (marketLine && pd?.avg_l10) {
-                                const edge = pd.avg_l10 - marketLine;
-                                const pct = marketLine > 0 ? (edge / marketLine) * 100 : 0;
-                                let sig = "Neutral", cls = "bg-gray-500/10 text-gray-400 border border-gray-500/30";
-                                if (pct >= 10)      { sig = "🟢 STRONG OVER";  cls = "bg-green-500/30 text-green-300 border border-green-500/50"; }
-                                else if (pct >= 3)  { sig = "🟡 Over";          cls = "bg-green-500/15 text-green-400 border border-green-500/30"; }
-                                else if (pct <= -10){ sig = "🔴 STRONG UNDER"; cls = "bg-red-500/30 text-red-300 border border-red-500/50"; }
-                                else if (pct <= -3) { sig = "🟠 Under";         cls = "bg-red-500/15 text-red-400 border border-red-500/30"; }
+                                const edge = pd.avg_l10 - marketLine
+                                const pct  = marketLine > 0 ? (edge / marketLine) * 100 : 0
+                                let sig = "Neutral", cls = "bg-gray-500/10 text-gray-400 border border-gray-500/30"
+                                if (pct >= 10)       { sig = "🟢 STRONG OVER";  cls = "bg-green-500/30 text-green-300 border border-green-500/50" }
+                                else if (pct >= 3)   { sig = "🟡 Over";         cls = "bg-green-500/15 text-green-400 border border-green-500/30" }
+                                else if (pct <= -10) { sig = "🔴 STRONG UNDER"; cls = "bg-red-500/30 text-red-300 border border-red-500/50" }
+                                else if (pct <= -3)  { sig = "🟠 Under";        cls = "bg-red-500/15 text-red-400 border border-red-500/30" }
                                 return (
                                   <div className="flex flex-col gap-1">
                                     <span className={`inline-flex px-2 py-1 rounded text-xs font-bold ${cls}`}>{sig}</span>
                                     <span className="text-[10px] text-gray-500">Edge: {edge > 0 ? "+" : ""}{edge.toFixed(1)}</span>
                                   </div>
-                                );
+                                )
                               }
-                              const trend = pd?.trend || 'Neutral';
+                              const trend = pd?.trend || 'Neutral'
                               const styles: Record<string, string> = {
-                                'Strong Over': 'bg-green-500/30 text-green-300 border border-green-500/50',
-                                'Over': 'bg-green-500/10 text-green-400 border border-green-500/30',
+                                'Strong Over':  'bg-green-500/30 text-green-300 border border-green-500/50',
+                                'Over':         'bg-green-500/10 text-green-400 border border-green-500/30',
                                 'Strong Under': 'bg-red-500/30 text-red-300 border border-red-500/50',
-                                'Under': 'bg-red-500/10 text-red-400 border border-red-500/30',
-                                'Neutral': 'bg-gray-500/10 text-gray-400 border border-gray-500/30',
-                              };
-                              return <span className={`inline-flex px-2 py-1 rounded text-xs font-bold ${styles[trend] || styles['Neutral']}`}>{trend}</span>;
+                                'Under':        'bg-red-500/10 text-red-400 border border-red-500/30',
+                                'Neutral':      'bg-gray-500/10 text-gray-400 border border-gray-500/30',
+                              }
+                              return <span className={`inline-flex px-2 py-1 rounded text-xs font-bold ${styles[trend] || styles['Neutral']}`}>{trend}</span>
                             })()}
                           </td>
                         </tr>
-                      );
+                      )
                     })}
                   </tbody>
                 </table>
               </div>
-              {totalPages > 1 && (
-                <div className="flex justify-between items-center px-4 py-3 border-t border-gray-800 bg-gray-900/30">
-                  <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1 || loading}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded text-sm disabled:opacity-50 transition">
-                    <ChevronLeft className="w-4 h-4" /> Prev
-                  </button>
-                  <span className="text-sm text-gray-400">Page {currentPage} of {totalPages} ({totalPlayers} total)</span>
-                  <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages || loading}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded text-sm disabled:opacity-50 transition">
-                    Next <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
             </div>
           )
         )}
       </div>
     </DashboardLayout>
-  );
+  )
 }
