@@ -2,9 +2,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { useEffect, lazy, Suspense } from "react";
-import { AuthProvider } from "@/hooks/useAuth"; // ✅ FIXED: Correct path to useAuth.tsx
+import { AuthProvider } from "@/hooks/useAuth";
 import { Toaster as Sonner } from "sonner";
 import AppLayout from "@/components/AppLayout";
+import AdminRoute from "@/components/AdminRoute"; // ✅ Added
 
 // ── Lazy load all pages ───────────────────────────────────────────────────────
 const Index          = lazy(() => import("./pages/Index"));
@@ -87,8 +88,15 @@ function App() {
                 <AppLayout><Profile /></AppLayout>
               } />
 
-              {/* ── Admin (no sidebar) ── */}
-              <Route path="/admin" element={<Admin />} />
+              {/* ── Admin (protected with AdminRoute) ── */}
+              <Route
+                path="/admin"
+                element={
+                  <AdminRoute>
+                    <Admin />
+                  </AdminRoute>
+                }
+              />
 
               {/* ── 404 ── */}
               <Route path="*" element={<NotFound />} />
