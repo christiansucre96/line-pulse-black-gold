@@ -97,6 +97,25 @@ export default function Auth() {
     }
   };
 
+  // ✨ NEW: Send Magic Link (no password required)
+  const sendMagicLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email) return toast.error("Enter your email first");
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: window.location.origin,
+      },
+    });
+
+    if (error) {
+      toast.error(error.message);
+    } else {
+      toast.success("✨ Magic link sent! Check your email.");
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-md">
@@ -149,19 +168,25 @@ export default function Auth() {
               onChange={(e) => setPassword(e.target.value)}
               className="w-full px-4 py-3 rounded-lg bg-secondary border border-border"
               placeholder="••••••••"
-              required
-              minLength={6}
+              required={isLogin} // Only required if using password
             />
           </div>
 
           {isLogin && (
-            <div className="text-right">
+            <div className="flex flex-wrap justify-between items-center gap-2">
               <button
                 type="button"
                 onClick={handleForgotPassword}
                 className="text-xs text-primary hover:underline"
               >
                 Forgot password?
+              </button>
+              <button
+                type="button"
+                onClick={sendMagicLink}
+                className="text-xs text-yellow-400 hover:underline"
+              >
+                Send Magic Link
               </button>
             </div>
           )}
