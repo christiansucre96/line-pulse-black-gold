@@ -1,8 +1,10 @@
+// src/pages/Auth.tsx
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
+import { Eye, EyeOff } from "lucide-react";
 
 export default function Auth() {
   const [isLogin, setIsLogin] = useState(true);
@@ -10,14 +12,15 @@ export default function Auth() {
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
 
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  // ✅ Redirect based on admin role
+  // Redirect based on admin role
   useEffect(() => {
     if (!user) return;
-
     if (user.profile?.is_admin || user.profile?.role === "admin") {
       navigate("/admin");
     } else {
@@ -31,18 +34,12 @@ export default function Auth() {
 
     try {
       if (isLogin) {
-        // 🔐 LOGIN – fetch user and profile after signIn
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
 
-        // ✅ Get the fresh user object
         const { data: { user: authUser } } = await supabase.auth.getUser();
         if (!authUser) throw new Error("User not found after login");
 
-        // ✅ Fetch profile
         const { data: profile } = await supabase
           .from("profiles")
           .select("*")
@@ -51,7 +48,6 @@ export default function Auth() {
 
         toast.success("Welcome back!");
 
-        // 🔥 route based on role
         if (profile?.is_admin || profile?.role === "admin") {
           navigate("/admin");
         } else {
@@ -59,7 +55,6 @@ export default function Auth() {
         }
 
       } else {
-        // 🆕 SIGNUP (unchanged)
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
@@ -79,11 +74,7 @@ export default function Auth() {
         if (data.user) {
           const { error: profileError } = await supabase
             .from("profiles")
-            .upsert({
-              id: data.user.id,
-              email: email,
-              display_name: displayName,
-            });
+            .upsert({ id: data.user.id, email, display_name: displayName });
           if (profileError) console.error("Profile error:", profileError.message);
         }
 
@@ -103,18 +94,7 @@ export default function Auth() {
       redirectTo: `${window.location.origin}/reset-password`,
     });
     if (error) toast.error(error.message);
-    else toast.success("Password reset email sent!");
-  };
-
-  const sendMagicLink = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email) return toast.error("Enter your email first");
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: window.location.origin },
-    });
-    if (error) toast.error(error.message);
-    else toast.success("✨ Magic link sent! Check your email.");
+    else toast.success("Password reset email sent! Check your inbox.");
   };
 
   return (
@@ -159,31 +139,42 @@ export default function Auth() {
 
           <div>
             <label className="block text-sm mb-1">Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-3 rounded-lg bg-secondary border border-border"
-              placeholder="••••••••"
-              required={isLogin}
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-4 py-3 pr-12 rounded-lg bg-secondary border border-border"
+                placeholder="••••••••"
+                required={isLogin}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
           </div>
 
           {isLogin && (
             <div className="flex flex-wrap justify-between items-center gap-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="w-4 h-4 rounded border-border accent-yellow-400"
+                />
+                <span className="text-xs text-muted-foreground">Stay logged in</span>
+              </label>
               <button
                 type="button"
                 onClick={handleForgotPassword}
                 className="text-xs text-primary hover:underline"
               >
                 Forgot password?
-              </button>
-              <button
-                type="button"
-                onClick={sendMagicLink}
-                className="text-xs text-yellow-400 hover:underline"
-              >
-                Send Magic Link
               </button>
             </div>
           )}
