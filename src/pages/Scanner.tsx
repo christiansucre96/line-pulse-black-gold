@@ -148,8 +148,23 @@ export default function Scanner() {
     if (urlSport && urlSport !== sport) setSport(urlSport);
   }, [urlSport]);
 
-  // ── Fetch games from games_data for selected sport ────────────────────────
+  // ── UPDATED loadGames: UTC range for ET day, filter future games, auto-select single ──
   const loadGames = async (s: string) => {
+    // Get today in Eastern Time (for display)
+    const todayET = etToday();
+    
+    // Calculate the UTC date range that corresponds to "today ET"
+    // ET is UTC-4 during daylight saving, UTC-5 during standard
+    const nowET = new Date(Date.now() - 4 * 60 * 60 * 1000); // ET offset
+    const startOfDayUTC = new Date(Date.UTC(
+      nowET.getUTCFullYear(),
+      nowET.getUTCMonth(),
+      nowET.getUTCDate(),
+      4 // Add 4 hours to convert ET midnight → UTC
+    ));
+    const endOfDayUTC = new Date(startOfDayUTC);
+    endOfDayUTC.setUTCDate(endOfDayUTC.getUTCDate() + 1);
+
     const { data } = await supabase
       .from('games_data')
       .select(`
@@ -158,20 +173,47 @@ export default function Scanner() {
         away_team:teams!games_data_away_team_id_fkey(abbreviation)
       `)
       .eq('sport', s)
-      .eq('game_date', today)
+      // Filter by start_time range instead of just game_date
+      .gte('start_time', startOfDayUTC.toISOString())
+      .lt('start_time', endOfDayUTC.toISOString())
       .neq('status', 'finished')
-      .order('start_time', { ascending: true })
+      .order('start_time', { ascending: true, nullsFirst: false });
 
-    const options: GameOption[] = (data || []).map((g: any) => {
-      const home = g.home_team?.abbreviation || '?'
-      const away = g.away_team?.abbreviation || '?'
-      const time = g.start_time
-        ? new Date(g.start_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-        : ''
-      return { game_id: g.external_id, label: `${away} vs ${home}`, time }
-    })
-    setGameOptions(options)
-  }
+    const options: GameOption[] = (data || [])
+      .filter((g: any) => {
+        if (!g.start_time) return false;
+        const gameTime = new Date(g.start_time);
+        const now = new Date();
+        // Only show games from now onward (in user's local time)
+        return gameTime >= now;
+      })
+      .map((g: any) => {
+        const home = g.home_team?.abbreviation || '?';
+        const away = g.away_team?.abbreviation || '?';
+        
+        // Convert UTC start_time to Eastern Time for display
+        const gameTime = new Date(g.start_time);
+        const timeStr = gameTime.toLocaleTimeString('en-US', { 
+          hour: 'numeric', 
+          minute: '2-digit',
+          timeZone: 'America/New_York', // Force Eastern Time
+          hour12: true 
+        });
+        
+        return { 
+          game_id: g.external_id, 
+          label: `${away} vs ${home}`, 
+          time: timeStr 
+        };
+      });
+
+    setGameOptions(options);
+    
+    // Auto-select the only game if there's just one (like PHI vs BOS)
+    if (options.length === 1) {
+      setSelectedGame(options[0].game_id);
+    }
+  };
 
   // ── Fetch players from clever-action ──────────────────────────────────────
   const fetchPlayers = async (s: string, gameId: string = 'all') => {
