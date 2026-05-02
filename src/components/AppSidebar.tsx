@@ -15,6 +15,11 @@ export function AppSidebar() {
   const { pathname } = useLocation();
   const { user, isAdmin, signOut } = useAuth();
 
+  const handleSignOut = async () => {
+    await signOut();
+    window.location.href = '/auth';
+  };
+
   return (
     <nav className="fixed left-0 top-0 h-screen w-[72px] bg-card border-r border-border flex flex-col items-center py-4 gap-2 z-50">
       <Link to="/" className="w-11 h-11 rounded-full bg-gradient-gold flex items-center justify-center mb-4 shrink-0">
@@ -62,7 +67,7 @@ export function AppSidebar() {
               <User size={20} />
             </Link>
             <button
-              onClick={signOut}
+              onClick={handleSignOut}
               title="Sign Out"
               className="w-11 h-11 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-destructive/20 hover:text-destructive transition-all"
             >
