@@ -1,16 +1,59 @@
-import { Navigate } from "react-router-dom";
+// src/components/AdminRoute.tsx
+import { useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 
-export default function AdminRoute({ children }: any) {
-  const { user, loading } = useAuth();
+interface AdminRouteProps {
+  children: JSX.Element;
+}
 
-  if (loading) return null;
+export default function AdminRoute({ children }: AdminRouteProps) {
+  const { user } = useAuth();
+  const navigate = useNavigate();
 
-  if (!user) return <Navigate to="/login" />;
+  const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
 
-  if (!user.profile?.is_admin && user.profile?.role !== "admin") {
-    return <Navigate to="/scanner" />;
+  useEffect(() => {
+    const checkAdmin = async () => {
+      if (!user) {
+        navigate("/auth");
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", user.id);
+
+      if (error) {
+        console.error("Admin check error:", error.message);
+        navigate("/scanner");
+        return;
+      }
+
+      const isAdminUser = data?.some((r) => r.role === "admin");
+
+      if (!isAdminUser) {
+        navigate("/scanner");
+      } else {
+        setIsAdmin(true);
+      }
+
+      setLoading(false);
+    };
+
+    checkAdmin();
+  }, [user, navigate]);
+
+  if (loading) {
+    return (
+      <div className="h-screen flex items-center justify-center text-white">
+        Checking permissions...
+      </div>
+    );
   }
 
-  return children;
+  return isAdmin ? children : null;
 }
