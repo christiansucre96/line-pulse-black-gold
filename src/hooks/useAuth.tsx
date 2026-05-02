@@ -43,7 +43,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  // ✅ REPLACED admin check – uses metadata first, then profiles table
+  // ✅ Updated admin check – uses metadata first, then profiles table
   useEffect(() => {
     if (!user) {
       setIsAdmin(false);
@@ -52,22 +52,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const checkAdmin = async () => {
       try {
-        // 1. Check metadata first (fast)
-        const metaAdmin = user.user_metadata?.is_admin === true;
-        if (metaAdmin) {
+        // 1. Quick check: metadata
+        if (user.user_metadata?.is_admin === true) {
           setIsAdmin(true);
           return;
         }
 
-        // 2. Fallback: Check profiles table (where we just set it)
+        // 2. Fallback: Query profiles table (this is where we set is_admin = true)
         const { data, error } = await supabase
           .from('profiles')
           .select('is_admin')
           .eq('id', user.id)
           .single();
 
-        if (!error && data) {
-          setIsAdmin(data.is_admin === true);
+        if (!error && data?.is_admin === true) {
+          setIsAdmin(true);
         } else {
           setIsAdmin(false);
         }
