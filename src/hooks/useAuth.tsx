@@ -10,11 +10,10 @@ interface Profile {
   display_name: string;
   is_admin?: boolean;
   role?: string;
-  // add other profile fields as needed
 }
 
 interface AuthContextType {
-  user: User | null;
+  user: (User & { profile?: Profile }) | null;
   profile: Profile | null;
   session: Session | null;
   loading: boolean;
@@ -32,62 +31,53 @@ const AuthContext = createContext<AuthContextType>({
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<(User & { profile?: Profile }) | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // Fetch profile for a given user ID
-  const fetchProfile = async (userId: string) => {
-    const { data, error } = await supabase
+  // Load user and profile using getUser() + profile fetch
+  const loadUser = async () => {
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+
+    if (!authUser) {
+      setUser(null);
+      setProfile(null);
+      setSession(null);
+      setIsAdmin(false);
+      setLoading(false);
+      return;
+    }
+
+    // Fetch profile from the profiles table
+    const { data: profileData } = await supabase
       .from("profiles")
       .select("*")
-      .eq("id", userId)
+      .eq("id", authUser.id)
       .maybeSingle();
 
-    if (error || !data) {
-      console.warn("Profile not found", error);
-      return null;
-    }
-    return data as Profile;
+    const mergedUser = { ...authUser, profile: profileData };
+    setUser(mergedUser);
+    setProfile(profileData);
+    setIsAdmin(profileData?.is_admin === true || profileData?.role === "admin");
+
+    // Also get current session
+    const { data: { session: currentSession } } = await supabase.auth.getSession();
+    setSession(currentSession);
+
+    setLoading(false);
   };
 
   useEffect(() => {
-    // Listen to auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      
-      if (session?.user) {
-        const profileData = await fetchProfile(session.user.id);
-        setProfile(profileData);
-        // Admin check using profile
-        setIsAdmin(profileData?.is_admin === true || profileData?.role === "admin");
-      } else {
-        setProfile(null);
-        setIsAdmin(false);
-      }
-      setLoading(false);
+    loadUser();
+
+    // Listen for auth changes (sign out, token refresh, etc.)
+    const { data: listener } = supabase.auth.onAuthStateChange(() => {
+      loadUser();
     });
 
-    // Get initial session
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      
-      if (session?.user) {
-        const profileData = await fetchProfile(session.user.id);
-        setProfile(profileData);
-        setIsAdmin(profileData?.is_admin === true || profileData?.role === "admin");
-      } else {
-        setProfile(null);
-        setIsAdmin(false);
-      }
-      setLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
+    return () => listener.subscription.unsubscribe();
   }, []);
 
   const signOut = async () => {
@@ -96,6 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(null);
     setSession(null);
     setIsAdmin(false);
+    setLoading(false);
   };
 
   return (
