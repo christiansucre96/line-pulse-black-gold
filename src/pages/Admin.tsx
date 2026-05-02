@@ -116,48 +116,37 @@ export default function Admin() {
     } catch (err) { console.error("Failed to load stats:", err); }
   };
 
-  // Batch fetch users with emails from auth.users
+  // ✅ UPDATED loadUsers – reads email directly from profiles table
   const loadUsers = async () => {
     setLoadingUsers(true);
     try {
-      const { data: profilesData, error: profilesError } = await supabase
+      const { data: profilesData, error } = await supabase
         .from('profiles')
         .select(`
-          id, created_at, last_login,
+          id, email, created_at, last_login,
           subscription_tier, subscription_start, subscription_end,
           is_active, is_free_trial, trial_reason, revenue_generated
         `)
         .order('created_at', { ascending: false });
-      
-      if (profilesError) throw profilesError;
-      
-      const userIds = profilesData?.map(p => p.id) || [];
-      const { data: authData, error: authError } = await supabase
-        .from('auth.users')
-        .select('id, email')
-        .in('id', userIds);
-      
-      if (authError) throw authError;
-      
-      const usersWithEmail = (profilesData || []).map(profile => {
-        const authUser = authData?.find(u => u.id === profile.id);
-        return {
-          ...profile,
-          email: authUser?.email || 'unknown'
-        };
-      });
-      
+
+      if (error) throw error;
+
+      const usersWithEmail = (profilesData || []).map(profile => ({
+        ...profile,
+        user_id: profile.id,
+      }));
+
       setUsers(usersWithEmail);
-      
+
       const trials = usersWithEmail.filter(u => u.is_free_trial);
       const now = new Date();
-      
+
       setTrialStats({
         totalTrials: trials.length,
-        activeTrials: trials.filter(u => 
+        activeTrials: trials.filter(u =>
           u.is_active && (!u.subscription_end || new Date(u.subscription_end) > now)
         ).length,
-        expiredTrials: trials.filter(u => 
+        expiredTrials: trials.filter(u =>
           u.subscription_end && new Date(u.subscription_end) <= now
         ).length,
         byTier: trials.reduce((acc, u) => {
@@ -193,7 +182,7 @@ export default function Admin() {
     }
   };
 
-  // ✅ REPLACED grantTrial FUNCTION WITH CORRECT SYNTAX
+  // grantTrial (unchanged – uses the new email from profiles)
   const grantTrial = async () => {
     if (!newUserEmail) {
       toast.error("Email is required");
@@ -211,7 +200,6 @@ export default function Admin() {
       
       // 1. Find or Create User
       if (isExistingUser) {
-        // ✅ Fixed: added 'data:' prefix
         const { data: authUsers, error: findError } = await supabase
           .from('auth.users')
           .select('id')
@@ -223,7 +211,6 @@ export default function Admin() {
         userId = authUsers[0].id;
       } else {
         const password = tempPassword || generateTempPassword();
-        // ✅ Fixed: added 'data:' prefix
         const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
           email: newUserEmail.toLowerCase(),
           password,
@@ -237,19 +224,18 @@ export default function Admin() {
         setTempPassword(password);
       }
       
-      // 2. Calculate Dates
       const startDate = new Date();
       const endDate = tier.days 
         ? new Date(startDate.getTime() + tier.days * 24 * 60 * 60 * 1000)
         : null;
       
-      // 3. Update/Create profile (now includes 'email' column – must exist in DB)
+      // Upsert profile – email is required
       const { error: profileError } = await supabase
         .from('profiles')
         .upsert({
           id: userId,
           user_id: userId,
-          email: newUserEmail.toLowerCase(),   // ✅ column must exist in profiles table
+          email: newUserEmail.toLowerCase(),
           subscription_tier: newUserTier,
           subscription_start: startDate.toISOString(),
           subscription_end: endDate?.toISOString(),
@@ -258,13 +244,10 @@ export default function Admin() {
           trial_reason: trialReason || `Influencer trial - ${newUserTier}`,
           trial_granted_by: user?.id,
           updated_at: new Date().toISOString(),
-        }, { 
-          onConflict: 'id'
-        });
+        }, { onConflict: 'id' });
       
       if (profileError) throw new Error(`Profile error: ${profileError.message}`);
       
-      // 4. Update Subscriptions (Safe Delete + Insert)
       await supabase.from('subscriptions').delete().eq('user_id', userId);
       
       const { error: subError } = await supabase
@@ -284,7 +267,6 @@ export default function Admin() {
       
       if (subError) throw new Error(`Subscription error: ${subError.message}`);
       
-      // 5. Record revenue event (optional)
       await supabase.from('revenue_events').insert({
         user_id: userId,
         event_type: 'subscription',
@@ -294,7 +276,6 @@ export default function Admin() {
         is_free_trial: true,
       });
       
-      // 6. Show success
       if (!isExistingUser) {
         toast.success(
           <div>
@@ -415,8 +396,7 @@ export default function Admin() {
 
   if (authLoading) return <div className="p-10 text-center text-yellow-400">Loading...</div>;
   
-  // 🔧 TEMPORARY BYPASS - Safe & Reversible
-  // Grants admin access to your email without database permissions
+  // 🔧 TEMPORARY BYPASS - grants admin to your email
   const forceAdmin = user?.email === 'christiansucre1@gmail.com';
 
   if (!isAdmin && !forceAdmin) {
@@ -689,7 +669,7 @@ export default function Admin() {
                             <div className="text-xs text-gray-600 mt-1">
                               Ref: {tier?.referencePrice.toFixed(2)} USDT
                             </div>
-                          </td>
+                          </tr>
                           <td className="py-3 px-4">
                             {expired ? (
                               <Badge variant="secondary" className="bg-red-500/20 text-red-400">
