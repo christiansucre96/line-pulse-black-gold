@@ -5,9 +5,9 @@ import { useEffect, lazy, Suspense } from "react";
 import { AuthProvider } from "@/hooks/useAuth";
 import { Toaster as Sonner } from "sonner";
 import AppLayout from "@/components/AppLayout";
-import AdminRoute from "@/components/AdminRoute"; // ✅ Added
+import AdminRoute from "@/components/AdminRoute";
 
-// ── Lazy load all pages ───────────────────────────────────────────────────────
+// ── Lazy load pages ─────────────────────────────────────────
 const Index          = lazy(() => import("./pages/Index"));
 const Auth           = lazy(() => import("./pages/Auth"));
 const Scanner        = lazy(() => import("./pages/Scanner"));
@@ -21,6 +21,7 @@ const Leaderboard    = lazy(() => import("./pages/Leaderboard"));
 const Profile        = lazy(() => import("./pages/Profile"));
 const TopPicks       = lazy(() => import("./pages/TopPicks"));
 
+// ── Query config ────────────────────────────────────────────
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -31,7 +32,7 @@ const queryClient = new QueryClient({
   },
 });
 
-// ── Loading spinner ───────────────────────────────────────────────────────────
+// ── Loader ──────────────────────────────────────────────────
 function PageLoader() {
   return (
     <div className="h-screen w-full flex items-center justify-center bg-gray-950">
@@ -40,10 +41,10 @@ function PageLoader() {
         <p className="text-gray-400 text-sm">Loading LinePulse...</p>
       </div>
     </div>
-  )
+  );
 }
 
-// ── App ───────────────────────────────────────────────────────────────────────
+// ── App ─────────────────────────────────────────────────────
 function App() {
   useEffect(() => {
     const hash = window.location.hash;
@@ -55,17 +56,19 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <Sonner position="top-right" richColors closeButton theme="dark" />
+
       <BrowserRouter>
         <AuthProvider>
           <Suspense fallback={<PageLoader />}>
             <Routes>
 
-              {/* ── Public routes (no sidebar) ── */}
-              <Route path="/"               element={<Index />} />
-              <Route path="/auth"           element={<Auth />} />
+              {/* ── Public routes ── */}
+              <Route path="/" element={<Index />} />
+              <Route path="/auth" element={<Auth />} />
+              <Route path="/login" element={<Auth />} /> {/* ✅ FIXED */}
               <Route path="/reset-password" element={<ResetPassword />} />
 
-              {/* ── Protected routes (with sidebar) ── */}
+              {/* ── App routes ── */}
               <Route path="/scanner" element={
                 <AppLayout><Scanner /></AppLayout>
               } />
@@ -88,7 +91,7 @@ function App() {
                 <AppLayout><Profile /></AppLayout>
               } />
 
-              {/* ── Admin (protected with AdminRoute) ── */}
+              {/* ── Admin route (protected) ── */}
               <Route
                 path="/admin"
                 element={
@@ -98,8 +101,8 @@ function App() {
                 }
               />
 
-              {/* ── 404 ── */}
-              <Route path="*" element={<NotFound />} />
+              {/* ── SAFE FALLBACK (FIXES VERCEL 404) ── */}
+              <Route path="*" element={<Index />} />
 
             </Routes>
           </Suspense>
