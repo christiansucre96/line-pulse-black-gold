@@ -25,16 +25,35 @@ export default function Auth() {
 
     try {
       if (isLogin) {
-        // 🔐 LOGIN
-        const { error } = await supabase.auth.signInWithPassword({
+        // 🔐 LOGIN – with profile fetch and admin routing
+        const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
 
         if (error) throw error;
 
+        // ✅ FETCH PROFILE AFTER LOGIN
+        const { data: profile, error: profileError } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", data.user.id)
+          .maybeSingle();
+
+        console.log("PROFILE:", profile);
+
+        if (profileError) {
+          console.error(profileError);
+        }
+
         toast.success("Welcome back!");
-        navigate("/scanner");
+
+        // 🔥 route based on role
+        if (profile?.is_admin || profile?.role === "admin") {
+          navigate("/admin");
+        } else {
+          navigate("/scanner");
+        }
 
       } else {
         // 🆕 SIGNUP
@@ -45,7 +64,7 @@ export default function Auth() {
             data: {
               display_name: displayName,
             },
-            emailRedirectTo: `${window.location.origin}/reset-password`, // ✅ FIXED
+            emailRedirectTo: `${window.location.origin}/reset-password`,
           },
         });
 
@@ -58,12 +77,13 @@ export default function Auth() {
           toast.success("Account created!");
         }
 
-        // 👤 CREATE PROFILE SAFELY
+        // 👤 CREATE PROFILE SAFELY – UPDATED UPSERT
         if (data.user) {
           const { error: profileError } = await supabase
             .from("profiles")
             .upsert({
-              user_id: data.user.id,
+              id: data.user.id,          // ✅ Use id (matches primary key)
+              email: email,              // ✅ Store email in profile
               display_name: displayName,
             });
 
@@ -168,7 +188,7 @@ export default function Auth() {
               onChange={(e) => setPassword(e.target.value)}
               className="w-full px-4 py-3 rounded-lg bg-secondary border border-border"
               placeholder="••••••••"
-              required={isLogin} // Only required if using password
+              required={isLogin}
             />
           </div>
 
