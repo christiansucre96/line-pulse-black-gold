@@ -414,7 +414,14 @@ export default function Admin() {
   };
 
   if (authLoading) return <div className="p-10 text-center text-yellow-400">Loading...</div>;
-  if (!isAdmin) return <Navigate to="/scanner" replace />;
+  
+  // 🔧 TEMPORARY BYPASS - Safe & Reversible
+  // Grants admin access to your email without database permissions
+  const forceAdmin = user?.email === 'christiansucre1@gmail.com';
+
+  if (!isAdmin && !forceAdmin) {
+    return <Navigate to="/scanner" replace />;
+  }
 
   const activeTrials = trialStats.activeTrials;
   const expiredTrials = trialStats.expiredTrials;
