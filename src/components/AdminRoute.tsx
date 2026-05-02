@@ -11,7 +11,6 @@ interface AdminRouteProps {
 export default function AdminRoute({ children }: AdminRouteProps) {
   const { user } = useAuth();
   const navigate = useNavigate();
-
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
 
@@ -22,6 +21,7 @@ export default function AdminRoute({ children }: AdminRouteProps) {
         return;
       }
 
+      // Check user_roles table
       const { data, error } = await supabase
         .from("user_roles")
         .select("role")
@@ -35,7 +35,20 @@ export default function AdminRoute({ children }: AdminRouteProps) {
 
       const isAdminUser = data?.some((r) => r.role === "admin");
 
+      // Also check profiles table as fallback
       if (!isAdminUser) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("is_admin, role")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (profile?.is_admin === true || profile?.role === "admin") {
+          setIsAdmin(true);
+          setLoading(false);
+          return;
+        }
+
         navigate("/scanner");
       } else {
         setIsAdmin(true);
