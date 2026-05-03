@@ -1,7 +1,7 @@
 // src/App.tsx
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { Toaster } from "sonner";
-import { useAuth } from "@/hooks/useAuth"; // ✅ Only import the hook
+import { useAuth } from "@/hooks/useAuth";
 
 // Layouts & Wrappers
 import AppLayout from "@/components/AppLayout";
@@ -30,32 +30,40 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+// ── App Layout Wrapper (Adds Sidebar/Header) ─────────────────────────────
+function AppLayoutWrapper() {
+  return (
+    <AppLayout>
+      <Outlet /> {/* ✅ Renders child routes like /scanner, /admin, /studio */}
+    </AppLayout>
+  );
+}
+
 // ── Main App Component ──────────────────────────────────────────────────
 function AppContent() {
   return (
     <Router>
-      {/* ✅ REMOVED: <AuthProvider> wrapper — not needed if useAuth handles it */}
       <div className="min-h-screen bg-[#060a0f] text-gray-100">
         <Routes>
           {/* ── PUBLIC ROUTES ───────────────────────────────────────── */}
           <Route path="/auth" element={<Auth />} />
-          
-          {/* ── PROTECTED APP ROUTES (AppLayout) ────────────────────── */}
+
+          {/* ── PROTECTED APP ROUTES ────────────────────────────────── */}
           <Route
             path="/"
             element={
               <ProtectedRoute>
-                <AppLayout />
+                <AppLayoutWrapper />
               </ProtectedRoute>
             }
           >
-            {/* Default redirect to Scanner */}
+            {/* Default redirect */}
             <Route index element={<Navigate to="/scanner" replace />} />
             
-            {/* Scanner */}
+            {/* ✅ All app pages as direct children */}
             <Route path="scanner" element={<Scanner />} />
             
-            {/* Admin Routes (Wrapped in AdminRoute) */}
+            {/* Admin-only routes */}
             <Route
               path="admin"
               element={
@@ -65,7 +73,7 @@ function AppContent() {
               }
             />
             
-            {/* ✅ Data Studio Route (Admin Only) */}
+            {/* ✅ FIX: Data Studio as direct child (not nested weirdly) */}
             <Route
               path="studio"
               element={
@@ -94,7 +102,6 @@ function AppContent() {
           }}
         />
       </div>
-      {/* ✅ REMOVED: </AuthProvider> */}
     </Router>
   );
 }
