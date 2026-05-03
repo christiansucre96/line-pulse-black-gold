@@ -5,7 +5,7 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { PlayerDetailView } from "@/components/PlayerDetailView";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, RefreshCw, Calendar, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, RefreshCw, Calendar } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -15,8 +15,29 @@ const supabase = createClient(
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
+// Get today's date in Eastern Time
 function etToday(): string {
-  return new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const now = new Date();
+  const etOffset = -4 * 60 * 60 * 1000; // EDT (Eastern Daylight Time)
+  const etNow = new Date(now.getTime() + etOffset);
+  return etNow.toISOString().split('T')[0];
+}
+
+// Convert UTC time to Eastern Time display
+function formatTimeET(utcTime: string): string {
+  if (!utcTime) return '';
+  const date = new Date(utcTime);
+  if (isNaN(date.getTime())) return '';
+  
+  // Convert to Eastern Time
+  const etString = date.toLocaleString('en-US', { 
+    timeZone: 'America/New_York',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true 
+  });
+  
+  return etString;
 }
 
 function HRBox({ value }: { value: number | null }) {
@@ -148,23 +169,11 @@ export default function Scanner() {
     if (urlSport && urlSport !== sport) setSport(urlSport);
   }, [urlSport]);
 
-  // ── UPDATED loadGames: UTC range for ET day, filter future games, auto-select single ──
+  // ── Fetch games from games_data for selected sport ────────────────────────
   const loadGames = async (s: string) => {
-    // Get today in Eastern Time (for display)
+    const now = new Date();
     const todayET = etToday();
     
-    // Calculate the UTC date range that corresponds to "today ET"
-    // ET is UTC-4 during daylight saving, UTC-5 during standard
-    const nowET = new Date(Date.now() - 4 * 60 * 60 * 1000); // ET offset
-    const startOfDayUTC = new Date(Date.UTC(
-      nowET.getUTCFullYear(),
-      nowET.getUTCMonth(),
-      nowET.getUTCDate(),
-      4 // Add 4 hours to convert ET midnight → UTC
-    ));
-    const endOfDayUTC = new Date(startOfDayUTC);
-    endOfDayUTC.setUTCDate(endOfDayUTC.getUTCDate() + 1);
-
     const { data } = await supabase
       .from('games_data')
       .select(`
@@ -173,32 +182,25 @@ export default function Scanner() {
         away_team:teams!games_data_away_team_id_fkey(abbreviation)
       `)
       .eq('sport', s)
-      // Filter by start_time range instead of just game_date
-      .gte('start_time', startOfDayUTC.toISOString())
-      .lt('start_time', endOfDayUTC.toISOString())
+      .eq('game_date', todayET)
       .neq('status', 'finished')
       .order('start_time', { ascending: true, nullsFirst: false });
 
     const options: GameOption[] = (data || [])
       .filter((g: any) => {
         if (!g.start_time) return false;
+        
         const gameTime = new Date(g.start_time);
-        const now = new Date();
-        // Only show games from now onward (in user's local time)
-        return gameTime >= now;
+        
+        // Only show games that haven't started yet (with 30 min buffer)
+        return gameTime > new Date(now.getTime() - 30 * 60 * 1000);
       })
       .map((g: any) => {
         const home = g.home_team?.abbreviation || '?';
         const away = g.away_team?.abbreviation || '?';
         
-        // Convert UTC start_time to Eastern Time for display
-        const gameTime = new Date(g.start_time);
-        const timeStr = gameTime.toLocaleTimeString('en-US', { 
-          hour: 'numeric', 
-          minute: '2-digit',
-          timeZone: 'America/New_York', // Force Eastern Time
-          hour12: true 
-        });
+        // Convert UTC to Eastern Time for display
+        const timeStr = formatTimeET(g.start_time);
         
         return { 
           game_id: g.external_id, 
@@ -209,7 +211,7 @@ export default function Scanner() {
 
     setGameOptions(options);
     
-    // Auto-select the only game if there's just one (like PHI vs BOS)
+    // Auto-select first game if only one exists
     if (options.length === 1) {
       setSelectedGame(options[0].game_id);
     }
@@ -219,8 +221,8 @@ export default function Scanner() {
   const fetchPlayers = async (s: string, gameId: string = 'all') => {
     setLoading(true); setError(null);
     try {
-      const body: any = { operation: "get_players", sport: s }
-      if (gameId !== 'all') body.game_id = gameId
+      const body: any = { operation: "get_players", sport: s };
+      if (gameId !== 'all') body.game_id = gameId;
 
       const res = await fetch(EDGE_URL, {
         method: "POST",
@@ -229,10 +231,10 @@ export default function Scanner() {
           "Authorization": `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
         },
         body: JSON.stringify(body),
-      })
+      });
 
-      const d = await res.json()
-      if (!d.success) throw new Error(d.error || 'Failed to load players')
+      const d = await res.json();
+      if (!d.success) throw new Error(d.error || 'Failed to load players');
 
       const mapped: ScannerPlayer[] = (d.players || []).map((p: any) => ({
         player_id: p.player_id,
@@ -244,55 +246,55 @@ export default function Scanner() {
         game_time: p.game_time || '',
         all_props: p.all_props || {},
         is_starter: p.is_starter || false,
-      }))
+      }));
 
-      setPlayers(mapped)
-      setLastRefresh(new Date().toLocaleTimeString())
-      console.log(`✅ ${mapped.length} players ready`)
+      setPlayers(mapped);
+      setLastRefresh(new Date().toLocaleTimeString());
+      console.log(`✅ ${mapped.length} players ready`);
     } catch (e: any) {
-      console.error('❌', e)
-      setError(e.message)
+      console.error('❌', e);
+      setError(e.message);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   useEffect(() => {
     if (!playerId) {
-      const defaultProp = DEFAULT_PROP[sport] || 'points'
-      setFilterProp(defaultProp)
-      setSelectedGame('all')
-      loadGames(sport)
-      fetchPlayers(sport, 'all')
+      const defaultProp = DEFAULT_PROP[sport] || 'points';
+      setFilterProp(defaultProp);
+      setSelectedGame('all');
+      loadGames(sport);
+      fetchPlayers(sport, 'all');
     }
-  }, [sport])
+  }, [sport]);
 
-  const handleSportChange = (s: string) => setSport(s)
-  const handleGameChange  = (g: string) => { setSelectedGame(g); fetchPlayers(sport, g) }
+  const handleSportChange = (s: string) => setSport(s);
+  const handleGameChange  = (g: string) => { setSelectedGame(g); fetchPlayers(sport, g); };
   const handleSort = (key: string) => {
-    if (sortKey === key) setSortDir(d => d === 1 ? -1 : 1)
-    else { setSortKey(key); setSortDir(-1) }
-  }
+    if (sortKey === key) setSortDir(d => d === 1 ? -1 : 1);
+    else { setSortKey(key); setSortDir(-1); }
+  };
 
   const displayPlayers = useMemo(() => {
-    let list = [...players]
+    let list = [...players];
 
-    if (filterProp !== "all") list = list.filter(p => p.all_props?.[filterProp])
+    if (filterProp !== "all") list = list.filter(p => p.all_props?.[filterProp]);
 
     if (search.trim()) {
-      const q = search.toLowerCase()
+      const q = search.toLowerCase();
       list = list.filter(p =>
         (p.name || "").toLowerCase().includes(q) ||
         (p.team_abbr || "").toLowerCase().includes(q) ||
         (p.opponent || "").toLowerCase().includes(q)
-      )
+      );
     }
 
     list.sort((a, b) => {
-      if (sortKey === "name") return sortDir * (a.name || '').localeCompare(b.name || '')
+      if (sortKey === "name") return sortDir * (a.name || '').localeCompare(b.name || '');
       const getV = (p: ScannerPlayer) => {
-        const pd = p.all_props?.[filterProp]
-        if (!pd) return -Infinity
+        const pd = p.all_props?.[filterProp];
+        if (!pd) return -Infinity;
         return sortKey === "line" ? pd.line ?? 0
           : sortKey === "avg"  ? pd.avg_l10 ?? 0
           : sortKey === "l5"   ? pd.l5 ?? 0
@@ -300,24 +302,24 @@ export default function Scanner() {
           : sortKey === "l15"  ? pd.l15 ?? 0
           : sortKey === "l20"  ? pd.l20 ?? 0
           : sortKey === "diff" ? (pd.avg_l10 ?? 0) - (pd.line ?? 0)
-          : 0
-      }
-      return sortDir * (getV(a) - getV(b))
-    })
+          : 0;
+      };
+      return sortDir * (getV(a) - getV(b));
+    });
 
-    return list
-  }, [players, filterProp, search, sortKey, sortDir])
+    return list;
+  }, [players, filterProp, search, sortKey, sortDir]);
 
   const SortTh = ({ label, sk }: { label: string; sk: string }) => (
     <th onClick={() => handleSort(sk)}
       className="p-3 text-left text-[11px] font-semibold text-yellow-400/70 uppercase tracking-wider cursor-pointer select-none hover:text-yellow-400 whitespace-nowrap">
       {label} {sortKey === sk ? (sortDir === -1 ? "↓" : "↑") : ""}
     </th>
-  )
+  );
 
-  if (playerId) return <PlayerDetailView playerId={playerId} sport={sport} onBack={() => navigate("/scanner")} />
+  if (playerId) return <PlayerDetailView playerId={playerId} sport={sport} onBack={() => navigate("/scanner")} />;
 
-  const currentProps = SPORT_PROPS[sport] || SPORT_PROPS.nba
+  const currentProps = SPORT_PROPS[sport] || SPORT_PROPS.nba;
 
   return (
     <DashboardLayout>
@@ -436,11 +438,12 @@ export default function Scanner() {
                   </thead>
                   <tbody>
                     {displayPlayers.map((p, i) => {
-                      const pd = p.all_props?.[filterProp] || p.all_props?.[Object.keys(p.all_props || {})[0]]
-                      const diff = pd ? ((pd.avg_l10 ?? 0) - (pd.line ?? 0)) : 0
-                      const gameTime = p.game_time
-                        ? new Date(p.game_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-                        : p.game_date || ''
+                      const pd = p.all_props?.[filterProp] || p.all_props?.[Object.keys(p.all_props || {})[0]];
+                      const diff = pd ? ((pd.avg_l10 ?? 0) - (pd.line ?? 0)) : 0;
+                      
+                      // Format game time properly
+                      const gameTime = p.game_time ? formatTimeET(p.game_time) : (p.game_date || '');
+                      
                       return (
                         <tr key={`${p.player_id}-${i}`}
                           onClick={() => navigate(`/scanner?playerId=${p.player_id}&sport=${sport}`)}
@@ -486,33 +489,33 @@ export default function Scanner() {
                           <td className="p-3">
                             {(() => {
                               if (marketLine && pd?.avg_l10) {
-                                const edge = pd.avg_l10 - marketLine
-                                const pct  = marketLine > 0 ? (edge / marketLine) * 100 : 0
-                                let sig = "Neutral", cls = "bg-gray-500/10 text-gray-400 border border-gray-500/30"
-                                if (pct >= 10)       { sig = "🟢 STRONG OVER";  cls = "bg-green-500/30 text-green-300 border border-green-500/50" }
-                                else if (pct >= 3)   { sig = "🟡 Over";         cls = "bg-green-500/15 text-green-400 border border-green-500/30" }
-                                else if (pct <= -10) { sig = "🔴 STRONG UNDER"; cls = "bg-red-500/30 text-red-300 border border-red-500/50" }
-                                else if (pct <= -3)  { sig = "🟠 Under";        cls = "bg-red-500/15 text-red-400 border border-red-500/30" }
+                                const edge = pd.avg_l10 - marketLine;
+                                const pct  = marketLine > 0 ? (edge / marketLine) * 100 : 0;
+                                let sig = "Neutral", cls = "bg-gray-500/10 text-gray-400 border border-gray-500/30";
+                                if (pct >= 10)       { sig = "🟢 STRONG OVER";  cls = "bg-green-500/30 text-green-300 border border-green-500/50"; }
+                                else if (pct >= 3)   { sig = "🟡 Over";         cls = "bg-green-500/15 text-green-400 border border-green-500/30"; }
+                                else if (pct <= -10) { sig = "🔴 STRONG UNDER"; cls = "bg-red-500/30 text-red-300 border border-red-500/50"; }
+                                else if (pct <= -3)  { sig = "🟠 Under";        cls = "bg-red-500/15 text-red-400 border border-red-500/30"; }
                                 return (
                                   <div className="flex flex-col gap-1">
                                     <span className={`inline-flex px-2 py-1 rounded text-xs font-bold ${cls}`}>{sig}</span>
                                     <span className="text-[10px] text-gray-500">Edge: {edge > 0 ? "+" : ""}{edge.toFixed(1)}</span>
                                   </div>
-                                )
+                                );
                               }
-                              const trend = pd?.trend || 'Neutral'
+                              const trend = pd?.trend || 'Neutral';
                               const styles: Record<string, string> = {
                                 'Strong Over':  'bg-green-500/30 text-green-300 border border-green-500/50',
                                 'Over':         'bg-green-500/10 text-green-400 border border-green-500/30',
                                 'Strong Under': 'bg-red-500/30 text-red-300 border border-red-500/50',
                                 'Under':        'bg-red-500/10 text-red-400 border border-red-500/30',
                                 'Neutral':      'bg-gray-500/10 text-gray-400 border border-gray-500/30',
-                              }
-                              return <span className={`inline-flex px-2 py-1 rounded text-xs font-bold ${styles[trend] || styles['Neutral']}`}>{trend}</span>
+                              };
+                              return <span className={`inline-flex px-2 py-1 rounded text-xs font-bold ${styles[trend] || styles['Neutral']}`}>{trend}</span>;
                             })()}
                           </td>
                         </tr>
-                      )
+                      );
                     })}
                   </tbody>
                 </table>
@@ -522,5 +525,5 @@ export default function Scanner() {
         )}
       </div>
     </DashboardLayout>
-  )
+  );
 }
