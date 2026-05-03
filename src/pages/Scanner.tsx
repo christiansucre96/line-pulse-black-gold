@@ -27,7 +27,7 @@ function etToday(): string {
 function formatTimeET(utcTime: string): string {
   if (!utcTime) return '';
   const date = new Date(utcTime);
-  if (isNaN(date.getTime())) return ''; // Return empty for invalid dates
+  if (isNaN(date.getTime())) return ''; // Prevents "12:00 AM" for invalid dates
   
   return date.toLocaleString('en-US', { 
     timeZone: 'America/New_York',
@@ -42,6 +42,10 @@ function HRBox({ value }: { value: number | null }) {
     return <div className="w-9 h-6 rounded bg-gray-800 text-gray-600 text-[10px] font-bold flex items-center justify-center">—</div>;
   const bg = value >= 80 ? "bg-green-500 text-white" : value >= 60 ? "bg-yellow-500 text-black" : "bg-red-500 text-white";
   return <div className={`w-9 h-6 rounded text-[10px] font-bold flex items-center justify-center ${bg}`}>{value}%</div>;
+}
+
+function getInitials(name: string) {
+  return (name || "??").split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
 }
 
 // ── Config ───────────────────────────────────────────────────────────────────
@@ -120,10 +124,6 @@ const DEFAULT_PROP: Record<string, string> = {
   nba: "points", nfl: "passing_yards", mlb: "hits", nhl: "goals", soccer: "goals",
 };
 
-function getInitials(name: string) {
-  return (name || "??").split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
-}
-
 // ── Types ────────────────────────────────────────────────────────────────────
 interface GameOption {
   game_id: string;
@@ -158,7 +158,7 @@ export default function Scanner() {
   const [sortKey, setSortKey]         = useState("l10");
   const [sortDir, setSortDir]         = useState<1 | -1>(-1);
   const [gameOptions, setGameOptions] = useState<GameOption[]>([]);
-  const [selectedGame, setSelectedGame] = useState("all");
+  const [selectedGame, setSelectedGame] = useState("__loading__"); // Prevents initial "all" fetch
   const [marketLine, setMarketLine]   = useState<number | null>(null);
 
   const playerId = searchParams.get("playerId");
@@ -204,19 +204,23 @@ export default function Scanner() {
       });
 
     setGameOptions(options);
-    if (options.length === 1) setSelectedGame(options[0].game_id);
+    
+    // ✅ AUTO-SELECT FIRST GAME if available, otherwise fallback to 'all'
+    if (options.length > 0) {
+      setSelectedGame(options[0].game_id);
+    } else {
+      setSelectedGame('all');
+    }
   };
 
   // ── Fetch Players ──────────────────────────────────────────────────────────
-  const fetchPlayers = async (s: string, gameId: string = 'all') => {
+  const fetchPlayers = async (s: string, gameId: string) => {
     setLoading(true); 
     setError(null);
     
-    console.log(`🔍 Fetching players: sport=${s}, game_id=${gameId}`);
-
     try {
       const body: any = { operation: "get_players", sport: s };
-      // CRITICAL FIX: Only pass game_id if it's not 'all'
+      // Only filter by game_id if a specific game is selected
       if (gameId && gameId !== 'all') body.game_id = gameId;
 
       const res = await fetch(EDGE_URL, {
@@ -245,7 +249,6 @@ export default function Scanner() {
 
       setPlayers(mapped);
       setLastRefresh(new Date().toLocaleTimeString());
-      console.log(`✅ Loaded ${mapped.length} players`);
     } catch (e: any) {
       console.error('❌ Fetch error:', e);
       setError(e.message);
@@ -254,32 +257,26 @@ export default function Scanner() {
     }
   };
 
-  // ── Effects ────────────────────────────────────────────────────────────────
-  // 1. Initial load & sport changes
+  // ── Effects ───────────────────────────────────────────────────────────────
+  // 1. Sport change: reset prop, load games, set loading state for games
   useEffect(() => {
     if (!playerId) {
       setFilterProp(DEFAULT_PROP[sport] || 'points');
-      setSelectedGame('all'); // Reset to all when sport changes
+      setSelectedGame('__loading__');
       loadGames(sport);
-      fetchPlayers(sport, 'all');
     }
   }, [sport]);
 
-  // 2. Handle game selection changes
+  // 2. Game selection change: fetch players for the selected game
   useEffect(() => {
-    if (!playerId && sport && selectedGame) {
+    if (selectedGame && selectedGame !== '__loading__') {
       fetchPlayers(sport, selectedGame);
     }
   }, [selectedGame]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
   const handleSportChange = (s: string) => setSport(s);
-  
-  const handleGameChange = (g: string) => {
-    setSelectedGame(g);
-    // fetchPlayers is triggered by the useEffect on selectedGame
-  };
-
+  const handleGameChange  = (g: string) => setSelectedGame(g);
   const handleSort = (key: string) => {
     if (sortKey === key) setSortDir(d => d === 1 ? -1 : 1);
     else { setSortKey(key); setSortDir(-1); }
@@ -365,7 +362,7 @@ export default function Scanner() {
 
           <Select value={selectedGame} onValueChange={handleGameChange}>
             <SelectTrigger className="w-72 bg-gray-900 border-gray-700 text-gray-300 text-sm">
-              <SelectValue placeholder="All Games (Today only)" />
+              <SelectValue placeholder="Loading games..." />
             </SelectTrigger>
             <SelectContent className="bg-gray-900 border-gray-700 max-h-64 overflow-y-auto">
               <SelectItem value="all">All Games (Today only)</SelectItem>
