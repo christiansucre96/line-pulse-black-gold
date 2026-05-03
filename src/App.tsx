@@ -1,115 +1,108 @@
 // src/App.tsx
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
-import { useEffect, lazy, Suspense } from "react";
-import { AuthProvider } from "@/hooks/useAuth";
-import { Toaster as Sonner } from "sonner";
+import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+import { Toaster } from "sonner";
+import { AuthProvider } from "@/contexts/AuthContext";
+import { useAuth } from "@/hooks/useAuth";
+
+// Layouts & Wrappers
 import AppLayout from "@/components/AppLayout";
 import AdminRoute from "@/components/AdminRoute";
 
-// ── Lazy load pages ─────────────────────────────────────────
-const Index          = lazy(() => import("./pages/Index"));
-const Auth           = lazy(() => import("./pages/Auth"));
-const Scanner        = lazy(() => import("./pages/Scanner"));
-const ResetPassword  = lazy(() => import("./pages/ResetPassword"));
-const NotFound       = lazy(() => import("./pages/NotFound"));
-const Admin          = lazy(() => import("./pages/Admin"));
-const Injuries       = lazy(() => import("./pages/Injuries"));
-const Roster         = lazy(() => import("./pages/Roster"));
-const ParlayBuilder  = lazy(() => import("./pages/ParlayBuilder"));
-const Leaderboard    = lazy(() => import("./pages/Leaderboard"));
-const Profile        = lazy(() => import("./pages/Profile"));
-const TopPicks       = lazy(() => import("./pages/TopPicks"));
+// Pages
+import Auth from "@/pages/Auth";
+import Scanner from "@/pages/Scanner";
+import Admin from "@/pages/Admin";
+import DataStudio from "@/pages/DataStudio"; // ✅ Import DataStudio
+import NotFound from "@/pages/NotFound";
 
-// ── Query config ────────────────────────────────────────────
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 1000 * 60 * 5,
-      retry: 1,
-      refetchOnWindowFocus: false,
-    },
-  },
-});
+// ── Protected Route Wrapper (Login Required) ──────────────────────────────
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
 
-// ── Loader ──────────────────────────────────────────────────
-function PageLoader() {
-  return (
-    <div className="h-screen w-full flex items-center justify-center bg-gray-950">
-      <div className="flex flex-col items-center gap-4">
-        <div className="w-10 h-10 border-4 border-yellow-400 border-t-transparent rounded-full animate-spin" />
-        <p className="text-gray-400 text-sm">Loading LinePulse...</p>
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#060a0f]">
+        <div className="w-8 h-8 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" />
       </div>
-    </div>
-  );
+    );
+  }
+
+  if (!user) return <Navigate to="/auth" replace />;
+  return <>{children}</>;
 }
 
-// ── App ─────────────────────────────────────────────────────
-function App() {
-  useEffect(() => {
-    const hash = window.location.hash;
-    if (hash.includes("access_token") && hash.includes("type=recovery")) {
-      window.location.href = "/reset-password" + hash;
-    }
-  }, []);
-
+// ── Main App Component ──────────────────────────────────────────────────
+function AppContent() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <Sonner position="top-right" richColors closeButton theme="dark" />
+    <Router>
+      <AuthProvider>
+        <div className="min-h-screen bg-[#060a0f] text-gray-100">
+          <Routes>
+            {/* ── PUBLIC ROUTES ───────────────────────────────────────── */}
+            <Route path="/auth" element={<Auth />} />
+            
+            {/* Add your public landing page here if it exists */}
+            {/* <Route path="/" element={<LandingPage />} /> */}
 
-      <BrowserRouter>
-        <AuthProvider>
-          <Suspense fallback={<PageLoader />}>
-            <Routes>
-
-              {/* ── Public routes ── */}
-              <Route path="/" element={<Index />} />
-              <Route path="/auth" element={<Auth />} />
-              <Route path="/login" element={<Auth />} /> {/* ✅ FIXED */}
-              <Route path="/reset-password" element={<ResetPassword />} />
-
-              {/* ── App routes ── */}
-              <Route path="/scanner" element={
-                <AppLayout><Scanner /></AppLayout>
-              } />
-              <Route path="/parlay" element={
-                <AppLayout><ParlayBuilder /></AppLayout>
-              } />
-              <Route path="/leaderboard" element={
-                <AppLayout><Leaderboard /></AppLayout>
-              } />
-              <Route path="/top-picks" element={
-                <AppLayout><TopPicks /></AppLayout>
-              } />
-              <Route path="/roster" element={
-                <AppLayout><Roster /></AppLayout>
-              } />
-              <Route path="/injuries" element={
-                <AppLayout><Injuries /></AppLayout>
-              } />
-              <Route path="/profile" element={
-                <AppLayout><Profile /></AppLayout>
-              } />
-
-              {/* ── Admin route (protected) ── */}
+            {/* ── PROTECTED APP ROUTES (AppLayout) ────────────────────── */}
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <AppLayout />
+                </ProtectedRoute>
+              }
+            >
+              {/* Default redirect to Scanner */}
+              <Route index element={<Navigate to="/scanner" replace />} />
+              
+              {/* Scanner */}
+              <Route path="scanner" element={<Scanner />} />
+              
+              {/* Admin Routes (Wrapped in AdminRoute) */}
               <Route
-                path="/admin"
+                path="admin"
                 element={
                   <AdminRoute>
                     <Admin />
                   </AdminRoute>
                 }
               />
+              
+              {/* ✅ FIX: Data Studio Route (Admin Only) */}
+              <Route
+                path="studio"
+                element={
+                  <AdminRoute>
+                    <DataStudio />
+                  </AdminRoute>
+                }
+              />
+            </Route>
 
-              {/* ── SAFE FALLBACK (FIXES VERCEL 404) ── */}
-              <Route path="*" element={<Index />} />
+            {/* Catch-all 404 */}
+            <Route path="*" element={<NotFound />} />
+          </Routes>
 
-            </Routes>
-          </Suspense>
-        </AuthProvider>
-      </BrowserRouter>
-    </QueryClientProvider>
+          {/* Global Toast Notifications */}
+          <Toaster
+            position="top-right"
+            richColors
+            theme="dark"
+            toastOptions={{
+              style: {
+                background: "#0b1120",
+                border: "1px solid #1e293b",
+                color: "#e2e8f0",
+              },
+            }}
+          />
+        </div>
+      </AuthProvider>
+    </Router>
   );
 }
 
-export default App;
+export default function App() {
+  return <AppContent />;
+}
