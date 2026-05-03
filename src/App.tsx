@@ -7,26 +7,34 @@ import { useAuth } from "@/hooks/useAuth";
 import AppLayout from "@/components/AppLayout";
 import AdminRoute from "@/components/AdminRoute";
 
-// ✅ ONLY import pages that actually exist in your project:
+// ✅ Your Pages
+import Auth from "@/pages/Auth";
 import Scanner from "@/pages/Scanner";
 import Admin from "@/pages/Admin";
 import DataStudio from "@/pages/DataStudio";
-// import Auth from "@/pages/Auth"; // ← Remove if you don't have this file
-import NotFound from "@/pages/NotFound";
 
-// ── Protected Route Wrapper ──────────────────────────────
+// ── Loading Spinner ────────────────────────────────────
+function LoadingScreen() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-[#060a0f]">
+      <div className="w-8 h-8 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+}
+
+// ── Public Route: Redirects authenticated users to /scanner ─
+function PublicRoute({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
+  if (loading) return <LoadingScreen />;
+  if (user) return <Navigate to="/scanner" replace />;
+  return <>{children}</>;
+}
+
+// ── Protected Route: Redirects unauthenticated users to /auth ─
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#060a0f]">
-        <div className="w-8 h-8 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
-
-  if (!user) return <Navigate to="/" replace />; // Redirect to home if not logged in
+  if (loading) return <LoadingScreen />;
+  if (!user) return <Navigate to="/auth" replace />;
   return <>{children}</>;
 }
 
@@ -45,14 +53,10 @@ function AppContent() {
     <Router>
       <div className="min-h-screen bg-[#060a0f] text-gray-100">
         <Routes>
-          {/* ── PUBLIC ROUTES ───────────────────────── */}
-          {/* If you have a login page, uncomment and adjust path: */}
-          {/* <Route path="/login" element={<Auth />} /> */}
-          
-          {/* Default home redirect */}
-          <Route path="/" element={<Navigate to="/scanner" replace />} />
+          {/* 🔓 PUBLIC ROUTE: Login/Signup */}
+          <Route path="/auth" element={<PublicRoute><Auth /></PublicRoute>} />
 
-          {/* ── PROTECTED APP ROUTES ────────────────── */}
+          {/* 🔐 PROTECTED ROUTES: Requires Login */}
           <Route
             path="/"
             element={
@@ -61,9 +65,13 @@ function AppContent() {
               </ProtectedRoute>
             }
           >
-            {/* ✅ Only routes that exist in your project: */}
+            {/* Default: go to scanner */}
+            <Route index element={<Navigate to="/scanner" replace />} />
+            
+            {/* Main App Pages */}
             <Route path="scanner" element={<Scanner />} />
             
+            {/* Admin-Only Pages */}
             <Route
               path="admin"
               element={
@@ -83,8 +91,8 @@ function AppContent() {
             />
           </Route>
 
-          {/* Catch-all 404 */}
-          <Route path="*" element={<NotFound />} />
+          {/* Catch-all: unknown URLs go to auth */}
+          <Route path="*" element={<Navigate to="/auth" replace />} />
         </Routes>
 
         {/* Global Toast Notifications */}
