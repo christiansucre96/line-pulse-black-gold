@@ -1,8 +1,7 @@
 // src/App.tsx
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
-import { AuthProvider } from "@/contexts/AuthContext";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth } from "@/hooks/useAuth"; // ✅ Only import the hook
 
 // Layouts & Wrappers
 import AppLayout from "@/components/AppLayout";
@@ -12,7 +11,7 @@ import AdminRoute from "@/components/AdminRoute";
 import Auth from "@/pages/Auth";
 import Scanner from "@/pages/Scanner";
 import Admin from "@/pages/Admin";
-import DataStudio from "@/pages/DataStudio"; // ✅ Import DataStudio
+import DataStudio from "@/pages/DataStudio";
 import NotFound from "@/pages/NotFound";
 
 // ── Protected Route Wrapper (Login Required) ──────────────────────────────
@@ -35,70 +34,67 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function AppContent() {
   return (
     <Router>
-      <AuthProvider>
-        <div className="min-h-screen bg-[#060a0f] text-gray-100">
-          <Routes>
-            {/* ── PUBLIC ROUTES ───────────────────────────────────────── */}
-            <Route path="/auth" element={<Auth />} />
+      {/* ✅ REMOVED: <AuthProvider> wrapper — not needed if useAuth handles it */}
+      <div className="min-h-screen bg-[#060a0f] text-gray-100">
+        <Routes>
+          {/* ── PUBLIC ROUTES ───────────────────────────────────────── */}
+          <Route path="/auth" element={<Auth />} />
+          
+          {/* ── PROTECTED APP ROUTES (AppLayout) ────────────────────── */}
+          <Route
+            path="/"
+            element={
+              <ProtectedRoute>
+                <AppLayout />
+              </ProtectedRoute>
+            }
+          >
+            {/* Default redirect to Scanner */}
+            <Route index element={<Navigate to="/scanner" replace />} />
             
-            {/* Add your public landing page here if it exists */}
-            {/* <Route path="/" element={<LandingPage />} /> */}
-
-            {/* ── PROTECTED APP ROUTES (AppLayout) ────────────────────── */}
+            {/* Scanner */}
+            <Route path="scanner" element={<Scanner />} />
+            
+            {/* Admin Routes (Wrapped in AdminRoute) */}
             <Route
-              path="/"
+              path="admin"
               element={
-                <ProtectedRoute>
-                  <AppLayout />
-                </ProtectedRoute>
+                <AdminRoute>
+                  <Admin />
+                </AdminRoute>
               }
-            >
-              {/* Default redirect to Scanner */}
-              <Route index element={<Navigate to="/scanner" replace />} />
-              
-              {/* Scanner */}
-              <Route path="scanner" element={<Scanner />} />
-              
-              {/* Admin Routes (Wrapped in AdminRoute) */}
-              <Route
-                path="admin"
-                element={
-                  <AdminRoute>
-                    <Admin />
-                  </AdminRoute>
-                }
-              />
-              
-              {/* ✅ FIX: Data Studio Route (Admin Only) */}
-              <Route
-                path="studio"
-                element={
-                  <AdminRoute>
-                    <DataStudio />
-                  </AdminRoute>
-                }
-              />
-            </Route>
+            />
+            
+            {/* ✅ Data Studio Route (Admin Only) */}
+            <Route
+              path="studio"
+              element={
+                <AdminRoute>
+                  <DataStudio />
+                </AdminRoute>
+              }
+            />
+          </Route>
 
-            {/* Catch-all 404 */}
-            <Route path="*" element={<NotFound />} />
-          </Routes>
+          {/* Catch-all 404 */}
+          <Route path="*" element={<NotFound />} />
+        </Routes>
 
-          {/* Global Toast Notifications */}
-          <Toaster
-            position="top-right"
-            richColors
-            theme="dark"
-            toastOptions={{
-              style: {
-                background: "#0b1120",
-                border: "1px solid #1e293b",
-                color: "#e2e8f0",
-              },
-            }}
-          />
-        </div>
-      </AuthProvider>
+        {/* Global Toast Notifications */}
+        <Toaster
+          position="top-right"
+          richColors
+          theme="dark"
+          toastOptions={{
+            style: {
+              background: "#0b1120",
+              border: "1px solid #1e293b",
+              color: "#e2e8f0",
+            },
+          }}
+        />
+      </div>
+      {/* ✅ REMOVED: </AuthProvider> */}
     </Router>
   );
 }
