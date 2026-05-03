@@ -1,5 +1,6 @@
 // src/App.tsx
 import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from "react-router-dom";
+import { lazy, Suspense } from "react";
 import { Toaster } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -12,6 +13,9 @@ import Auth from "@/pages/Auth";
 import Scanner from "@/pages/Scanner";
 import Admin from "@/pages/Admin";
 import DataStudio from "@/pages/DataStudio";
+
+// ✅ Lazy‑loaded Horse Racing page
+const HorseRacing = lazy(() => import("@/pages/HorseRacing"));
 
 // ── Loading Spinner ────────────────────────────────────
 function LoadingScreen() {
@@ -70,6 +74,16 @@ function AppContent() {
             
             {/* Main App Pages */}
             <Route path="scanner" element={<Scanner />} />
+            
+            {/* 🐎 Horse Racing Page (lazy loaded) */}
+            <Route
+              path="horse-racing"
+              element={
+                <Suspense fallback={<LoadingScreen />}>
+                  <HorseRacing />
+                </Suspense>
+              }
+            />
             
             {/* Admin-Only Pages */}
             <Route
