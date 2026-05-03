@@ -275,27 +275,56 @@ export default function Admin() {
     if (isAdmin) { refreshStats(); loadUsers(); }
   }, [isAdmin]);
 
-  // ── NEW: Helper to call edge function with any operation ─────────────────────
-  const callEdge = async (body: any) => {
-    const res = await fetch(EDGE_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json();
-    if (!res.ok || !data.success) throw new Error(data.error || "Sync failed");
-    return data;
+  // ── Helper: Call edge function with timeout protection ─────────────────────
+  const callEdge = async (body: any, timeoutMs = 45000) => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    
+    try {
+      const res = await fetch(EDGE_URL, {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json", 
+          "Authorization": `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` 
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || "Sync failed");
+      return data;
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') {
+        throw new Error("Request timed out (45s limit). Try syncing smaller data sets.");
+      }
+      throw err;
+    }
   };
 
-  // ── Chain the four steps instead of a single sync_sport ─────────────────────
+  // ── FIXED: Sync sport by chaining individual fast operations ───────────────
   const syncSport = async (sport: string) => {
     setIngesting(sport);
     try {
+      // Step 1: Sync teams (~5-10s)
       await callEdge({ operation: 'teams', sport });
+      toast.info(`${sport.toUpperCase()} teams synced`);
+      
+      // Step 2: Sync schedule (~5-10s)
       await callEdge({ operation: 'schedule', sport });
+      toast.info(`${sport.toUpperCase()} schedule synced`);
+      
+      // Step 3: Sync players (~10-20s)
       await callEdge({ operation: 'players', sport });
-      await callEdge({ operation: 'historical_stats', sport });
-      toast.success(`${sport.toUpperCase()} synced successfully`);
+      toast.info(`${sport.toUpperCase()} players synced`);
+      
+      // Step 4: Sync historical stats (~20-40s) - longest step
+      await callEdge({ operation: 'historical_stats', sport }, 60000); // 60s timeout for this one
+      toast.info(`${sport.toUpperCase()} stats synced`);
+      
+      toast.success(`✅ ${sport.toUpperCase()} fully synced!`);
       await refreshStats();
     } catch (err: any) {
       console.error(`Sync error for ${sport}:`, err);
@@ -305,13 +334,16 @@ export default function Admin() {
     }
   };
 
+  // ── Sync all sports with delay between each to avoid rate limits ───────────
   const syncAll = async () => {
     setIngesting("all");
     try {
       for (const sport of SPORTS) {
         await syncSport(sport);
+        // Wait 2 seconds between sports to avoid ESPN rate limiting
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
-      toast.success("All sports synced 🚀");
+      toast.success("🚀 All sports synced successfully!");
     } catch (err: any) {
       toast.error(`Sync all failed: ${err.message}`);
     } finally {
@@ -319,8 +351,24 @@ export default function Admin() {
     }
   };
 
+  // ── Quick box score sync for today's finished games (fast fallback) ────────
+  const syncBoxScores = async (sport: string) => {
+    setIngesting(sport);
+    try {
+      await callEdge({ operation: 'boxscores', sport });
+      toast.success(`✅ ${sport.toUpperCase()} box scores updated`);
+      await refreshStats();
+    } catch (err: any) {
+      console.error(`Box score sync error for ${sport}:`, err);
+      toast.error(`${sport.toUpperCase()} box scores failed: ${err.message}`);
+    } finally {
+      setIngesting(null);
+    }
+  };
+
   if (authLoading) return <div className="p-10 text-center text-yellow-400">Loading...</div>;
 
+  // 🔧 TEMPORARY BYPASS - Keep this until auth.is_admin is fully reliable
   const forceAdmin = user?.email === 'christiansucre1@gmail.com';
   if (!isAdmin && !forceAdmin) return <Navigate to="/scanner" replace />;
 
@@ -573,7 +621,9 @@ export default function Admin() {
         {/* Sync Controls */}
         <div className="bg-[#0b1120] p-4 rounded-xl mb-6 border border-gray-800">
           <h3 className="font-bold mb-4 text-yellow-400 flex items-center gap-2"><Database className="w-4 h-4" /> Data Sync Controls</h3>
-          <div className="flex flex-wrap gap-3">
+          
+          {/* Primary Sync Buttons */}
+          <div className="flex flex-wrap gap-3 mb-4">
             {SPORTS.map((sport) => (
               <button key={sport} onClick={() => syncSport(sport)} disabled={!!ingesting}
                 className="px-4 py-2 bg-[#1e293b] hover:bg-[#334155] rounded-lg text-sm font-semibold flex items-center gap-2 text-white disabled:opacity-50 transition">
@@ -587,6 +637,20 @@ export default function Admin() {
               Sync ALL Sports
             </button>
           </div>
+          
+          {/* Quick Box Score Sync (Fast Fallback) */}
+          <div className="pt-3 border-t border-gray-700">
+            <p className="text-xs text-gray-500 mb-2">⚡ Quick Update (today's finished games only):</p>
+            <div className="flex flex-wrap gap-2">
+              {SPORTS.map((sport) => (
+                <button key={sport} onClick={() => syncBoxScores(sport)} disabled={!!ingesting}
+                  className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded text-xs text-gray-300 disabled:opacity-50 transition">
+                  {ingesting === sport ? <Loader2 className="w-3 h-3 animate-spin mr-1 inline" /> : null}
+                  {sport.toUpperCase()} Box Scores
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         <div className="bg-blue-900/20 border border-blue-800 p-4 rounded-lg text-sm text-blue-400">
@@ -594,7 +658,8 @@ export default function Admin() {
           • This panel grants <strong>FREE trial access</strong> to influencers & VIPs<br />
           • Reference pricing (1 month = {REFERENCE_MONTHLY_RATE.toFixed(2)} USDT) is for context only<br />
           • New users receive a temporary password<br />
-          • Extend or revoke trials anytime from the table above
+          • Extend or revoke trials anytime from the table above<br />
+          • <strong>Sync Strategy:</strong> Use "Quick Box Scores" for daily updates (fast), "Full Sync" for initial setup (slower)
         </div>
       </div>
     </DashboardLayout>
