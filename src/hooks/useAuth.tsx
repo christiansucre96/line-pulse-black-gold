@@ -66,12 +66,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const mergedUser = { ...authUser, profile: profileData };
       setUser(mergedUser);
       setProfile(profileData);
-      setIsAdmin(profileData?.is_admin === true || profileData?.role === "admin");
+
+      // ✅ Fast admin check (user_metadata first, fallback to profile)
+      let adminFlag = false;
+      if (authUser.user_metadata?.is_admin === true) {
+        adminFlag = true;
+      } else if (profileData?.is_admin === true || profileData?.role === "admin") {
+        adminFlag = true;
+      }
+      setIsAdmin(adminFlag);
 
       const { data: { session: currentSession } } = await supabase.auth.getSession();
       setSession(currentSession);
     } catch (err) {
       console.error("Auth load error:", err);
+      setIsAdmin(false);
     } finally {
       setLoading(false);
     }
