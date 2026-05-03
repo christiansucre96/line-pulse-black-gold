@@ -3,21 +3,22 @@ import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from "react-
 import { lazy, Suspense } from "react";
 import { Toaster } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
-
-// Layouts & Wrappers
+import { AuthProvider } from "@/hooks/useAuth";
 import AppLayout from "@/components/AppLayout";
 import AdminRoute from "@/components/AdminRoute";
-
-// ✅ Your Pages
 import Auth from "@/pages/Auth";
 import Scanner from "@/pages/Scanner";
 import Admin from "@/pages/Admin";
-import DataStudio from "@/pages/DataStudio";
 
-// ✅ Lazy‑loaded Horse Racing page
-const HorseRacing = lazy(() => import("@/pages/HorseRacing"));
+const HorseRacing  = lazy(() => import("@/pages/HorseRacing"));
+const Injuries     = lazy(() => import("@/pages/Injuries"));
+const Roster       = lazy(() => import("@/pages/Roster"));
+const ParlayBuilder= lazy(() => import("@/pages/ParlayBuilder"));
+const Leaderboard  = lazy(() => import("@/pages/Leaderboard"));
+const Profile      = lazy(() => import("@/pages/Profile"));
+const ResetPassword= lazy(() => import("@/pages/ResetPassword"));
+const NotFound     = lazy(() => import("@/pages/NotFound"));
 
-// ── Loading Spinner ────────────────────────────────────
 function LoadingScreen() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#060a0f]">
@@ -26,7 +27,6 @@ function LoadingScreen() {
   );
 }
 
-// ── Public Route: Redirects authenticated users to /scanner ─
 function PublicRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) return <LoadingScreen />;
@@ -34,7 +34,6 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-// ── Protected Route: Redirects unauthenticated users to /auth ─
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) return <LoadingScreen />;
@@ -42,7 +41,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-// ── App Layout Wrapper ─────────────────────────────────
 function AppLayoutWrapper() {
   return (
     <AppLayout>
@@ -51,65 +49,35 @@ function AppLayoutWrapper() {
   );
 }
 
-// ── Main App Component ─────────────────────────────────
 function AppContent() {
   return (
     <Router>
       <div className="min-h-screen bg-[#060a0f] text-gray-100">
-        <Routes>
-          {/* 🔓 PUBLIC ROUTE: Login/Signup */}
-          <Route path="/auth" element={<PublicRoute><Auth /></PublicRoute>} />
+        <Suspense fallback={<LoadingScreen />}>
+          <Routes>
+            {/* Public */}
+            <Route path="/auth"           element={<PublicRoute><Auth /></PublicRoute>} />
+            <Route path="/login"          element={<Navigate to="/auth" replace />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
 
-          {/* 🔐 PROTECTED ROUTES: Requires Login */}
-          <Route
-            path="/"
-            element={
-              <ProtectedRoute>
-                <AppLayoutWrapper />
-              </ProtectedRoute>
-            }
-          >
-            {/* Default: go to scanner */}
-            <Route index element={<Navigate to="/scanner" replace />} />
-            
-            {/* Main App Pages */}
-            <Route path="scanner" element={<Scanner />} />
-            
-            {/* 🐎 Horse Racing Page (lazy loaded) */}
-            <Route
-              path="horse-racing"
-              element={
-                <Suspense fallback={<LoadingScreen />}>
-                  <HorseRacing />
-                </Suspense>
-              }
-            />
-            
-            {/* Admin-Only Pages */}
-            <Route
-              path="admin"
-              element={
-                <AdminRoute>
-                  <Admin />
-                </AdminRoute>
-              }
-            />
-            
-            <Route
-              path="studio"
-              element={
-                <AdminRoute>
-                  <DataStudio />
-                </AdminRoute>
-              }
-            />
-          </Route>
+            {/* Protected */}
+            <Route path="/" element={<ProtectedRoute><AppLayoutWrapper /></ProtectedRoute>}>
+              <Route index element={<Navigate to="/scanner" replace />} />
+              <Route path="scanner"      element={<Scanner />} />
+              <Route path="parlay"       element={<ParlayBuilder />} />
+              <Route path="leaderboard"  element={<Leaderboard />} />
+              <Route path="roster"       element={<Roster />} />
+              <Route path="injuries"     element={<Injuries />} />
+              <Route path="profile"      element={<Profile />} />
+              <Route path="horse-racing" element={<HorseRacing />} />
+              <Route path="admin"        element={<AdminRoute><Admin /></AdminRoute>} />
+            </Route>
 
-          {/* Catch-all: unknown URLs go to auth */}
-          <Route path="*" element={<Navigate to="/auth" replace />} />
-        </Routes>
+            {/* Fallback */}
+            <Route path="*" element={<Navigate to="/auth" replace />} />
+          </Routes>
+        </Suspense>
 
-        {/* Global Toast Notifications */}
         <Toaster
           position="top-right"
           richColors
@@ -128,5 +96,9 @@ function AppContent() {
 }
 
 export default function App() {
-  return <AppContent />;
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
+  );
 }
