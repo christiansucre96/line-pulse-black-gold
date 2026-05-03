@@ -93,7 +93,7 @@ export default function Admin() {
     } catch (err) { console.error("Failed to load stats:", err); }
   };
 
-  // ✅ FIXED: reads email directly from profiles, no auth.users query
+  // ✅ reads email directly from profiles, no auth.users query
   const loadUsers = async () => {
     setLoadingUsers(true);
     try {
@@ -170,7 +170,6 @@ export default function Admin() {
       let userId: string;
 
       if (isExistingUser) {
-        // Find existing user by email in profiles
         const { data: existing, error: findError } = await supabase
           .from('profiles')
           .select('id')
@@ -276,30 +275,48 @@ export default function Admin() {
     if (isAdmin) { refreshStats(); loadUsers(); }
   }, [isAdmin]);
 
+  // ── NEW: Helper to call edge function with any operation ─────────────────────
+  const callEdge = async (body: any) => {
+    const res = await fetch(EDGE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data.error || "Sync failed");
+    return data;
+  };
+
+  // ── Chain the four steps instead of a single sync_sport ─────────────────────
   const syncSport = async (sport: string) => {
     setIngesting(sport);
     try {
-      const res = await fetch(EDGE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
-        body: JSON.stringify({ operation: "sync_sport", sport }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.error || "Sync failed");
+      await callEdge({ operation: 'teams', sport });
+      await callEdge({ operation: 'schedule', sport });
+      await callEdge({ operation: 'players', sport });
+      await callEdge({ operation: 'historical_stats', sport });
       toast.success(`${sport.toUpperCase()} synced successfully`);
       await refreshStats();
     } catch (err: any) {
+      console.error(`Sync error for ${sport}:`, err);
       toast.error(`${sport.toUpperCase()} failed: ${err.message}`);
-    } finally { setIngesting(null); }
+    } finally {
+      setIngesting(null);
+    }
   };
 
   const syncAll = async () => {
     setIngesting("all");
     try {
-      for (const sport of SPORTS) await syncSport(sport);
+      for (const sport of SPORTS) {
+        await syncSport(sport);
+      }
       toast.success("All sports synced 🚀");
-    } catch (err: any) { toast.error(`Sync failed: ${err.message}`); }
-    finally { setIngesting(null); }
+    } catch (err: any) {
+      toast.error(`Sync all failed: ${err.message}`);
+    } finally {
+      setIngesting(null);
+    }
   };
 
   if (authLoading) return <div className="p-10 text-center text-yellow-400">Loading...</div>;
