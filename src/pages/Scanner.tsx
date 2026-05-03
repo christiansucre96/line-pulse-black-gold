@@ -15,29 +15,26 @@ const supabase = createClient(
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
-// Get today's date in Eastern Time
+// ── Helpers ──────────────────────────────────────────────────────────────────
 function etToday(): string {
   const now = new Date();
-  const etOffset = -4 * 60 * 60 * 1000; // EDT (Eastern Daylight Time)
+  // Eastern Daylight Time is UTC-4
+  const etOffset = -4 * 60 * 60 * 1000; 
   const etNow = new Date(now.getTime() + etOffset);
   return etNow.toISOString().split('T')[0];
 }
 
-// Convert UTC time to Eastern Time display
 function formatTimeET(utcTime: string): string {
   if (!utcTime) return '';
   const date = new Date(utcTime);
-  if (isNaN(date.getTime())) return '';
+  if (isNaN(date.getTime())) return ''; // Return empty for invalid dates
   
-  // Convert to Eastern Time
-  const etString = date.toLocaleString('en-US', { 
+  return date.toLocaleString('en-US', { 
     timeZone: 'America/New_York',
     hour: 'numeric',
     minute: '2-digit',
     hour12: true 
   });
-  
-  return etString;
 }
 
 function HRBox({ value }: { value: number | null }) {
@@ -47,6 +44,7 @@ function HRBox({ value }: { value: number | null }) {
   return <div className={`w-9 h-6 rounded text-[10px] font-bold flex items-center justify-center ${bg}`}>{value}%</div>;
 }
 
+// ── Config ───────────────────────────────────────────────────────────────────
 const SPORTS = [
   { value: "nba",    label: "🏀 NBA" },
   { value: "nfl",    label: "🏈 NFL" },
@@ -126,6 +124,7 @@ function getInitials(name: string) {
   return (name || "??").split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
 }
 
+// ── Types ────────────────────────────────────────────────────────────────────
 interface GameOption {
   game_id: string;
   label: string;
@@ -144,6 +143,7 @@ interface ScannerPlayer {
   is_starter: boolean;
 }
 
+// ── Component ────────────────────────────────────────────────────────────────
 export default function Scanner() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -169,7 +169,7 @@ export default function Scanner() {
     if (urlSport && urlSport !== sport) setSport(urlSport);
   }, [urlSport]);
 
-  // ── Fetch games from games_data for selected sport ────────────────────────
+  // ── Load Games ─────────────────────────────────────────────────────────────
   const loadGames = async (s: string) => {
     const now = new Date();
     const todayET = etToday();
@@ -189,40 +189,35 @@ export default function Scanner() {
     const options: GameOption[] = (data || [])
       .filter((g: any) => {
         if (!g.start_time) return false;
-        
         const gameTime = new Date(g.start_time);
-        
-        // Only show games that haven't started yet (with 30 min buffer)
+        // Only show games that haven't started yet (30 min buffer)
         return gameTime > new Date(now.getTime() - 30 * 60 * 1000);
       })
       .map((g: any) => {
         const home = g.home_team?.abbreviation || '?';
         const away = g.away_team?.abbreviation || '?';
-        
-        // Convert UTC to Eastern Time for display
-        const timeStr = formatTimeET(g.start_time);
-        
         return { 
           game_id: g.external_id, 
           label: `${away} vs ${home}`, 
-          time: timeStr 
+          time: formatTimeET(g.start_time) 
         };
       });
 
     setGameOptions(options);
-    
-    // Auto-select first game if only one exists
-    if (options.length === 1) {
-      setSelectedGame(options[0].game_id);
-    }
+    if (options.length === 1) setSelectedGame(options[0].game_id);
   };
 
-  // ── Fetch players from clever-action ──────────────────────────────────────
+  // ── Fetch Players ──────────────────────────────────────────────────────────
   const fetchPlayers = async (s: string, gameId: string = 'all') => {
-    setLoading(true); setError(null);
+    setLoading(true); 
+    setError(null);
+    
+    console.log(`🔍 Fetching players: sport=${s}, game_id=${gameId}`);
+
     try {
       const body: any = { operation: "get_players", sport: s };
-      if (gameId !== 'all') body.game_id = gameId;
+      // CRITICAL FIX: Only pass game_id if it's not 'all'
+      if (gameId && gameId !== 'all') body.game_id = gameId;
 
       const res = await fetch(EDGE_URL, {
         method: "POST",
@@ -250,32 +245,47 @@ export default function Scanner() {
 
       setPlayers(mapped);
       setLastRefresh(new Date().toLocaleTimeString());
-      console.log(`✅ ${mapped.length} players ready`);
+      console.log(`✅ Loaded ${mapped.length} players`);
     } catch (e: any) {
-      console.error('❌', e);
+      console.error('❌ Fetch error:', e);
       setError(e.message);
     } finally {
       setLoading(false);
     }
   };
 
+  // ── Effects ────────────────────────────────────────────────────────────────
+  // 1. Initial load & sport changes
   useEffect(() => {
     if (!playerId) {
-      const defaultProp = DEFAULT_PROP[sport] || 'points';
-      setFilterProp(defaultProp);
-      setSelectedGame('all');
+      setFilterProp(DEFAULT_PROP[sport] || 'points');
+      setSelectedGame('all'); // Reset to all when sport changes
       loadGames(sport);
       fetchPlayers(sport, 'all');
     }
   }, [sport]);
 
+  // 2. Handle game selection changes
+  useEffect(() => {
+    if (!playerId && sport && selectedGame) {
+      fetchPlayers(sport, selectedGame);
+    }
+  }, [selectedGame]);
+
+  // ── Handlers ───────────────────────────────────────────────────────────────
   const handleSportChange = (s: string) => setSport(s);
-  const handleGameChange  = (g: string) => { setSelectedGame(g); fetchPlayers(sport, g); };
+  
+  const handleGameChange = (g: string) => {
+    setSelectedGame(g);
+    // fetchPlayers is triggered by the useEffect on selectedGame
+  };
+
   const handleSort = (key: string) => {
     if (sortKey === key) setSortDir(d => d === 1 ? -1 : 1);
     else { setSortKey(key); setSortDir(-1); }
   };
 
+  // ── Data Processing ────────────────────────────────────────────────────────
   const displayPlayers = useMemo(() => {
     let list = [...players];
 
@@ -321,6 +331,7 @@ export default function Scanner() {
 
   const currentProps = SPORT_PROPS[sport] || SPORT_PROPS.nba;
 
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <DashboardLayout>
       <div className="p-4 max-w-7xl mx-auto">
@@ -331,7 +342,7 @@ export default function Scanner() {
             <h1 className="text-2xl font-bold text-yellow-400">⚡ LinePulse Scanner</h1>
             <p className="text-gray-500 text-sm mt-0.5 flex items-center gap-1.5">
               <Calendar className="w-3.5 h-3.5" />
-              Players with games today ({today}) · Set your own lines
+              Players with games today ({today})
             </p>
           </div>
           <button onClick={() => fetchPlayers(sport, selectedGame)} disabled={loading}
@@ -385,12 +396,11 @@ export default function Scanner() {
 
         {/* Market Line */}
         <div className="mb-4 p-3 bg-gray-900/50 rounded-lg border border-gray-700 flex items-center gap-3 flex-wrap">
-          <span className="text-sm text-gray-400 font-medium">📊 Market Line (from sportsbook):</span>
+          <span className="text-sm text-gray-400 font-medium">📊 Market Line:</span>
           <input type="number" step="0.5" placeholder="e.g. 26.5"
             value={marketLine ?? ""}
             onChange={e => setMarketLine(e.target.value ? parseFloat(e.target.value) : null)}
             className="w-24 px-3 py-1.5 bg-gray-800 border border-gray-600 rounded text-white text-sm focus:border-blue-500 focus:outline-none" />
-          {marketLine && <span className="text-xs text-blue-400">Enter the line from your sportsbook → app calculates your edge</span>}
         </div>
 
         {error && <div className="mb-4 p-3 bg-red-900/20 border border-red-800 rounded-lg text-red-400 text-sm">❌ {error}</div>}
@@ -405,10 +415,8 @@ export default function Scanner() {
         {!loading && (
           displayPlayers.length === 0 ? (
             <div className="text-center py-20 text-gray-600 border border-gray-800 rounded-xl bg-gray-900/20">
-              <p className="text-lg">No players found for today</p>
-              <p className="text-sm mt-1 text-gray-700">
-                Try syncing {sport.toUpperCase()} data from the admin panel first
-              </p>
+              <p className="text-lg">No players found</p>
+              <p className="text-sm mt-1 text-gray-700">Try syncing {sport.toUpperCase()} data from the admin panel</p>
               <button onClick={() => fetchPlayers(sport, selectedGame)}
                 className="mt-4 px-4 py-2 bg-yellow-500 text-black rounded font-semibold text-sm hover:bg-yellow-600">
                 Retry
@@ -417,7 +425,7 @@ export default function Scanner() {
           ) : (
             <div className="bg-gray-900/30 border border-gray-800 rounded-xl overflow-hidden">
               <div className="px-4 py-2 border-b border-gray-800 text-xs text-gray-600 flex justify-between">
-                <span>{displayPlayers.length} players shown · click any row for all prop details</span>
+                <span>{displayPlayers.length} players shown</span>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full">
@@ -441,7 +449,7 @@ export default function Scanner() {
                       const pd = p.all_props?.[filterProp] || p.all_props?.[Object.keys(p.all_props || {})[0]];
                       const diff = pd ? ((pd.avg_l10 ?? 0) - (pd.line ?? 0)) : 0;
                       
-                      // Format game time properly
+                      // Safe time formatting
                       const gameTime = p.game_time ? formatTimeET(p.game_time) : (p.game_date || '');
                       
                       return (
