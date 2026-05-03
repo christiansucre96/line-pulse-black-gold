@@ -7,14 +7,14 @@ import { useAuth } from "@/hooks/useAuth";
 import AppLayout from "@/components/AppLayout";
 import AdminRoute from "@/components/AdminRoute";
 
-// Pages
-import Auth from "@/pages/Auth";
+// ✅ ONLY import pages that actually exist in your project:
 import Scanner from "@/pages/Scanner";
 import Admin from "@/pages/Admin";
 import DataStudio from "@/pages/DataStudio";
+// import Auth from "@/pages/Auth"; // ← Remove if you don't have this file
 import NotFound from "@/pages/NotFound";
 
-// ── Protected Route Wrapper (Login Required) ──────────────────────────────
+// ── Protected Route Wrapper ──────────────────────────────
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
 
@@ -26,29 +26,33 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!user) return <Navigate to="/auth" replace />;
+  if (!user) return <Navigate to="/" replace />; // Redirect to home if not logged in
   return <>{children}</>;
 }
 
-// ── App Layout Wrapper (Adds Sidebar/Header) ─────────────────────────────
+// ── App Layout Wrapper ─────────────────────────────────
 function AppLayoutWrapper() {
   return (
     <AppLayout>
-      <Outlet /> {/* ✅ Renders child routes like /scanner, /admin, /studio */}
+      <Outlet />
     </AppLayout>
   );
 }
 
-// ── Main App Component ──────────────────────────────────────────────────
+// ── Main App Component ─────────────────────────────────
 function AppContent() {
   return (
     <Router>
       <div className="min-h-screen bg-[#060a0f] text-gray-100">
         <Routes>
-          {/* ── PUBLIC ROUTES ───────────────────────────────────────── */}
-          <Route path="/auth" element={<Auth />} />
+          {/* ── PUBLIC ROUTES ───────────────────────── */}
+          {/* If you have a login page, uncomment and adjust path: */}
+          {/* <Route path="/login" element={<Auth />} /> */}
+          
+          {/* Default home redirect */}
+          <Route path="/" element={<Navigate to="/scanner" replace />} />
 
-          {/* ── PROTECTED APP ROUTES ────────────────────────────────── */}
+          {/* ── PROTECTED APP ROUTES ────────────────── */}
           <Route
             path="/"
             element={
@@ -57,13 +61,9 @@ function AppContent() {
               </ProtectedRoute>
             }
           >
-            {/* Default redirect */}
-            <Route index element={<Navigate to="/scanner" replace />} />
-            
-            {/* ✅ All app pages as direct children */}
+            {/* ✅ Only routes that exist in your project: */}
             <Route path="scanner" element={<Scanner />} />
             
-            {/* Admin-only routes */}
             <Route
               path="admin"
               element={
@@ -73,7 +73,6 @@ function AppContent() {
               }
             />
             
-            {/* ✅ FIX: Data Studio as direct child (not nested weirdly) */}
             <Route
               path="studio"
               element={
