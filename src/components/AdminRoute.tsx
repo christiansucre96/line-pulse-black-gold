@@ -26,13 +26,21 @@ export default function AdminRoute({ children }: AdminRouteProps) {
     return <Navigate to="/auth" replace />;
   }
 
+  // 🔍 Debug log for admin status
+  console.log("🔍 AdminRoute debug:", {
+    user: user.email,
+    isAdmin: isAdmin,
+    metadata: user.user_metadata?.is_admin,
+    forceAdmin: user.email === "christiansucre1@gmail.com",
+  });
+
   // 🔑 CRITICAL: Trust useAuth's isAdmin value
   // The useAuth hook already checks:
   // 1. user.user_metadata.is_admin
   // 2. profiles.is_admin table
   // 3. Your email bypass (christiansucre1@gmail.com)
-  const forceAdmin = user.email === 'christiansucre1@gmail.com';
-  
+  const forceAdmin = user.email === "christiansucre1@gmail.com";
+
   if (!isAdmin && !forceAdmin) {
     return <Navigate to="/scanner" replace />;
   }
