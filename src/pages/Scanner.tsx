@@ -1,4 +1,4 @@
-// src/pages/Scanner.tsx
+// src/pages/Scanner.tsx (updated)
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -60,6 +60,7 @@ const SPORTS = [
   { value: "mlb",    label: "⚾ MLB" },
   { value: "nhl",    label: "🏒 NHL" },
   { value: "soccer", label: "⚽ Soccer" },
+  { value: "horse-racing", label: "🏇 Horse Racing" },  // ✅ Added
 ];
 
 const SOCCER_LEAGUES = [
@@ -137,10 +138,20 @@ const SPORT_PROPS: Record<string, { id: string; label: string }[]> = {
     { id: "combo_shots_sot",     label: "Shots+SOT" },
     { id: "combo_tkl_int",       label: "Tkl+Int" },
   ],
+  "horse-racing": [   // ✅ Placeholder – define your racing props if needed
+    { id: "win",      label: "Win" },
+    { id: "place",    label: "Place" },
+    { id: "show",     label: "Show" },
+  ],
 };
 
 const DEFAULT_PROP: Record<string, string> = {
-  nba: "points", nfl: "passing_yards", mlb: "hits", nhl: "goals", soccer: "goals",
+  nba: "points",
+  nfl: "passing_yards",
+  mlb: "hits",
+  nhl: "goals",
+  soccer: "goals",
+  "horse-racing": "win",
 };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -282,11 +293,17 @@ export default function Scanner() {
   // ── Effects ───────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!playerId) {
-      setFilterProp(DEFAULT_PROP[sport] || 'points');
+      // Update default prop when sport changes
+      const defaultProp = DEFAULT_PROP[sport] || (SPORT_PROPS[sport]?.[0]?.id) || "points";
+      setFilterProp(defaultProp);
       setSelectedGame('__loading__');
       setPlayers([]);
       setNoStatsWarning(false);
-      loadGames(sport, soccerLeague);
+      if (sport !== 'soccer') {
+        loadGames(sport);
+      } else {
+        loadGames('soccer', soccerLeague);
+      }
     }
   }, [sport]);
 
@@ -363,7 +380,7 @@ export default function Scanner() {
     <PlayerDetailView playerId={playerId} sport={sport} onBack={() => navigate("/scanner")} />
   );
 
-  const currentProps   = SPORT_PROPS[sport] || SPORT_PROPS.nba;
+  const currentProps   = SPORT_PROPS[sport] || SPORT_PROPS["horse-racing"];  // fallback
   const withStatCount  = displayPlayers.filter(p => Object.keys(p.all_props).length > 0).length;
   const someNoStats    = displayPlayers.some(p => Object.keys(p.all_props).length === 0);
 
@@ -523,7 +540,6 @@ export default function Scanner() {
 
         {!loading && displayPlayers.length > 0 && (
           <div className="bg-gray-900/30 border border-gray-800 rounded-xl overflow-hidden">
-            {/* Table header bar */}
             <div className="px-4 py-2 border-b border-gray-800 text-xs text-gray-600 flex justify-between items-center">
               <span>{displayPlayers.length} players shown</span>
               <span>
@@ -572,7 +588,6 @@ export default function Scanner() {
                         onClick={() => navigate(`/scanner?playerId=${p.player_id}&sport=${sport}`)}
                         className={`border-b border-gray-800/50 hover:bg-gray-800/40 cursor-pointer transition-colors ${!hasStats ? 'opacity-40' : ''}`}
                       >
-                        {/* Player name */}
                         <td className="p-3">
                           <div className="flex items-center gap-2.5">
                             <div className="w-9 h-9 rounded-full bg-gradient-to-br from-yellow-500 to-yellow-700 flex items-center justify-center text-black text-xs font-bold shrink-0">
@@ -590,25 +605,21 @@ export default function Scanner() {
                           </div>
                         </td>
 
-                        {/* Game info */}
                         <td className="p-3">
                           <p className="text-xs text-gray-400">vs {p.opponent || '—'}</p>
                           <p className="text-[10px] text-gray-600">{gameTime}</p>
                         </td>
 
-                        {/* Line */}
                         <td className="p-3">
                           <span className="text-yellow-400 font-bold text-sm">
                             {pd?.line != null ? pd.line.toFixed(1) : '—'}
                           </span>
                         </td>
 
-                        {/* Avg L10 */}
                         <td className="p-3 text-gray-300 text-sm">
                           {pd?.avg_l10 != null ? pd.avg_l10 : '—'}
                         </td>
 
-                        {/* Diff */}
                         <td className="p-3">
                           {pd ? (
                             <span className={`text-sm font-semibold ${diff > 0 ? "text-green-400" : diff < 0 ? "text-red-400" : "text-gray-500"}`}>
@@ -617,13 +628,11 @@ export default function Scanner() {
                           ) : <span className="text-gray-600">—</span>}
                         </td>
 
-                        {/* Hit rate boxes */}
                         <td className="p-3"><HRBox value={pd?.l5  ?? null} /></td>
                         <td className="p-3"><HRBox value={pd?.l10 ?? null} /></td>
                         <td className="p-3"><HRBox value={pd?.l15 ?? null} /></td>
                         <td className="p-3"><HRBox value={pd?.l20 ?? null} /></td>
 
-                        {/* Rolling: streak + rolling avg */}
                         <td className="p-3">
                           <div className="flex flex-col gap-1">
                             {pd?.streak ? (
@@ -637,7 +646,6 @@ export default function Scanner() {
                             ) : (
                               <span className="text-gray-700 text-xs">—</span>
                             )}
-                            {/* Rolling avg label: L19 + today */}
                             {rolling && rolling.count > 0 && (
                               <span className="text-[10px] text-gray-500">
                                 avg {rolling.avg}
@@ -647,7 +655,6 @@ export default function Scanner() {
                           </div>
                         </td>
 
-                        {/* Trend / Market line edge */}
                         <td className="p-3">
                           {(() => {
                             if (marketLine && pd?.avg_l10 != null) {
