@@ -4,13 +4,11 @@ import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 
 const navItems = [
-  { icon: BarChart3, label: "Props", path: "/scanner" },
-  { icon: Layers, label: "Parlay", path: "/parlay" },
-  { icon: Trophy, label: "Leaders", path: "/leaderboard" },
-  { icon: Users, label: "Rosters", path: "/roster" },
-  { icon: Bandage, label: "Injuries", path: "/injuries" },
-  // 🐎 Horse Racing (using emoji because lucide-react doesn't have a horse icon)
-  { icon: () => <span className="text-[20px]">🏇</span>, label: "Racing", path: "/horse-racing" },
+  { icon: BarChart3, label: "Props",    path: "/scanner" },
+  { icon: Layers,    label: "Parlay",   path: "/parlay" },
+  { icon: Trophy,    label: "Leaders",  path: "/leaderboard" },
+  { icon: Users,     label: "Rosters",  path: "/roster" },
+  { icon: Bandage,   label: "Injuries", path: "/injuries" },
 ];
 
 export function AppSidebar() {
@@ -22,42 +20,32 @@ export function AppSidebar() {
     window.location.href = '/auth';
   };
 
+  const linkClass = (path: string) =>
+    `w-11 h-11 rounded-lg flex items-center justify-center transition-all ${
+      pathname === path
+        ? "bg-gradient-gold text-primary-foreground"
+        : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+    }`;
+
   return (
     <nav className="fixed left-0 top-0 h-screen w-[72px] bg-card border-r border-border flex flex-col items-center py-4 gap-2 z-50">
       <Link to="/" className="w-11 h-11 rounded-full bg-gradient-gold flex items-center justify-center mb-4 shrink-0">
         <span className="font-display text-sm font-bold text-primary-foreground">LP</span>
       </Link>
 
-      {navItems.map((item) => {
-        const active = pathname === item.path;
-        const Icon = item.icon;
-        return (
-          <Link
-            key={item.path}
-            to={item.path}
-            title={item.label}
-            className={`w-11 h-11 rounded-lg flex items-center justify-center transition-all ${
-              active ? "bg-gradient-gold text-primary-foreground" : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-            }`}
-          >
-            {/* Render either icon component or emoji span */}
-            {typeof Icon === 'function' && Icon !== BarChart3 && Icon !== Layers && Icon !== Trophy && Icon !== Users && Icon !== Bandage ? (
-              <Icon />
-            ) : (
-              <Icon size={20} />
-            )}
-          </Link>
-        );
-      })}
+      {navItems.map((item) => (
+        <Link key={item.path} to={item.path} title={item.label} className={linkClass(item.path)}>
+          <item.icon size={20} />
+        </Link>
+      ))}
+
+      {/* Horse Racing */}
+      <Link to="/horse-racing" title="Racing" className={linkClass("/horse-racing")}>
+        <span className="text-[20px] leading-none">🏇</span>
+      </Link>
 
       {isAdmin && (
-        <Link
-          to="/admin"
-          title="Admin"
-          className={`w-11 h-11 rounded-lg flex items-center justify-center transition-all ${
-            pathname === "/admin" ? "bg-gradient-gold text-primary-foreground" : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-          }`}
-        >
+        <Link to="/admin" title="Admin" className={linkClass("/admin")}>
           <Shield size={20} />
         </Link>
       )}
@@ -65,13 +53,7 @@ export function AppSidebar() {
       <div className="mt-auto flex flex-col items-center gap-2">
         {user ? (
           <>
-            <Link
-              to="/profile"
-              title="Profile"
-              className={`w-11 h-11 rounded-lg flex items-center justify-center transition-all ${
-                pathname === "/profile" ? "bg-gradient-gold text-primary-foreground" : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-              }`}
-            >
+            <Link to="/profile" title="Profile" className={linkClass("/profile")}>
               <User size={20} />
             </Link>
             <button
@@ -83,11 +65,7 @@ export function AppSidebar() {
             </button>
           </>
         ) : (
-          <Link
-            to="/auth"
-            title="Sign In"
-            className="w-11 h-11 rounded-lg flex items-center justify-center text-primary hover:bg-primary/20 transition-all"
-          >
+          <Link to="/auth" title="Sign In" className="w-11 h-11 rounded-lg flex items-center justify-center text-primary hover:bg-primary/20 transition-all">
             <LogIn size={20} />
           </Link>
         )}
