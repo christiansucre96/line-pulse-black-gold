@@ -9,6 +9,8 @@ const navItems = [
   { icon: Trophy, label: "Leaders", path: "/leaderboard" },
   { icon: Users, label: "Rosters", path: "/roster" },
   { icon: Bandage, label: "Injuries", path: "/injuries" },
+  // 🐎 Horse Racing (using emoji because lucide-react doesn't have a horse icon)
+  { icon: () => <span className="text-[20px]">🏇</span>, label: "Racing", path: "/horse-racing" },
 ];
 
 export function AppSidebar() {
@@ -28,6 +30,7 @@ export function AppSidebar() {
 
       {navItems.map((item) => {
         const active = pathname === item.path;
+        const Icon = item.icon;
         return (
           <Link
             key={item.path}
@@ -37,7 +40,12 @@ export function AppSidebar() {
               active ? "bg-gradient-gold text-primary-foreground" : "text-muted-foreground hover:bg-secondary hover:text-foreground"
             }`}
           >
-            <item.icon size={20} />
+            {/* Render either icon component or emoji span */}
+            {typeof Icon === 'function' && Icon !== BarChart3 && Icon !== Layers && Icon !== Trophy && Icon !== Users && Icon !== Bandage ? (
+              <Icon />
+            ) : (
+              <Icon size={20} />
+            )}
           </Link>
         );
       })}
