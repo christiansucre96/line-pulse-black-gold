@@ -42,7 +42,6 @@ function getInitials(name: string) {
   return (name || "??").split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
 }
 
-// Rolling: last 19 historical games + today's live value if available
 function calcRolling(values: number[], todayVal: number | null): { avg: number; count: number } {
   const window = [...values.slice(0, 19)];
   if (todayVal !== null && todayVal !== undefined) window.unshift(todayVal);
@@ -60,7 +59,7 @@ const SPORTS = [
   { value: "mlb",    label: "⚾ MLB" },
   { value: "nhl",    label: "🏒 NHL" },
   { value: "soccer", label: "⚽ Soccer" },
-  { value: "horse-racing", label: "🏇 Horse Racing" },  // ✅ Added
+  { value: "horse-racing", label: "🏇 Horse Racing" },
 ];
 
 const SOCCER_LEAGUES = [
@@ -138,10 +137,10 @@ const SPORT_PROPS: Record<string, { id: string; label: string }[]> = {
     { id: "combo_shots_sot",     label: "Shots+SOT" },
     { id: "combo_tkl_int",       label: "Tkl+Int" },
   ],
-  "horse-racing": [   // ✅ Placeholder – define your racing props if needed
-    { id: "win",      label: "Win" },
-    { id: "place",    label: "Place" },
-    { id: "show",     label: "Show" },
+  "horse-racing": [
+    { id: "win",   label: "Win" },
+    { id: "place", label: "Place" },
+    { id: "show",  label: "Show" },
   ],
 };
 
@@ -154,7 +153,6 @@ const DEFAULT_PROP: Record<string, string> = {
   "horse-racing": "win",
 };
 
-// ── Types ─────────────────────────────────────────────────────────────────────
 interface GameOption {
   game_id: string;
   label: string;
@@ -175,7 +173,6 @@ interface ScannerPlayer {
   games_logged: number;
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
 export default function Scanner() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -203,10 +200,8 @@ export default function Scanner() {
     if (urlSport && urlSport !== sport) setSport(urlSport);
   }, [urlSport]);
 
-  // ── Load Games ────────────────────────────────────────────────────────────
   const loadGames = useCallback(async (s: string, league = "all") => {
     const todayET = etToday();
-
     const { data } = await supabase
       .from('games_data')
       .select(`
@@ -235,7 +230,6 @@ export default function Scanner() {
     });
 
     setGameOptions(options);
-
     const upcoming = options.find(g => g.status === 'upcoming' || g.status === 'scheduled');
     const live     = options.find(g => g.status === 'live');
     const first    = options[0];
@@ -243,7 +237,6 @@ export default function Scanner() {
     setSelectedGame(autoSelect?.game_id ?? 'all');
   }, []);
 
-  // ── Fetch Players ─────────────────────────────────────────────────────────
   const fetchPlayers = useCallback(async (s: string, gameId: string) => {
     setLoading(true);
     setError(null);
@@ -290,10 +283,8 @@ export default function Scanner() {
     }
   }, []);
 
-  // ── Effects ───────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!playerId) {
-      // Update default prop when sport changes
       const defaultProp = DEFAULT_PROP[sport] || (SPORT_PROPS[sport]?.[0]?.id) || "points";
       setFilterProp(defaultProp);
       setSelectedGame('__loading__');
@@ -305,14 +296,14 @@ export default function Scanner() {
         loadGames('soccer', soccerLeague);
       }
     }
-  }, [sport]);
+  }, [sport, playerId]);
 
   useEffect(() => {
     if (sport === 'soccer' && !playerId) {
       setSelectedGame('__loading__');
       loadGames('soccer', soccerLeague);
     }
-  }, [soccerLeague]);
+  }, [soccerLeague, playerId]);
 
   useEffect(() => {
     if (selectedGame && selectedGame !== '__loading__') {
@@ -320,21 +311,17 @@ export default function Scanner() {
     }
   }, [selectedGame]);
 
-  // ── Handlers ──────────────────────────────────────────────────────────────
   const handleSort = (key: string) => {
     if (sortKey === key) setSortDir(d => d === 1 ? -1 : 1);
     else { setSortKey(key); setSortDir(-1); }
   };
 
-  // ── Display data ──────────────────────────────────────────────────────────
   const displayPlayers = useMemo(() => {
     let list = [...players];
-
     if (filterProp !== "all") {
       const withProp = list.filter(p => p.all_props?.[filterProp]);
       if (withProp.length > 0) list = withProp;
     }
-
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter(p =>
@@ -343,15 +330,12 @@ export default function Scanner() {
         p.opponent.toLowerCase().includes(q)
       );
     }
-
     list.sort((a, b) => {
       if (sortKey === "name") return sortDir * a.name.localeCompare(b.name);
       const getV = (p: ScannerPlayer) => {
         const pd = p.all_props?.[filterProp];
         if (!pd) return -Infinity;
-        if (sortKey === "rolling") {
-          return calcRolling(pd.values || [], null).avg;
-        }
+        if (sortKey === "rolling") return calcRolling(pd.values || [], null).avg;
         return sortKey === "line" ? pd.line ?? 0
           : sortKey === "avg"    ? pd.avg_l10 ?? 0
           : sortKey === "l5"     ? pd.l5 ?? 0
@@ -363,7 +347,6 @@ export default function Scanner() {
       };
       return sortDir * (getV(a) - getV(b));
     });
-
     return list;
   }, [players, filterProp, search, sortKey, sortDir]);
 
@@ -376,19 +359,19 @@ export default function Scanner() {
     </th>
   );
 
-  if (playerId) return (
-    <PlayerDetailView playerId={playerId} sport={sport} onBack={() => navigate("/scanner")} />
-  );
+  if (playerId) {
+    return (
+      <PlayerDetailView playerId={playerId} sport={sport} onBack={() => navigate("/scanner")} />
+    );
+  }
 
-  const currentProps   = SPORT_PROPS[sport] || SPORT_PROPS["horse-racing"];  // fallback
-  const withStatCount  = displayPlayers.filter(p => Object.keys(p.all_props).length > 0).length;
-  const someNoStats    = displayPlayers.some(p => Object.keys(p.all_props).length === 0);
+  const currentProps = SPORT_PROPS[sport] || SPORT_PROPS["horse-racing"];
+  const withStatCount = displayPlayers.filter(p => Object.keys(p.all_props).length > 0).length;
+  const someNoStats = displayPlayers.some(p => Object.keys(p.all_props).length === 0);
 
-  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <DashboardLayout>
       <div className="p-4 max-w-7xl mx-auto">
-
         {/* Header */}
         <div className="mb-5 flex items-start justify-between">
           <div>
@@ -410,7 +393,6 @@ export default function Scanner() {
 
         {/* Controls */}
         <div className="flex flex-wrap gap-2 mb-2">
-          {/* Sport */}
           <Select value={sport} onValueChange={setSport}>
             <SelectTrigger className="w-36 bg-gray-900 border-gray-700 text-yellow-400 text-sm">
               <SelectValue />
@@ -420,7 +402,6 @@ export default function Scanner() {
             </SelectContent>
           </Select>
 
-          {/* Soccer League Picker */}
           {sport === 'soccer' && (
             <Select value={soccerLeague} onValueChange={setSoccerLeague}>
               <SelectTrigger className="w-52 bg-gray-900 border-yellow-700/40 text-gray-300 text-sm">
@@ -434,7 +415,6 @@ export default function Scanner() {
             </Select>
           )}
 
-          {/* Game */}
           <Select value={selectedGame} onValueChange={setSelectedGame}>
             <SelectTrigger className="w-72 bg-gray-900 border-gray-700 text-gray-300 text-sm">
               <SelectValue placeholder="Loading games..." />
@@ -449,7 +429,6 @@ export default function Scanner() {
             </SelectContent>
           </Select>
 
-          {/* Prop type */}
           <Select value={filterProp} onValueChange={setFilterProp}>
             <SelectTrigger className="w-40 bg-gray-900 border-gray-700 text-gray-300 text-sm">
               <SelectValue placeholder="Select prop" />
@@ -459,7 +438,6 @@ export default function Scanner() {
             </SelectContent>
           </Select>
 
-          {/* Search */}
           <div className="relative flex-1 min-w-[180px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
             <Input
@@ -480,12 +458,10 @@ export default function Scanner() {
             onChange={e => setMarketLine(e.target.value ? parseFloat(e.target.value) : null)}
             className="w-24 px-3 py-1.5 bg-gray-800 border border-gray-600 rounded text-white text-sm focus:border-blue-500 focus:outline-none"
           />
-          {marketLine && (
-            <span className="text-xs text-gray-600">Trend shows vs {marketLine}</span>
-          )}
+          {marketLine && <span className="text-xs text-gray-600">Trend shows vs {marketLine}</span>}
         </div>
 
-        {/* No stats warning */}
+        {/* Warnings */}
         {noStatsWarning && !loading && (
           <div className="mb-4 p-3 bg-yellow-900/20 border border-yellow-700/50 rounded-lg flex items-start gap-2">
             <span className="text-yellow-400 text-lg">⚠️</span>
@@ -497,7 +473,6 @@ export default function Scanner() {
             </div>
           </div>
         )}
-
         {error && (
           <div className="mb-4 p-3 bg-red-900/20 border border-red-800 rounded-lg text-red-400 text-sm">
             ❌ {error}
@@ -556,15 +531,15 @@ export default function Scanner() {
               <table className="w-full">
                 <thead className="border-b border-gray-800">
                   <tr>
-                    <SortTh label="Player"    sk="name" />
+                    <SortTh label="Player" sk="name" />
                     <th className="p-3 text-left text-[11px] font-semibold text-yellow-400/70 uppercase tracking-wider whitespace-nowrap">Game</th>
-                    <SortTh label="Line"      sk="line" />
-                    <SortTh label="Avg L10"   sk="avg" />
-                    <SortTh label="Diff"      sk="diff" />
-                    <SortTh label="L5"        sk="l5" />
-                    <SortTh label="L10"       sk="l10" />
-                    <SortTh label="L15"       sk="l15" />
-                    <SortTh label="L20"       sk="l20" />
+                    <SortTh label="Line" sk="line" />
+                    <SortTh label="Avg L10" sk="avg" />
+                    <SortTh label="Diff" sk="diff" />
+                    <SortTh label="L5" sk="l5" />
+                    <SortTh label="L10" sk="l10" />
+                    <SortTh label="L15" sk="l15" />
+                    <SortTh label="L20" sk="l20" />
                     <SortTh label="Rolling ↺" sk="rolling" />
                     <th className="p-3 text-left text-[11px] font-semibold text-yellow-400/70 uppercase tracking-wider whitespace-nowrap">Trend</th>
                   </tr>
@@ -574,13 +549,10 @@ export default function Scanner() {
                     const pd = p.all_props?.[filterProp]
                       ?? p.all_props?.[Object.keys(p.all_props || {})[0]]
                       ?? null;
-
-                    const diff     = pd ? ((pd.avg_l10 ?? 0) - (pd.line ?? 0)) : 0;
+                    const diff = pd ? ((pd.avg_l10 ?? 0) - (pd.line ?? 0)) : 0;
                     const gameTime = p.game_time ? formatTimeET(p.game_time) : '';
                     const hasStats = Object.keys(p.all_props || {}).length > 0;
-
-                    // Rolling window: last 19 + today's value (null until game is live/done)
-                    const rolling  = pd ? calcRolling(pd.values || [], null) : null;
+                    const rolling = pd ? calcRolling(pd.values || [], null) : null;
 
                     return (
                       <tr
@@ -615,11 +587,9 @@ export default function Scanner() {
                             {pd?.line != null ? pd.line.toFixed(1) : '—'}
                           </span>
                         </td>
-
                         <td className="p-3 text-gray-300 text-sm">
                           {pd?.avg_l10 != null ? pd.avg_l10 : '—'}
                         </td>
-
                         <td className="p-3">
                           {pd ? (
                             <span className={`text-sm font-semibold ${diff > 0 ? "text-green-400" : diff < 0 ? "text-red-400" : "text-gray-500"}`}>
@@ -628,7 +598,7 @@ export default function Scanner() {
                           ) : <span className="text-gray-600">—</span>}
                         </td>
 
-                        <td className="p-3"><HRBox value={pd?.l5  ?? null} /></td>
+                        <td className="p-3"><HRBox value={pd?.l5 ?? null} /></td>
                         <td className="p-3"><HRBox value={pd?.l10 ?? null} /></td>
                         <td className="p-3"><HRBox value={pd?.l15 ?? null} /></td>
                         <td className="p-3"><HRBox value={pd?.l20 ?? null} /></td>
@@ -659,7 +629,7 @@ export default function Scanner() {
                           {(() => {
                             if (marketLine && pd?.avg_l10 != null) {
                               const edge = pd.avg_l10 - marketLine;
-                              const pct  = marketLine > 0 ? (edge / marketLine) * 100 : 0;
+                              const pct = marketLine > 0 ? (edge / marketLine) * 100 : 0;
                               let sig = "Neutral", cls = "bg-gray-500/10 text-gray-400 border border-gray-500/30";
                               if (pct >= 10)       { sig = "🟢 STRONG OVER";  cls = "bg-green-500/30 text-green-300 border border-green-500/50"; }
                               else if (pct >= 3)   { sig = "🟡 Over";         cls = "bg-green-500/15 text-green-400 border border-green-500/30"; }
@@ -688,7 +658,7 @@ export default function Scanner() {
                             );
                           })()}
                         </td>
-                      </td>
+                      </tr>
                     );
                   })}
                 </tbody>
