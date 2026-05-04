@@ -15,10 +15,8 @@ const supabase = createClient(
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
 function etToday(): string {
-  const etNow = new Date(Date.now() - 4 * 60 * 60 * 1000);
-  return etNow.toISOString().split('T')[0];
+  return new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString().split('T')[0];
 }
 
 function formatTimeET(utcTime: string): string {
@@ -43,22 +41,21 @@ function getInitials(name: string) {
 }
 
 function calcRolling(values: number[], todayVal: number | null): { avg: number; count: number } {
-  const window = [...values.slice(0, 19)];
-  if (todayVal !== null && todayVal !== undefined) window.unshift(todayVal);
-  if (!window.length) return { avg: 0, count: 0 };
+  const win = [...values.slice(0, 19)];
+  if (todayVal !== null && todayVal !== undefined) win.unshift(todayVal);
+  if (!win.length) return { avg: 0, count: 0 };
   return {
-    avg: Math.round((window.reduce((a, b) => a + b, 0) / window.length) * 10) / 10,
-    count: window.length,
+    avg: Math.round((win.reduce((a, b) => a + b, 0) / win.length) * 10) / 10,
+    count: win.length,
   };
 }
 
-// ── Config ────────────────────────────────────────────────────────────────────
 const SPORTS = [
-  { value: "nba",    label: "🏀 NBA" },
-  { value: "nfl",    label: "🏈 NFL" },
-  { value: "mlb",    label: "⚾ MLB" },
-  { value: "nhl",    label: "🏒 NHL" },
-  { value: "soccer", label: "⚽ Soccer" },
+  { value: "nba",          label: "🏀 NBA" },
+  { value: "nfl",          label: "🏈 NFL" },
+  { value: "mlb",          label: "⚾ MLB" },
+  { value: "nhl",          label: "🏒 NHL" },
+  { value: "soccer",       label: "⚽ Soccer" },
   { value: "horse-racing", label: "🏇 Horse Racing" },
 ];
 
@@ -145,19 +142,19 @@ const SPORT_PROPS: Record<string, { id: string; label: string }[]> = {
 };
 
 const DEFAULT_PROP: Record<string, string> = {
-  nba: "points",
-  nfl: "passing_yards",
-  mlb: "hits",
-  nhl: "goals",
-  soccer: "goals",
-  "horse-racing": "win",
+  nba:           "points",
+  nfl:           "passing_yards",
+  mlb:           "hits",
+  nhl:           "goals",
+  soccer:        "goals",
+  "horse-racing":"win",
 };
 
 interface GameOption {
   game_id: string;
-  label: string;
-  time: string;
-  status: string;
+  label:   string;
+  time:    string;
+  status:  string;
 }
 
 interface ScannerPlayer {
@@ -177,20 +174,20 @@ export default function Scanner() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  const [sport, setSport]                   = useState("nba");
-  const [filterProp, setFilterProp]         = useState("points");
-  const [search, setSearch]                 = useState("");
-  const [players, setPlayers]               = useState<ScannerPlayer[]>([]);
-  const [loading, setLoading]               = useState(false);
-  const [error, setError]                   = useState<string | null>(null);
-  const [lastRefresh, setLastRefresh]       = useState("");
-  const [sortKey, setSortKey]               = useState("l10");
-  const [sortDir, setSortDir]               = useState<1 | -1>(-1);
-  const [gameOptions, setGameOptions]       = useState<GameOption[]>([]);
-  const [selectedGame, setSelectedGame]     = useState("__loading__");
-  const [marketLine, setMarketLine]         = useState<number | null>(null);
+  const [sport, setSport]               = useState("nba");
+  const [filterProp, setFilterProp]     = useState("points");
+  const [search, setSearch]             = useState("");
+  const [players, setPlayers]           = useState<ScannerPlayer[]>([]);
+  const [loading, setLoading]           = useState(false);
+  const [error, setError]               = useState<string | null>(null);
+  const [lastRefresh, setLastRefresh]   = useState("");
+  const [sortKey, setSortKey]           = useState("l10");
+  const [sortDir, setSortDir]           = useState<1 | -1>(-1);
+  const [gameOptions, setGameOptions]   = useState<GameOption[]>([]);
+  const [selectedGame, setSelectedGame] = useState("__loading__");
+  const [marketLine, setMarketLine]     = useState<number | null>(null);
   const [noStatsWarning, setNoStatsWarning] = useState(false);
-  const [soccerLeague, setSoccerLeague]     = useState("all");
+  const [soccerLeague, setSoccerLeague] = useState("all");
 
   const playerId = searchParams.get("playerId");
   const urlSport = searchParams.get("sport");
@@ -200,7 +197,7 @@ export default function Scanner() {
     if (urlSport && urlSport !== sport) setSport(urlSport);
   }, [urlSport]);
 
-  const loadGames = useCallback(async (s: string, league = "all") => {
+  const loadGames = useCallback(async (s: string) => {
     const todayET = etToday();
     const { data } = await supabase
       .from('games_data')
@@ -230,10 +227,10 @@ export default function Scanner() {
     });
 
     setGameOptions(options);
-    const upcoming = options.find(g => g.status === 'upcoming' || g.status === 'scheduled');
-    const live     = options.find(g => g.status === 'live');
-    const first    = options[0];
-    const autoSelect = upcoming ?? live ?? first;
+    const autoSelect =
+      options.find(g => g.status === 'upcoming' || g.status === 'scheduled') ??
+      options.find(g => g.status === 'live') ??
+      options[0];
     setSelectedGame(autoSelect?.game_id ?? 'all');
   }, []);
 
@@ -241,7 +238,6 @@ export default function Scanner() {
     setLoading(true);
     setError(null);
     setNoStatsWarning(false);
-
     try {
       const body: any = { operation: "get_players", sport: s };
       if (gameId && gameId !== 'all') body.game_id = gameId;
@@ -273,7 +269,6 @@ export default function Scanner() {
 
       const withStats = mapped.filter(p => Object.keys(p.all_props).length > 0);
       if (mapped.length > 0 && withStats.length === 0) setNoStatsWarning(true);
-
       setPlayers(mapped);
       setLastRefresh(new Date().toLocaleTimeString());
     } catch (e: any) {
@@ -285,23 +280,18 @@ export default function Scanner() {
 
   useEffect(() => {
     if (!playerId) {
-      const defaultProp = DEFAULT_PROP[sport] || (SPORT_PROPS[sport]?.[0]?.id) || "points";
-      setFilterProp(defaultProp);
+      setFilterProp(DEFAULT_PROP[sport] || SPORT_PROPS[sport]?.[0]?.id || "points");
       setSelectedGame('__loading__');
       setPlayers([]);
       setNoStatsWarning(false);
-      if (sport !== 'soccer') {
-        loadGames(sport);
-      } else {
-        loadGames('soccer', soccerLeague);
-      }
+      loadGames(sport);
     }
   }, [sport, playerId]);
 
   useEffect(() => {
     if (sport === 'soccer' && !playerId) {
       setSelectedGame('__loading__');
-      loadGames('soccer', soccerLeague);
+      loadGames('soccer');
     }
   }, [soccerLeague, playerId]);
 
@@ -360,18 +350,17 @@ export default function Scanner() {
   );
 
   if (playerId) {
-    return (
-      <PlayerDetailView playerId={playerId} sport={sport} onBack={() => navigate("/scanner")} />
-    );
+    return <PlayerDetailView playerId={playerId} sport={sport} onBack={() => navigate("/scanner")} />;
   }
 
-  const currentProps = SPORT_PROPS[sport] || SPORT_PROPS["horse-racing"];
+  const currentProps  = SPORT_PROPS[sport] || SPORT_PROPS["horse-racing"];
   const withStatCount = displayPlayers.filter(p => Object.keys(p.all_props).length > 0).length;
-  const someNoStats = displayPlayers.some(p => Object.keys(p.all_props).length === 0);
+  const someNoStats   = displayPlayers.some(p => Object.keys(p.all_props).length === 0);
 
   return (
     <DashboardLayout>
       <div className="p-4 max-w-7xl mx-auto">
+
         {/* Header */}
         <div className="mb-5 flex items-start justify-between">
           <div>
@@ -393,14 +382,12 @@ export default function Scanner() {
 
         {/* Controls */}
         <div className="flex flex-wrap gap-2 mb-2">
-          {/* Sport selector with redirect for horse racing */}
+
+          {/* Sport — redirects to /horse-racing */}
           <Select
             value={sport}
             onValueChange={(s) => {
-              if (s === 'horse-racing') {
-                navigate('/horse-racing');
-                return;
-              }
+              if (s === 'horse-racing') { navigate('/horse-racing'); return; }
               setSport(s);
             }}
           >
@@ -412,6 +399,7 @@ export default function Scanner() {
             </SelectContent>
           </Select>
 
+          {/* Soccer league picker */}
           {sport === 'soccer' && (
             <Select value={soccerLeague} onValueChange={setSoccerLeague}>
               <SelectTrigger className="w-52 bg-gray-900 border-yellow-700/40 text-gray-300 text-sm">
@@ -425,6 +413,7 @@ export default function Scanner() {
             </Select>
           )}
 
+          {/* Game */}
           <Select value={selectedGame} onValueChange={setSelectedGame}>
             <SelectTrigger className="w-72 bg-gray-900 border-gray-700 text-gray-300 text-sm">
               <SelectValue placeholder="Loading games..." />
@@ -439,6 +428,7 @@ export default function Scanner() {
             </SelectContent>
           </Select>
 
+          {/* Prop */}
           <Select value={filterProp} onValueChange={setFilterProp}>
             <SelectTrigger className="w-40 bg-gray-900 border-gray-700 text-gray-300 text-sm">
               <SelectValue placeholder="Select prop" />
@@ -448,6 +438,7 @@ export default function Scanner() {
             </SelectContent>
           </Select>
 
+          {/* Search */}
           <div className="relative flex-1 min-w-[180px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
             <Input
@@ -483,6 +474,7 @@ export default function Scanner() {
             </div>
           </div>
         )}
+
         {error && (
           <div className="mb-4 p-3 bg-red-900/20 border border-red-800 rounded-lg text-red-400 text-sm">
             ❌ {error}
@@ -541,15 +533,15 @@ export default function Scanner() {
               <table className="w-full">
                 <thead className="border-b border-gray-800">
                   <tr>
-                    <SortTh label="Player" sk="name" />
+                    <SortTh label="Player"    sk="name" />
                     <th className="p-3 text-left text-[11px] font-semibold text-yellow-400/70 uppercase tracking-wider whitespace-nowrap">Game</th>
-                    <SortTh label="Line" sk="line" />
-                    <SortTh label="Avg L10" sk="avg" />
-                    <SortTh label="Diff" sk="diff" />
-                    <SortTh label="L5" sk="l5" />
-                    <SortTh label="L10" sk="l10" />
-                    <SortTh label="L15" sk="l15" />
-                    <SortTh label="L20" sk="l20" />
+                    <SortTh label="Line"      sk="line" />
+                    <SortTh label="Avg L10"   sk="avg" />
+                    <SortTh label="Diff"      sk="diff" />
+                    <SortTh label="L5"        sk="l5" />
+                    <SortTh label="L10"       sk="l10" />
+                    <SortTh label="L15"       sk="l15" />
+                    <SortTh label="L20"       sk="l20" />
                     <SortTh label="Rolling ↺" sk="rolling" />
                     <th className="p-3 text-left text-[11px] font-semibold text-yellow-400/70 uppercase tracking-wider whitespace-nowrap">Trend</th>
                   </tr>
@@ -559,10 +551,10 @@ export default function Scanner() {
                     const pd = p.all_props?.[filterProp]
                       ?? p.all_props?.[Object.keys(p.all_props || {})[0]]
                       ?? null;
-                    const diff = pd ? ((pd.avg_l10 ?? 0) - (pd.line ?? 0)) : 0;
+                    const diff     = pd ? ((pd.avg_l10 ?? 0) - (pd.line ?? 0)) : 0;
                     const gameTime = p.game_time ? formatTimeET(p.game_time) : '';
                     const hasStats = Object.keys(p.all_props || {}).length > 0;
-                    const rolling = pd ? calcRolling(pd.values || [], null) : null;
+                    const rolling  = pd ? calcRolling(pd.values || [], null) : null;
 
                     return (
                       <tr
@@ -586,12 +578,10 @@ export default function Scanner() {
                             </div>
                           </div>
                         </td>
-
                         <td className="p-3">
                           <p className="text-xs text-gray-400">vs {p.opponent || '—'}</p>
                           <p className="text-[10px] text-gray-600">{gameTime}</p>
                         </td>
-
                         <td className="p-3">
                           <span className="text-yellow-400 font-bold text-sm">
                             {pd?.line != null ? pd.line.toFixed(1) : '—'}
@@ -607,12 +597,10 @@ export default function Scanner() {
                             </span>
                           ) : <span className="text-gray-600">—</span>}
                         </td>
-
-                        <td className="p-3"><HRBox value={pd?.l5 ?? null} /></td>
+                        <td className="p-3"><HRBox value={pd?.l5  ?? null} /></td>
                         <td className="p-3"><HRBox value={pd?.l10 ?? null} /></td>
                         <td className="p-3"><HRBox value={pd?.l15 ?? null} /></td>
                         <td className="p-3"><HRBox value={pd?.l20 ?? null} /></td>
-
                         <td className="p-3">
                           <div className="flex flex-col gap-1">
                             {pd?.streak ? (
@@ -634,12 +622,11 @@ export default function Scanner() {
                             )}
                           </div>
                         </td>
-
                         <td className="p-3">
                           {(() => {
                             if (marketLine && pd?.avg_l10 != null) {
                               const edge = pd.avg_l10 - marketLine;
-                              const pct = marketLine > 0 ? (edge / marketLine) * 100 : 0;
+                              const pct  = marketLine > 0 ? (edge / marketLine) * 100 : 0;
                               let sig = "Neutral", cls = "bg-gray-500/10 text-gray-400 border border-gray-500/30";
                               if (pct >= 10)       { sig = "🟢 STRONG OVER";  cls = "bg-green-500/30 text-green-300 border border-green-500/50"; }
                               else if (pct >= 3)   { sig = "🟡 Over";         cls = "bg-green-500/15 text-green-400 border border-green-500/30"; }
@@ -668,7 +655,7 @@ export default function Scanner() {
                             );
                           })()}
                         </td>
-                      </table>
+                      </tr>
                     );
                   })}
                 </tbody>
