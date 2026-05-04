@@ -1,4 +1,4 @@
-// src/pages/Scanner.tsx (updated)
+// src/pages/Scanner.tsx
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -688,7 +688,7 @@ export default function Scanner() {
                             );
                           })()}
                         </td>
-                      </tr>
+                      </td>
                     );
                   })}
                 </tbody>
