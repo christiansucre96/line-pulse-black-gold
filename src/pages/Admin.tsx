@@ -68,13 +68,11 @@ export default function Admin() {
   const { user, isAdmin, loading: authLoading } = useAuth();
   const navigate = useNavigate();
 
-  // stats
   const [dbStats, setDbStats]           = useState({ totalUsers: 0, totalProps: 0 });
   const [users, setUsers]               = useState<UserProfile[]>([]);
   const [trialStats, setTrialStats]     = useState({ totalTrials: 0, activeTrials: 0, expiredTrials: 0, byTier: {} as Record<string, number> });
   const [loadingUsers, setLoadingUsers] = useState(false);
 
-  // trial dialog
   const [showAddTrial, setShowAddTrial]   = useState(false);
   const [newEmail, setNewEmail]           = useState("");
   const [newTier, setNewTier]             = useState("7day");
@@ -82,11 +80,9 @@ export default function Admin() {
   const [trialReason, setTrialReason]     = useState("");
   const [isExisting, setIsExisting]       = useState(false);
 
-  // sync jobs  key = "sport-op"
   const [jobs, setJobs]       = useState<Record<string, JobState>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
-  // backfill
   const [bfSport,   setBfSport]   = useState("mlb");
   const [bfStart,   setBfStart]   = useState("");
   const [bfEnd,     setBfEnd]     = useState("");
@@ -101,7 +97,6 @@ export default function Admin() {
 
   const anyRunning = Object.values(jobs).some(j => j.status === "running") || bfRunning;
 
-  // ── Edge call ─────────────────────────────────────────────────────────────
   const callEdge = async (body: any, ms = 90000) => {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), ms);
@@ -123,7 +118,6 @@ export default function Admin() {
     }
   };
 
-  // ── Single op (with horse‑racing guard) ───────────────────────────────────
   const runOp = async (sport: string, op: string) => {
     if (sport === 'horse-racing') {
       toast.error("Horse racing data cannot be synced using clever-action. Use the 'Full Sync' button instead.");
@@ -142,11 +136,9 @@ export default function Admin() {
     }
   };
 
-  // ── Full sport sync (horse‑racing uses its own edge function) ─────────────
   const syncSport = async (sport: string) => {
-    // Horse racing: call dedicated edge function
     if (sport === 'horse-racing') {
-      setJob(sport, 'teams', 'running'); // reusing "teams" as the job key for full sync
+      setJob(sport, 'teams', 'running');
       try {
         const res = await fetch(HORSE_RACING_EDGE_URL, {
           method: 'POST',
@@ -167,7 +159,6 @@ export default function Admin() {
       return;
     }
 
-    // All other sports: use clever-action
     const seq = ["teams", "schedule", "players", "historical_stats"];
     for (const op of seq) {
       setJob(sport, op, "running");
@@ -185,7 +176,6 @@ export default function Admin() {
     refreshDbStats();
   };
 
-  // ── Backfill (guard for horse‑racing) ─────────────────────────────────────
   const runBackfill = async () => {
     if (bfSport === 'horse-racing') {
       toast.error("Horse racing backfill is not supported (no free API).");
@@ -206,7 +196,6 @@ export default function Admin() {
     } finally { setBfRunning(false); }
   };
 
-  // ── DB stats ──────────────────────────────────────────────────────────────
   const refreshDbStats = async () => {
     try {
       const [{ count: props }, { count: users }] = await Promise.all([
@@ -225,7 +214,6 @@ export default function Admin() {
         .select("id,email,created_at,last_login,subscription_tier,subscription_start,subscription_end,is_active,is_free_trial,trial_reason,revenue_generated")
         .order("created_at", { ascending: false });
       if (error) throw error;
-
       const mapped: UserProfile[] = (data || []).map(p => ({
         ...p, email: p.email || "unknown",
         subscription_tier: p.subscription_tier || "",
@@ -234,7 +222,6 @@ export default function Admin() {
         revenue_generated: p.revenue_generated ?? 0,
       }));
       setUsers(mapped);
-
       const trials = mapped.filter(u => u.is_free_trial);
       const now = new Date();
       setTrialStats({
@@ -308,20 +295,14 @@ export default function Admin() {
   return (
     <DashboardLayout>
       <div className="p-6 max-w-7xl mx-auto space-y-6">
-
         {/* Header */}
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold flex items-center gap-2 text-yellow-400">
             <Shield className="w-6 h-6" /> Admin Panel
           </h1>
           <div className="flex gap-2">
-            <Button 
-              onClick={() => navigate('/studio')}
-              variant="outline"
-              className="border-gray-700 text-gray-300 hover:bg-gray-800 hover:text-white"
-            >
-              <Database className="w-4 h-4 mr-2" />
-              Data Studio
+            <Button onClick={() => navigate('/studio')} variant="outline" className="border-gray-700 text-gray-300 hover:bg-gray-800 hover:text-white">
+              <Database className="w-4 h-4 mr-2" /> Data Studio
             </Button>
             <Badge variant="outline" className="border-green-500/50 text-green-400">
               <Gift className="w-3 h-3 mr-1" /> Trial Manager
@@ -348,7 +329,7 @@ export default function Admin() {
           ))}
         </div>
 
-        {/* ══ DATA SYNC ════════════════════════════════════════════════════ */}
+        {/* DATA SYNC */}
         <div className="bg-[#0b1120] rounded-xl border border-gray-800 overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
             <h3 className="font-bold text-yellow-400 flex items-center gap-2">
@@ -381,14 +362,12 @@ export default function Admin() {
 
               return (
                 <div key={sport}>
-                  {/* Sport row */}
                   <div className="flex items-center gap-3 px-5 py-3">
                     <span className="text-lg">{icon}</span>
                     <span className="font-semibold text-white w-24">{label}</span>
                     <span className={`text-xs px-2 py-0.5 rounded-full ${running ? "bg-yellow-500/20 text-yellow-400" : allOk ? "bg-green-500/20 text-green-400" : hasErr ? "bg-red-500/20 text-red-400" : "bg-gray-800 text-gray-500"}`}>
                       {running ? "Syncing…" : allOk ? "✓ Done" : hasErr ? "Error" : "Idle"}
                     </span>
-
                     <div className="ml-auto flex gap-2">
                       <button
                         onClick={() => syncSport(sport)}
@@ -408,7 +387,6 @@ export default function Admin() {
                     </div>
                   </div>
 
-                  {/* Expanded ops */}
                   {isOpen && (
                     <div className="bg-[#060d1a] px-5 py-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
                       {SPORT_OPS.map(op => {
@@ -451,41 +429,34 @@ export default function Admin() {
           </div>
         </div>
 
-        {/* ══ BACKFILL ══════════════════════════════════════════════════════ */}
+        {/* BACKFILL */}
         <div className="bg-[#0b1120] rounded-xl border border-gray-800 p-5">
           <h3 className="font-bold text-yellow-400 mb-4">📦 Backfill Box Scores by Date Range</h3>
           <div className="flex flex-wrap gap-3 items-end">
             <div>
               <label className="text-xs text-gray-500 block mb-1">Sport</label>
-              <select value={bfSport} onChange={e => setBfSport(e.target.value)}
-                className="bg-[#1e293b] border border-gray-700 rounded px-3 py-1.5 text-sm text-white">
+              <select value={bfSport} onChange={e => setBfSport(e.target.value)} className="bg-[#1e293b] border border-gray-700 rounded px-3 py-1.5 text-sm text-white">
                 {SPORTS.map(s => <option key={s.key} value={s.key}>{s.icon} {s.label}</option>)}
               </select>
             </div>
             <div>
               <label className="text-xs text-gray-500 block mb-1">Start Date</label>
-              <input type="date" value={bfStart} onChange={e => setBfStart(e.target.value)}
-                className="bg-[#1e293b] border border-gray-700 rounded px-3 py-1.5 text-sm text-white" />
+              <input type="date" value={bfStart} onChange={e => setBfStart(e.target.value)} className="bg-[#1e293b] border border-gray-700 rounded px-3 py-1.5 text-sm text-white" />
             </div>
             <div>
               <label className="text-xs text-gray-500 block mb-1">End Date</label>
-              <input type="date" value={bfEnd} onChange={e => setBfEnd(e.target.value)}
-                className="bg-[#1e293b] border border-gray-700 rounded px-3 py-1.5 text-sm text-white" />
+              <input type="date" value={bfEnd} onChange={e => setBfEnd(e.target.value)} className="bg-[#1e293b] border border-gray-700 rounded px-3 py-1.5 text-sm text-white" />
             </div>
             <div>
               <label className="text-xs text-gray-500 block mb-1">Or Last N Days</label>
-              <input type="number" min={1} max={60} value={bfDays} onChange={e => setBfDays(+e.target.value)}
-                className="bg-[#1e293b] border border-gray-700 rounded px-3 py-1.5 text-sm text-white w-20" />
+              <input type="number" min={1} max={60} value={bfDays} onChange={e => setBfDays(+e.target.value)} className="bg-[#1e293b] border border-gray-700 rounded px-3 py-1.5 text-sm text-white w-20" />
             </div>
-            <button onClick={runBackfill} disabled={bfRunning || anyRunning}
-              className="px-4 py-1.5 bg-yellow-500 hover:bg-yellow-600 text-black rounded font-bold text-sm disabled:opacity-40 flex items-center gap-2 transition">
+            <button onClick={runBackfill} disabled={bfRunning || anyRunning} className="px-4 py-1.5 bg-yellow-500 hover:bg-yellow-600 text-black rounded font-bold text-sm disabled:opacity-40 flex items-center gap-2 transition">
               {bfRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : "⚡"}
               {bfRunning ? "Running…" : "Run Backfill"}
             </button>
           </div>
-          {bfResult && (
-            <p className={`mt-3 text-sm font-medium ${bfResult.startsWith("❌") ? "text-red-400" : "text-green-400"}`}>{bfResult}</p>
-          )}
+          {bfResult && <p className={`mt-3 text-sm font-medium ${bfResult.startsWith("❌") ? "text-red-400" : "text-green-400"}`}>{bfResult}</p>}
           <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px] text-gray-600">
             <span>⭐ MLB start: <strong className="text-gray-500">2026-03-27</strong></span>
             <span>⭐ NHL start: <strong className="text-gray-500">2025-10-04</strong></span>
@@ -494,7 +465,7 @@ export default function Admin() {
           </div>
         </div>
 
-        {/* ══ TRIAL DIALOG ═════════════════════════════════════════════════ */}
+        {/* TRIAL DIALOG */}
         <Dialog open={showAddTrial} onOpenChange={setShowAddTrial}>
           <DialogContent className="bg-[#0b1120] border-gray-800 text-white max-w-lg">
             <DialogHeader>
@@ -512,15 +483,13 @@ export default function Admin() {
               </div>
               <div className="space-y-2">
                 <Label className="text-gray-300">Email</Label>
-                <Input type="email" value={newEmail} onChange={e => setNewEmail(e.target.value)}
-                  placeholder="user@example.com" className="bg-[#1e293b] border-gray-700 text-white" />
+                <Input type="email" value={newEmail} onChange={e => setNewEmail(e.target.value)} placeholder="user@example.com" className="bg-[#1e293b] border-gray-700 text-white" />
               </div>
               {!isExisting && (
                 <div className="space-y-2">
                   <Label className="text-gray-300">Temp Password</Label>
                   <div className="flex gap-2">
-                    <Input value={tempPw} readOnly onChange={e => setTempPw(e.target.value)}
-                      placeholder="Auto-generated" className="bg-[#1e293b] border-gray-700 text-white font-mono flex-1" />
+                    <Input value={tempPw} readOnly onChange={e => setTempPw(e.target.value)} placeholder="Auto-generated" className="bg-[#1e293b] border-gray-700 text-white font-mono flex-1" />
                     <Button type="button" variant="outline" onClick={() => setTempPw(makePw())} className="border-gray-700 text-gray-300 shrink-0"><Key className="w-4 h-4" /></Button>
                     {tempPw && <Button type="button" variant="outline" onClick={async () => { await navigator.clipboard.writeText(tempPw); toast.success("Copied"); }} className="border-gray-700 text-blue-400 shrink-0"><Copy className="w-4 h-4" /></Button>}
                   </div>
@@ -539,29 +508,24 @@ export default function Admin() {
               </div>
               <div className="space-y-2">
                 <Label className="text-gray-300">Reason (optional)</Label>
-                <Textarea value={trialReason} onChange={e => setTrialReason(e.target.value)}
-                  placeholder="e.g., YouTube influencer..." className="bg-[#1e293b] border-gray-700 text-white min-h-[80px]" />
+                <Textarea value={trialReason} onChange={e => setTrialReason(e.target.value)} placeholder="e.g., YouTube influencer..." className="bg-[#1e293b] border-gray-700 text-white min-h-[80px]" />
               </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setShowAddTrial(false)} className="border-gray-700 text-gray-300">Cancel</Button>
-              <Button onClick={grantTrial} disabled={!newEmail} className="bg-yellow-500 hover:bg-yellow-600 text-black font-semibold">
-                <Gift className="w-4 h-4 mr-2" /> Grant Trial
-              </Button>
+              <Button onClick={grantTrial} disabled={!newEmail} className="bg-yellow-500 hover:bg-yellow-600 text-black font-semibold"><Gift className="w-4 h-4 mr-2" /> Grant Trial</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
-        {/* ══ TRIAL TABLE ══════════════════════════════════════════════════ */}
+        {/* TRIAL TABLE */}
         <Card className="bg-[#0b1120] border-gray-800">
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
               <CardTitle className="text-yellow-400 flex items-center gap-2"><Users className="w-5 h-5" /> Trial Users</CardTitle>
               <CardDescription className="text-gray-400">Manage free trial access</CardDescription>
             </div>
-            <Button onClick={() => setShowAddTrial(true)} className="bg-yellow-500 hover:bg-yellow-600 text-black font-semibold">
-              <Gift className="w-4 h-4 mr-2" /> Grant New Trial
-            </Button>
+            <Button onClick={() => setShowAddTrial(true)} className="bg-yellow-500 hover:bg-yellow-600 text-black font-semibold"><Gift className="w-4 h-4 mr-2" /> Grant New Trial</Button>
           </CardHeader>
           <CardContent>
             {loadingUsers ? (
@@ -584,7 +548,7 @@ export default function Admin() {
                   </thead>
                   <tbody>
                     {users.filter(u => u.is_free_trial).map(u => {
-                      const exp  = expired(u.subscription_end);
+                      const exp = expired(u.subscription_end);
                       const tier = PRICING[u.subscription_tier];
                       return (
                         <tr key={u.id} className="border-b border-gray-800/50 hover:bg-[#1e293b]/50">
@@ -633,15 +597,13 @@ export default function Admin() {
           </CardContent>
         </Card>
 
-        {/* Info */}
         <div className="bg-blue-900/20 border border-blue-800 p-4 rounded-lg text-sm text-blue-400">
           <strong>💡 Sync Order:</strong> For each sport — <strong>Teams → Schedule → Players → Historical Stats</strong>.
           Historical Stats pulls exactly <strong>20 games</strong> per player and fixes any orphaned stats.
           Use <strong>Backfill</strong> to pull older box scores directly from ESPN box scores by date range.
           <br /><br />
-          <strong>🏇 Horse Racing:</strong> Use the <strong>Full Sync</strong> button (only) to fetch racing cards from the dedicated `horse-racing` Edge Function. Individual operations are not supported.
+          <strong>🏇 Horse Racing:</strong> Use the <strong>Full Sync</strong> button (only) to fetch racing cards from the dedicated <code>horse-racing</code> Edge Function. Individual operations are not supported.
         </div>
-
       </div>
     </DashboardLayout>
   );
