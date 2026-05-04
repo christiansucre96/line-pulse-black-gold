@@ -655,7 +655,7 @@ export default function Scanner() {
                             );
                           })()}
                         </td>
-                      </table>
+                      </td>
                     );
                   })}
                 </tbody>
