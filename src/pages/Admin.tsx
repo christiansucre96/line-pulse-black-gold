@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/card";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
+const HORSE_RACING_EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/horse-racing";
 
 const SPORTS = [
   { key: "nba",    icon: "🏀", label: "NBA" },
@@ -36,7 +37,7 @@ const SPORTS = [
   { key: "mlb",    icon: "⚾", label: "MLB" },
   { key: "nhl",    icon: "🏒", label: "NHL" },
   { key: "soccer", icon: "⚽", label: "Soccer" },
-  { key: "horse-racing", icon: "🏇", label: "Horse Racing" }, // ← added
+  { key: "horse-racing", icon: "🏇", label: "Horse Racing" },
 ];
 
 const SPORT_OPS = [
@@ -122,8 +123,12 @@ export default function Admin() {
     }
   };
 
-  // ── Single op ─────────────────────────────────────────────────────────────
+  // ── Single op (with horse‑racing guard) ───────────────────────────────────
   const runOp = async (sport: string, op: string) => {
+    if (sport === 'horse-racing') {
+      toast.error("Horse racing data cannot be synced using clever-action. Use the 'Full Sync' button instead.");
+      return;
+    }
     setJob(sport, op, "running");
     try {
       const d = await callEdge({ operation: op, sport });
@@ -137,8 +142,32 @@ export default function Admin() {
     }
   };
 
-  // ── Full sport sync (teams → schedule → players → historical) ─────────────
+  // ── Full sport sync (horse‑racing uses its own edge function) ─────────────
   const syncSport = async (sport: string) => {
+    // Horse racing: call dedicated edge function
+    if (sport === 'horse-racing') {
+      setJob(sport, 'teams', 'running'); // reusing "teams" as the job key for full sync
+      try {
+        const res = await fetch(HORSE_RACING_EDGE_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
+          body: JSON.stringify({ operation: 'sync_cards' }),
+        });
+        const d = await res.json();
+        if (!d.success) throw new Error(d.error || 'Unknown error');
+        const uk = d.results?.uk || 0;
+        const aus = d.results?.aus || 0;
+        const usa = d.results?.usa || 0;
+        setJob(sport, 'teams', 'success', `UK:${uk} AUS:${aus} USA:${usa}`);
+        toast.success(`🏇 Horse Racing cards synced! (UK:${uk}, AUS:${aus}, USA:${usa})`);
+      } catch (e: any) {
+        setJob(sport, 'teams', 'error', e.message);
+        toast.error(`Horse Racing sync failed: ${e.message}`);
+      }
+      return;
+    }
+
+    // All other sports: use clever-action
     const seq = ["teams", "schedule", "players", "historical_stats"];
     for (const op of seq) {
       setJob(sport, op, "running");
@@ -156,8 +185,12 @@ export default function Admin() {
     refreshDbStats();
   };
 
-  // ── Backfill ──────────────────────────────────────────────────────────────
+  // ── Backfill (guard for horse‑racing) ─────────────────────────────────────
   const runBackfill = async () => {
+    if (bfSport === 'horse-racing') {
+      toast.error("Horse racing backfill is not supported (no free API).");
+      return;
+    }
     setBfRunning(true); setBfResult(null);
     try {
       const body: any = { operation: "sync_stats_range", sport: bfSport };
@@ -380,6 +413,7 @@ export default function Admin() {
                     <div className="bg-[#060d1a] px-5 py-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
                       {SPORT_OPS.map(op => {
                         const job = getJob(sport, op.key);
+                        const isHorse = sport === 'horse-racing';
                         return (
                           <div key={op.key} className={`rounded-lg p-3 border flex flex-col gap-1.5 ${
                             job.status === "running" ? "border-yellow-500/40 bg-yellow-500/5" :
@@ -399,11 +433,12 @@ export default function Admin() {
                             )}
                             <button
                               onClick={() => runOp(sport, op.key)}
-                              disabled={anyRunning}
-                              className="mt-auto w-full py-1 rounded text-xs font-medium bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-40 flex items-center justify-center gap-1 transition"
+                              disabled={anyRunning || isHorse}
+                              className={`mt-auto w-full py-1 rounded text-xs font-medium bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-40 flex items-center justify-center gap-1 transition ${isHorse ? 'cursor-not-allowed opacity-50' : ''}`}
+                              title={isHorse ? "Use 'Full Sync' for Horse Racing" : ""}
                             >
                               {job.status === "running" && <Loader2 className="w-3 h-3 animate-spin" />}
-                              {job.status === "running" ? "Running…" : "Run"}
+                              {job.status === "running" ? "Running…" : isHorse ? "N/A" : "Run"}
                             </button>
                           </div>
                         );
@@ -603,6 +638,8 @@ export default function Admin() {
           <strong>💡 Sync Order:</strong> For each sport — <strong>Teams → Schedule → Players → Historical Stats</strong>.
           Historical Stats pulls exactly <strong>20 games</strong> per player and fixes any orphaned stats.
           Use <strong>Backfill</strong> to pull older box scores directly from ESPN box scores by date range.
+          <br /><br />
+          <strong>🏇 Horse Racing:</strong> Use the <strong>Full Sync</strong> button (only) to fetch racing cards from the dedicated `horse-racing` Edge Function. Individual operations are not supported.
         </div>
 
       </div>
