@@ -393,7 +393,17 @@ export default function Scanner() {
 
         {/* Controls */}
         <div className="flex flex-wrap gap-2 mb-2">
-          <Select value={sport} onValueChange={setSport}>
+          {/* Sport Select with redirect for horse racing */}
+          <Select
+            value={sport}
+            onValueChange={(s) => {
+              if (s === 'horse-racing') {
+                navigate('/horse-racing');
+                return;
+              }
+              setSport(s);
+            }}
+          >
             <SelectTrigger className="w-36 bg-gray-900 border-gray-700 text-yellow-400 text-sm">
               <SelectValue />
             </SelectTrigger>
@@ -575,7 +585,7 @@ export default function Scanner() {
                               </p>
                             </div>
                           </div>
-                        </td>
+                        </tr>
 
                         <td className="p-3">
                           <p className="text-xs text-gray-400">vs {p.opponent || '—'}</p>
