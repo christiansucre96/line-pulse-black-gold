@@ -1,14 +1,13 @@
 // src/pages/Admin.tsx
-// 🎁 Purpose: Grant FREE trial access to influencers & VIP users
-
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { useEffect, useState } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { toast } from "sonner";
-import { 
-  Shield, Database, RefreshCw, Loader2, Users, Gift, 
-  Clock, Key, CheckCircle, XCircle, ExternalLink, Copy
+import {
+  Shield, Database, RefreshCw, Loader2, Users, Gift,
+  Clock, Key, CheckCircle, XCircle, ExternalLink, Copy,
+  ChevronDown, ChevronUp,
 } from "lucide-react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -16,550 +15,567 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
+  Dialog, DialogContent, DialogDescription,
+  DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem,
+  SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  Card, CardContent, CardHeader,
+  CardTitle, CardDescription,
+} from "@/components/ui/card";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
-const SPORTS = ["nba", "nfl", "mlb", "nhl", "soccer"];
 
-const PRICING: Record<string, { label: string; days: number; referencePrice: number; note: string }> = {
-  '7day':   { label: '7 Days',  days: 7,   referencePrice: 35.00,   note: '1-week influencer trial' },
-  '1month': { label: '1 Month', days: 30,  referencePrice: 150.00,  note: 'Standard monthly access' },
-  '3month': { label: '3 Months',days: 90,  referencePrice: 400.00,  note: 'Quarterly partnership' },
-  '1year':  { label: '1 Year',  days: 365, referencePrice: 1500.00, note: 'Annual ambassador access' },
+const SPORTS = [
+  { key: "nba",    icon: "🏀", label: "NBA" },
+  { key: "nfl",    icon: "🏈", label: "NFL" },
+  { key: "mlb",    icon: "⚾", label: "MLB" },
+  { key: "nhl",    icon: "🏒", label: "NHL" },
+  { key: "soccer", icon: "⚽", label: "Soccer" },
+  { key: "horse-racing", icon: "🏇", label: "Horse Racing" }, // ← added
+];
+
+const SPORT_OPS = [
+  { key: "teams",            label: "Teams",           icon: "🏟️", desc: "All team rosters" },
+  { key: "schedule",         label: "Schedule",        icon: "📅", desc: "Next 3-day games" },
+  { key: "players",          label: "Players",         icon: "👤", desc: "Active rosters" },
+  { key: "historical_stats", label: "Historical Stats", icon: "📊", desc: "Last 20 game logs" },
+  { key: "boxscores",        label: "Box Scores",      icon: "🔢", desc: "Today's finished" },
+];
+
+const PRICING: Record<string, { label: string; days: number; referencePrice: number }> = {
+  "7day":   { label: "7 Days",   days: 7,   referencePrice: 35.00 },
+  "1month": { label: "1 Month",  days: 30,  referencePrice: 150.00 },
+  "3month": { label: "3 Months", days: 90,  referencePrice: 400.00 },
+  "1year":  { label: "1 Year",   days: 365, referencePrice: 1500.00 },
 };
 
-const REFERENCE_MONTHLY_RATE = 150.00;
-
-interface UserWithProfile {
-  id: string;
-  email: string;
-  created_at: string;
-  last_login: string | null;
-  subscription_tier: string;
-  subscription_start: string | null;
-  subscription_end: string | null;
-  is_active: boolean;
-  is_free_trial: boolean;
-  trial_reason: string | null;
-  revenue_generated: number;
+interface UserProfile {
+  id: string; email: string; created_at: string; last_login: string | null;
+  subscription_tier: string; subscription_start: string | null; subscription_end: string | null;
+  is_active: boolean; is_free_trial: boolean; trial_reason: string | null; revenue_generated: number;
 }
 
-interface TrialStats {
-  totalTrials: number;
-  activeTrials: number;
-  expiredTrials: number;
-  byTier: Record<string, number>;
-}
+type JobStatus = "idle" | "running" | "success" | "error";
+interface JobState { status: JobStatus; message?: string }
 
 export default function Admin() {
   const { user, isAdmin, loading: authLoading } = useAuth();
   const navigate = useNavigate();
-  
-  const [stats, setStats] = useState({ totalUsers: 0, totalProps: 0 });
-  const [ingesting, setIngesting] = useState<string | null>(null);
-  const [users, setUsers] = useState<UserWithProfile[]>([]);
-  const [trialStats, setTrialStats] = useState<TrialStats>({
-    totalTrials: 0, activeTrials: 0, expiredTrials: 0, byTier: {}
-  });
+
+  // stats
+  const [dbStats, setDbStats]           = useState({ totalUsers: 0, totalProps: 0 });
+  const [users, setUsers]               = useState<UserProfile[]>([]);
+  const [trialStats, setTrialStats]     = useState({ totalTrials: 0, activeTrials: 0, expiredTrials: 0, byTier: {} as Record<string, number> });
   const [loadingUsers, setLoadingUsers] = useState(false);
-  const [showAddTrial, setShowAddTrial] = useState(false);
-  const [newUserEmail, setNewUserEmail] = useState('');
-  const [newUserTier, setNewUserTier] = useState<string>('7day');
-  const [tempPassword, setTempPassword] = useState('');
-  const [trialReason, setTrialReason] = useState('');
-  const [isExistingUser, setIsExistingUser] = useState(false);
-  const [copiedPassword, setCopiedPassword] = useState(false);
 
-  const refreshStats = async () => {
-    try {
-      const { count: propsCount } = await supabase.from("player_props_cache").select("*", { count: "exact", head: true });
-      const { count: userCount } = await supabase.from("profiles").select("*", { count: "exact", head: true });
-      setStats({ totalUsers: userCount || 0, totalProps: propsCount || 0 });
-    } catch (err) { console.error("Failed to load stats:", err); }
-  };
+  // trial dialog
+  const [showAddTrial, setShowAddTrial]   = useState(false);
+  const [newEmail, setNewEmail]           = useState("");
+  const [newTier, setNewTier]             = useState("7day");
+  const [tempPw, setTempPw]               = useState("");
+  const [trialReason, setTrialReason]     = useState("");
+  const [isExisting, setIsExisting]       = useState(false);
 
-  const loadUsers = async () => {
-    setLoadingUsers(true);
-    try {
-      const { data: profilesData, error } = await supabase
-        .from('profiles')
-        .select(`
-          id, email, created_at, last_login,
-          subscription_tier, subscription_start, subscription_end,
-          is_active, is_free_trial, trial_reason, revenue_generated
-        `)
-        .order('created_at', { ascending: false });
+  // sync jobs  key = "sport-op"
+  const [jobs, setJobs]       = useState<Record<string, JobState>>({});
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
-      if (error) throw error;
+  // backfill
+  const [bfSport,   setBfSport]   = useState("mlb");
+  const [bfStart,   setBfStart]   = useState("");
+  const [bfEnd,     setBfEnd]     = useState("");
+  const [bfDays,    setBfDays]    = useState(7);
+  const [bfRunning, setBfRunning] = useState(false);
+  const [bfResult,  setBfResult]  = useState<string | null>(null);
 
-      const usersWithEmail: UserWithProfile[] = (profilesData || []).map(profile => ({
-        ...profile,
-        email: profile.email || 'unknown',
-        subscription_tier: profile.subscription_tier || '',
-        is_active: profile.is_active ?? false,
-        is_free_trial: profile.is_free_trial ?? false,
-        revenue_generated: profile.revenue_generated ?? 0,
-      }));
+  const setJob = (sport: string, op: string, status: JobStatus, msg?: string) =>
+    setJobs(p => ({ ...p, [`${sport}-${op}`]: { status, message: msg } }));
+  const getJob = (sport: string, op: string): JobState =>
+    jobs[`${sport}-${op}`] || { status: "idle" };
 
-      setUsers(usersWithEmail);
+  const anyRunning = Object.values(jobs).some(j => j.status === "running") || bfRunning;
 
-      const trials = usersWithEmail.filter(u => u.is_free_trial);
-      const now = new Date();
-
-      setTrialStats({
-        totalTrials: trials.length,
-        activeTrials: trials.filter(u =>
-          u.is_active && (!u.subscription_end || new Date(u.subscription_end) > now)
-        ).length,
-        expiredTrials: trials.filter(u =>
-          u.subscription_end && new Date(u.subscription_end) <= now
-        ).length,
-        byTier: trials.reduce((acc, u) => {
-          acc[u.subscription_tier] = (acc[u.subscription_tier] || 0) + 1;
-          return acc;
-        }, {} as Record<string, number>)
-      });
-    } catch (err) {
-      console.error("Failed to load users:", err);
-      toast.error("Failed to load users");
-    } finally {
-      setLoadingUsers(false);
-    }
-  };
-
-  const generateTempPassword = () => {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    let result = '';
-    for (let i = 0; i < 10; i++) result += chars.charAt(Math.floor(Math.random() * chars.length));
-    return result;
-  };
-
-  const copyToClipboard = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopiedPassword(true);
-      toast.success("Password copied to clipboard");
-      setTimeout(() => setCopiedPassword(false), 2000);
-    } catch {
-      toast.error("Failed to copy");
-    }
-  };
-
-  const grantTrial = async () => {
-    if (!newUserEmail) { toast.error("Email is required"); return; }
-    const tier = PRICING[newUserTier];
-    if (!tier) { toast.error("Invalid tier selected"); return; }
-
-    try {
-      let userId: string;
-
-      if (isExistingUser) {
-        const { data: existing, error: findError } = await supabase
-          .from('profiles')
-          .select('id')
-          .eq('email', newUserEmail.toLowerCase())
-          .maybeSingle();
-
-        if (findError || !existing) throw new Error("User not found. Create new user instead.");
-        userId = existing.id;
-      } else {
-        const password = tempPassword || generateTempPassword();
-        const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
-          email: newUserEmail.toLowerCase(),
-          password,
-          email_confirm: true,
-        });
-        if (authError) throw authError;
-        if (!authUser.user) throw new Error("User creation failed");
-        userId = authUser.user.id;
-        setTempPassword(password);
-      }
-
-      const startDate = new Date();
-      const endDate = tier.days
-        ? new Date(startDate.getTime() + tier.days * 24 * 60 * 60 * 1000)
-        : null;
-
-      const { error: profileError } = await supabase.from('profiles').upsert({
-        id: userId,
-        user_id: userId,
-        email: newUserEmail.toLowerCase(),
-        subscription_tier: newUserTier,
-        subscription_start: startDate.toISOString(),
-        subscription_end: endDate?.toISOString(),
-        is_active: true,
-        is_free_trial: true,
-        trial_reason: trialReason || `Influencer trial - ${newUserTier}`,
-        trial_granted_by: user?.id,
-      }, { onConflict: 'id' });
-
-      if (profileError) throw new Error(`Profile error: ${profileError.message}`);
-
-      await supabase.from('subscriptions').delete().eq('user_id', userId);
-      const { error: subError } = await supabase.from('subscriptions').insert({
-        user_id: userId,
-        tier: newUserTier,
-        amount: 0,
-        currency: 'USDT',
-        status: 'active',
-        start_date: startDate.toISOString(),
-        end_date: endDate?.toISOString(),
-        is_free_trial: true,
-        granted_by: user?.id,
-        trial_reason: trialReason,
-      });
-      if (subError) throw new Error(`Subscription error: ${subError.message}`);
-
-      await supabase.from('revenue_events').insert({
-        user_id: userId,
-        event_type: 'subscription',
-        amount: 0,
-        currency: 'USDT',
-        description: `FREE trial: ${tier.label}`,
-        is_free_trial: true,
-      });
-
-      toast.success(`✅ Trial granted to ${newUserEmail}`);
-      setShowAddTrial(false);
-      setNewUserEmail('');
-      setTempPassword('');
-      setTrialReason('');
-      setIsExistingUser(false);
-      await loadUsers();
-      await refreshStats();
-    } catch (err: any) {
-      console.error("Grant trial error:", err);
-      toast.error(err.message || "Failed to grant trial");
-    }
-  };
-
-  const extendTrial = async (userId: string, additionalDays: number) => {
-    try {
-      const newEnd = new Date(Date.now() + additionalDays * 24 * 60 * 60 * 1000);
-      await supabase.from('profiles').update({ subscription_end: newEnd.toISOString() }).eq('id', userId);
-      await supabase.from('subscriptions').update({ end_date: newEnd.toISOString() }).eq('user_id', userId).eq('status', 'active');
-      toast.success("Trial extended");
-      await loadUsers();
-    } catch (err: any) { toast.error(err.message || "Failed to extend trial"); }
-  };
-
-  const revokeTrial = async (userId: string) => {
-    if (!confirm("Revoke this user's trial access?")) return;
-    try {
-      await supabase.from('profiles').update({ is_active: false, subscription_end: new Date().toISOString() }).eq('id', userId);
-      await supabase.from('subscriptions').update({ status: 'revoked' }).eq('user_id', userId);
-      toast.success("Trial revoked");
-      await loadUsers();
-    } catch (err: any) { toast.error(err.message || "Failed to revoke trial"); }
-  };
-
-  const isTrialExpired = (endDate: string | null) => endDate ? new Date(endDate) < new Date() : false;
-
-  useEffect(() => {
-    if (isAdmin) { refreshStats(); loadUsers(); }
-  }, [isAdmin]);
-
-  const callEdge = async (body: any, timeoutMs = 45000) => {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  // ── Edge call ─────────────────────────────────────────────────────────────
+  const callEdge = async (body: any, ms = 90000) => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
     try {
       const res = await fetch(EDGE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
         body: JSON.stringify(body),
-        signal: controller.signal,
+        signal: ctrl.signal,
       });
-      clearTimeout(timeoutId);
-      const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.error || "Sync failed");
-      return data;
-    } catch (err: any) {
-      clearTimeout(timeoutId);
-      if (err.name === 'AbortError') throw new Error("Request timed out (45s limit). Try syncing smaller data sets.");
-      throw err;
+      clearTimeout(timer);
+      const d = await res.json();
+      if (!res.ok || !d.success) throw new Error(d.error || "Sync failed");
+      return d;
+    } catch (e: any) {
+      clearTimeout(timer);
+      if (e.name === "AbortError") throw new Error("Timed out — try a smaller range");
+      throw e;
     }
   };
 
+  // ── Single op ─────────────────────────────────────────────────────────────
+  const runOp = async (sport: string, op: string) => {
+    setJob(sport, op, "running");
+    try {
+      const d = await callEdge({ operation: op, sport });
+      const n = d.count ?? d.archived ?? d.stats_upserted ?? "✓";
+      setJob(sport, op, "success", `${n}`);
+      toast.success(`${sport.toUpperCase()} ${op} — ${n}`);
+      if (op === "historical_stats" || op === "boxscores") refreshDbStats();
+    } catch (e: any) {
+      setJob(sport, op, "error", e.message);
+      toast.error(`${sport.toUpperCase()} ${op}: ${e.message}`);
+    }
+  };
+
+  // ── Full sport sync (teams → schedule → players → historical) ─────────────
   const syncSport = async (sport: string) => {
-    setIngesting(sport);
-    try {
-      await callEdge({ operation: 'teams', sport });
-      toast.info(`${sport.toUpperCase()} teams synced`);
-      await callEdge({ operation: 'schedule', sport });
-      toast.info(`${sport.toUpperCase()} schedule synced`);
-      await callEdge({ operation: 'players', sport });
-      toast.info(`${sport.toUpperCase()} players synced`);
-      await callEdge({ operation: 'historical_stats', sport }, 60000);
-      toast.info(`${sport.toUpperCase()} stats synced`);
-      toast.success(`✅ ${sport.toUpperCase()} fully synced!`);
-      await refreshStats();
-    } catch (err: any) {
-      console.error(`Sync error for ${sport}:`, err);
-      toast.error(`${sport.toUpperCase()} failed: ${err.message}`);
-    } finally { setIngesting(null); }
-  };
-
-  const syncAll = async () => {
-    setIngesting("all");
-    try {
-      for (const sport of SPORTS) {
-        await syncSport(sport);
-        await new Promise(resolve => setTimeout(resolve, 2000));
+    const seq = ["teams", "schedule", "players", "historical_stats"];
+    for (const op of seq) {
+      setJob(sport, op, "running");
+      try {
+        const d = await callEdge({ operation: op, sport }, 120000);
+        const n = d.count ?? d.archived ?? "✓";
+        setJob(sport, op, "success", `${n}`);
+      } catch (e: any) {
+        setJob(sport, op, "error", e.message);
+        toast.error(`${sport.toUpperCase()} ${op} failed: ${e.message}`);
+        return;
       }
-      toast.success("🚀 All sports synced successfully!");
-    } catch (err: any) {
-      toast.error(`Sync all failed: ${err.message}`);
-    } finally { setIngesting(null); }
+    }
+    toast.success(`✅ ${sport.toUpperCase()} fully synced`);
+    refreshDbStats();
   };
 
-  const syncBoxScores = async (sport: string) => {
-    setIngesting(sport);
+  // ── Backfill ──────────────────────────────────────────────────────────────
+  const runBackfill = async () => {
+    setBfRunning(true); setBfResult(null);
     try {
-      await callEdge({ operation: 'boxscores', sport });
-      toast.success(`✅ ${sport.toUpperCase()} box scores updated`);
-      await refreshStats();
-    } catch (err: any) {
-      console.error(`Box score sync error for ${sport}:`, err);
-      toast.error(`${sport.toUpperCase()} box scores failed: ${err.message}`);
-    } finally { setIngesting(null); }
+      const body: any = { operation: "sync_stats_range", sport: bfSport };
+      if (bfStart) { body.start_date = bfStart; body.end_date = bfEnd || new Date().toISOString().split("T")[0]; }
+      else body.days = bfDays;
+      const d = await callEdge(body, 180000);
+      const msg = `✓ ${d.games_processed} games · ${d.stats_upserted} stats · ${d.dates_processed} days`;
+      setBfResult(msg);
+      toast.success(`${bfSport.toUpperCase()} backfill: ${msg}`);
+    } catch (e: any) {
+      setBfResult(`❌ ${e.message}`);
+      toast.error(e.message);
+    } finally { setBfRunning(false); }
   };
 
-  if (authLoading) return <div className="p-10 text-center text-yellow-400">Loading...</div>;
+  // ── DB stats ──────────────────────────────────────────────────────────────
+  const refreshDbStats = async () => {
+    try {
+      const [{ count: props }, { count: users }] = await Promise.all([
+        supabase.from("player_props_cache").select("*", { count: "exact", head: true }),
+        supabase.from("profiles").select("*", { count: "exact", head: true }),
+      ]);
+      setDbStats({ totalUsers: users || 0, totalProps: props || 0 });
+    } catch {}
+  };
 
-  const forceAdmin = user?.email === 'christiansucre1@gmail.com';
+  const loadUsers = async () => {
+    setLoadingUsers(true);
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id,email,created_at,last_login,subscription_tier,subscription_start,subscription_end,is_active,is_free_trial,trial_reason,revenue_generated")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+
+      const mapped: UserProfile[] = (data || []).map(p => ({
+        ...p, email: p.email || "unknown",
+        subscription_tier: p.subscription_tier || "",
+        is_active: p.is_active ?? false,
+        is_free_trial: p.is_free_trial ?? false,
+        revenue_generated: p.revenue_generated ?? 0,
+      }));
+      setUsers(mapped);
+
+      const trials = mapped.filter(u => u.is_free_trial);
+      const now = new Date();
+      setTrialStats({
+        totalTrials: trials.length,
+        activeTrials: trials.filter(u => u.is_active && (!u.subscription_end || new Date(u.subscription_end) > now)).length,
+        expiredTrials: trials.filter(u => u.subscription_end && new Date(u.subscription_end) <= now).length,
+        byTier: trials.reduce((a, u) => ({ ...a, [u.subscription_tier]: (a[u.subscription_tier] || 0) + 1 }), {} as Record<string, number>),
+      });
+    } catch { toast.error("Failed to load users"); }
+    finally { setLoadingUsers(false); }
+  };
+
+  const makePw = () => {
+    const c = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    return Array.from({ length: 10 }, () => c[Math.floor(Math.random() * c.length)]).join("");
+  };
+
+  const grantTrial = async () => {
+    if (!newEmail) { toast.error("Email required"); return; }
+    const tier = PRICING[newTier];
+    try {
+      let uid: string;
+      if (isExisting) {
+        const { data } = await supabase.from("profiles").select("id").eq("email", newEmail.toLowerCase()).maybeSingle();
+        if (!data) throw new Error("User not found");
+        uid = data.id;
+      } else {
+        const pw = tempPw || makePw();
+        const { data: au, error } = await supabase.auth.admin.createUser({ email: newEmail.toLowerCase(), password: pw, email_confirm: true });
+        if (error) throw error;
+        uid = au.user!.id;
+        setTempPw(pw);
+      }
+      const start = new Date();
+      const end   = new Date(start.getTime() + tier.days * 86400000);
+      await supabase.from("profiles").upsert({ id: uid, user_id: uid, email: newEmail.toLowerCase(), subscription_tier: newTier, subscription_start: start.toISOString(), subscription_end: end.toISOString(), is_active: true, is_free_trial: true, trial_reason: trialReason || `Trial - ${newTier}`, trial_granted_by: user?.id }, { onConflict: "id" });
+      await supabase.from("subscriptions").delete().eq("user_id", uid);
+      await supabase.from("subscriptions").insert({ user_id: uid, tier: newTier, amount: 0, currency: "USDT", status: "active", start_date: start.toISOString(), end_date: end.toISOString(), is_free_trial: true, granted_by: user?.id, trial_reason: trialReason });
+      toast.success(`✅ Trial granted to ${newEmail}`);
+      setShowAddTrial(false); setNewEmail(""); setTempPw(""); setTrialReason(""); setIsExisting(false);
+      loadUsers();
+    } catch (e: any) { toast.error(e.message); }
+  };
+
+  const extendTrial = async (uid: string, days: number) => {
+    const end = new Date(Date.now() + days * 86400000);
+    await supabase.from("profiles").update({ subscription_end: end.toISOString() }).eq("id", uid);
+    await supabase.from("subscriptions").update({ end_date: end.toISOString() }).eq("user_id", uid).eq("status", "active");
+    toast.success("Extended"); loadUsers();
+  };
+
+  const revokeTrial = async (uid: string) => {
+    if (!confirm("Revoke this trial?")) return;
+    await supabase.from("profiles").update({ is_active: false, subscription_end: new Date().toISOString() }).eq("id", uid);
+    await supabase.from("subscriptions").update({ status: "revoked" }).eq("user_id", uid);
+    toast.success("Revoked"); loadUsers();
+  };
+
+  const expired = (d: string | null) => d ? new Date(d) < new Date() : false;
+
+  useEffect(() => { if (isAdmin) { refreshDbStats(); loadUsers(); } }, [isAdmin]);
+
+  if (authLoading) return <div className="p-10 text-center text-yellow-400">Loading…</div>;
+  const forceAdmin = user?.email === "christiansucre1@gmail.com";
   if (!isAdmin && !forceAdmin) return <Navigate to="/scanner" replace />;
+
+  const Dot = ({ s }: { s: JobStatus }) => (
+    <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${s === "running" ? "bg-yellow-400 animate-pulse" : s === "success" ? "bg-green-500" : s === "error" ? "bg-red-500" : "bg-gray-600"}`} />
+  );
 
   return (
     <DashboardLayout>
-      <div className="p-6 max-w-7xl mx-auto">
-        <div className="flex items-center justify-between mb-6">
+      <div className="p-6 max-w-7xl mx-auto space-y-6">
+
+        {/* Header */}
+        <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold flex items-center gap-2 text-yellow-400">
             <Shield className="w-6 h-6" /> Admin Panel
           </h1>
-          <Badge variant="outline" className="border-green-500/50 text-green-400">
-            <Gift className="w-3 h-3 mr-1" /> Free Trial Manager
-          </Badge>
+          <div className="flex gap-2">
+            <Button 
+              onClick={() => navigate('/studio')}
+              variant="outline"
+              className="border-gray-700 text-gray-300 hover:bg-gray-800 hover:text-white"
+            >
+              <Database className="w-4 h-4 mr-2" />
+              Data Studio
+            </Button>
+            <Badge variant="outline" className="border-green-500/50 text-green-400">
+              <Gift className="w-3 h-3 mr-1" /> Trial Manager
+            </Badge>
+          </div>
         </div>
 
-        {/* Quick Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <Card className="bg-[#0b1120] border-gray-800">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-gray-400 flex items-center gap-2">
-                <Users className="w-4 h-4" /> Total Users
-              </CardTitle>
-            </CardHeader>
-            <CardContent><div className="text-2xl font-bold text-white">{stats.totalUsers}</div></CardContent>
-          </Card>
-          <Card className="bg-[#0b1120] border-green-900/50">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-green-400 flex items-center gap-2">
-                <Gift className="w-4 h-4" /> Active Trials
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-green-400">{trialStats.activeTrials}</div>
-              <p className="text-xs text-gray-500">{trialStats.totalTrials} total granted</p>
-            </CardContent>
-          </Card>
-          <Card className="bg-[#0b1120] border-gray-800">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-gray-400 flex items-center gap-2">
-                <Clock className="w-4 h-4" /> Expired Trials
-              </CardTitle>
-            </CardHeader>
-            <CardContent><div className="text-2xl font-bold text-red-400">{trialStats.expiredTrials}</div></CardContent>
-          </Card>
-          <Card className="bg-[#0b1120] border-gray-800">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-gray-400 flex items-center gap-2">
-                <Database className="w-4 h-4" /> Cached Props
-              </CardTitle>
-            </CardHeader>
-            <CardContent><div className="text-2xl font-bold text-yellow-400">{stats.totalProps}</div></CardContent>
-          </Card>
+        {/* KPI row */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            { label: "Total Users",    value: dbStats.totalUsers,       color: "text-white",       Icon: Users },
+            { label: "Active Trials",  value: trialStats.activeTrials,  color: "text-green-400",   Icon: Gift },
+            { label: "Expired Trials", value: trialStats.expiredTrials, color: "text-red-400",     Icon: Clock },
+            { label: "Cached Props",   value: dbStats.totalProps,       color: "text-yellow-400",  Icon: Database },
+          ].map(({ label, value, color, Icon }) => (
+            <Card key={label} className="bg-[#0b1120] border-gray-800">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-gray-400 flex items-center gap-2">
+                  <Icon className="w-4 h-4" /> {label}
+                </CardTitle>
+              </CardHeader>
+              <CardContent><div className={`text-2xl font-bold ${color}`}>{value}</div></CardContent>
+            </Card>
+          ))}
         </div>
 
-        {/* Trial Grant Dialog */}
+        {/* ══ DATA SYNC ════════════════════════════════════════════════════ */}
+        <div className="bg-[#0b1120] rounded-xl border border-gray-800 overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+            <h3 className="font-bold text-yellow-400 flex items-center gap-2">
+              <Database className="w-4 h-4" /> Data Sync Controls
+              <span className="text-xs font-normal text-gray-600 ml-1">— 20 games per player</span>
+            </h3>
+            <button
+              onClick={async () => {
+                for (const { key } of SPORTS) {
+                  await syncSport(key);
+                  await new Promise(r => setTimeout(r, 500));
+                }
+                toast.success("🚀 All sports synced!");
+              }}
+              disabled={anyRunning}
+              className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded font-bold text-sm disabled:opacity-40 flex items-center gap-2 transition"
+            >
+              {anyRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+              Sync All
+            </button>
+          </div>
+
+          <div className="divide-y divide-gray-800/40">
+            {SPORTS.map(({ key: sport, icon, label }) => {
+              const isOpen   = expanded[sport];
+              const opStates = SPORT_OPS.map(o => getJob(sport, o.key).status);
+              const running  = opStates.includes("running");
+              const allOk    = opStates.every(s => s === "success");
+              const hasErr   = opStates.includes("error");
+
+              return (
+                <div key={sport}>
+                  {/* Sport row */}
+                  <div className="flex items-center gap-3 px-5 py-3">
+                    <span className="text-lg">{icon}</span>
+                    <span className="font-semibold text-white w-24">{label}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${running ? "bg-yellow-500/20 text-yellow-400" : allOk ? "bg-green-500/20 text-green-400" : hasErr ? "bg-red-500/20 text-red-400" : "bg-gray-800 text-gray-500"}`}>
+                      {running ? "Syncing…" : allOk ? "✓ Done" : hasErr ? "Error" : "Idle"}
+                    </span>
+
+                    <div className="ml-auto flex gap-2">
+                      <button
+                        onClick={() => syncSport(sport)}
+                        disabled={anyRunning}
+                        className="px-3 py-1.5 bg-yellow-500/10 border border-yellow-500/30 hover:bg-yellow-500/20 text-yellow-400 rounded text-xs font-semibold disabled:opacity-40 flex items-center gap-1 transition"
+                      >
+                        {running && <Loader2 className="w-3 h-3 animate-spin" />}
+                        Full Sync
+                      </button>
+                      <button
+                        onClick={() => setExpanded(e => ({ ...e, [sport]: !e[sport] }))}
+                        className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-400 rounded text-xs flex items-center gap-1 transition"
+                      >
+                        {isOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                        {isOpen ? "Hide" : "Steps"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Expanded ops */}
+                  {isOpen && (
+                    <div className="bg-[#060d1a] px-5 py-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+                      {SPORT_OPS.map(op => {
+                        const job = getJob(sport, op.key);
+                        return (
+                          <div key={op.key} className={`rounded-lg p-3 border flex flex-col gap-1.5 ${
+                            job.status === "running" ? "border-yellow-500/40 bg-yellow-500/5" :
+                            job.status === "success" ? "border-green-500/30 bg-green-500/5" :
+                            job.status === "error"   ? "border-red-500/30 bg-red-500/5" :
+                            "border-gray-800 bg-[#0b1120]"
+                          }`}>
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-semibold text-gray-300">{op.icon} {op.label}</span>
+                              <Dot s={job.status} />
+                            </div>
+                            <p className="text-[10px] text-gray-600">{op.desc}</p>
+                            {job.message && (
+                              <p className={`text-[10px] font-medium ${job.status === "error" ? "text-red-400" : "text-green-400"}`}>
+                                {job.status === "error" ? "✗ " : "✓ "}{job.message}
+                              </p>
+                            )}
+                            <button
+                              onClick={() => runOp(sport, op.key)}
+                              disabled={anyRunning}
+                              className="mt-auto w-full py-1 rounded text-xs font-medium bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-40 flex items-center justify-center gap-1 transition"
+                            >
+                              {job.status === "running" && <Loader2 className="w-3 h-3 animate-spin" />}
+                              {job.status === "running" ? "Running…" : "Run"}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ══ BACKFILL ══════════════════════════════════════════════════════ */}
+        <div className="bg-[#0b1120] rounded-xl border border-gray-800 p-5">
+          <h3 className="font-bold text-yellow-400 mb-4">📦 Backfill Box Scores by Date Range</h3>
+          <div className="flex flex-wrap gap-3 items-end">
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">Sport</label>
+              <select value={bfSport} onChange={e => setBfSport(e.target.value)}
+                className="bg-[#1e293b] border border-gray-700 rounded px-3 py-1.5 text-sm text-white">
+                {SPORTS.map(s => <option key={s.key} value={s.key}>{s.icon} {s.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">Start Date</label>
+              <input type="date" value={bfStart} onChange={e => setBfStart(e.target.value)}
+                className="bg-[#1e293b] border border-gray-700 rounded px-3 py-1.5 text-sm text-white" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">End Date</label>
+              <input type="date" value={bfEnd} onChange={e => setBfEnd(e.target.value)}
+                className="bg-[#1e293b] border border-gray-700 rounded px-3 py-1.5 text-sm text-white" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">Or Last N Days</label>
+              <input type="number" min={1} max={60} value={bfDays} onChange={e => setBfDays(+e.target.value)}
+                className="bg-[#1e293b] border border-gray-700 rounded px-3 py-1.5 text-sm text-white w-20" />
+            </div>
+            <button onClick={runBackfill} disabled={bfRunning || anyRunning}
+              className="px-4 py-1.5 bg-yellow-500 hover:bg-yellow-600 text-black rounded font-bold text-sm disabled:opacity-40 flex items-center gap-2 transition">
+              {bfRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : "⚡"}
+              {bfRunning ? "Running…" : "Run Backfill"}
+            </button>
+          </div>
+          {bfResult && (
+            <p className={`mt-3 text-sm font-medium ${bfResult.startsWith("❌") ? "text-red-400" : "text-green-400"}`}>{bfResult}</p>
+          )}
+          <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px] text-gray-600">
+            <span>⭐ MLB start: <strong className="text-gray-500">2026-03-27</strong></span>
+            <span>⭐ NHL start: <strong className="text-gray-500">2025-10-04</strong></span>
+            <span>⭐ NFL start: <strong className="text-gray-500">2025-09-05</strong></span>
+            <span>⭐ Soccer: use last 30 days</span>
+          </div>
+        </div>
+
+        {/* ══ TRIAL DIALOG ═════════════════════════════════════════════════ */}
         <Dialog open={showAddTrial} onOpenChange={setShowAddTrial}>
           <DialogContent className="bg-[#0b1120] border-gray-800 text-white max-w-lg">
             <DialogHeader>
-              <DialogTitle className="text-yellow-400 flex items-center gap-2">
-                <Gift className="w-5 h-5" /> Grant Free Trial Access
-              </DialogTitle>
-              <DialogDescription className="text-gray-400">
-                Grant complimentary access to influencers, partners, or VIP users.
-                Reference: 1 month = {REFERENCE_MONTHLY_RATE.toFixed(2)} USDT.
-              </DialogDescription>
+              <DialogTitle className="text-yellow-400 flex items-center gap-2"><Gift className="w-5 h-5" /> Grant Free Trial</DialogTitle>
+              <DialogDescription className="text-gray-400">Reference: 1 month = 150.00 USDT</DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
               <div className="flex gap-4 p-3 bg-[#1e293b] rounded-lg">
-                <label className="flex items-center gap-2 cursor-pointer flex-1">
-                  <input type="radio" name="userType" checked={!isExistingUser} onChange={() => setIsExistingUser(false)} className="text-yellow-500" />
-                  <span className="text-sm">✨ Create New User</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer flex-1">
-                  <input type="radio" name="userType" checked={isExistingUser} onChange={() => setIsExistingUser(true)} className="text-yellow-500" />
-                  <span className="text-sm">👤 Existing User</span>
-                </label>
+                {[false, true].map(v => (
+                  <label key={String(v)} className="flex items-center gap-2 cursor-pointer flex-1">
+                    <input type="radio" name="ut" checked={isExisting === v} onChange={() => setIsExisting(v)} />
+                    <span className="text-sm">{v ? "👤 Existing" : "✨ New User"}</span>
+                  </label>
+                ))}
               </div>
               <div className="space-y-2">
-                <Label htmlFor="email" className="text-gray-300">User Email</Label>
-                <Input id="email" type="email" placeholder="influencer@example.com" value={newUserEmail}
-                  onChange={(e) => setNewUserEmail(e.target.value)} className="bg-[#1e293b] border-gray-700 text-white" />
+                <Label className="text-gray-300">Email</Label>
+                <Input type="email" value={newEmail} onChange={e => setNewEmail(e.target.value)}
+                  placeholder="user@example.com" className="bg-[#1e293b] border-gray-700 text-white" />
               </div>
-              {!isExistingUser && (
+              {!isExisting && (
                 <div className="space-y-2">
-                  <Label className="text-gray-300">Temporary Password</Label>
+                  <Label className="text-gray-300">Temp Password</Label>
                   <div className="flex gap-2">
-                    <Input type="text" placeholder="Auto-generated" value={tempPassword}
-                      onChange={(e) => setTempPassword(e.target.value)}
-                      className="bg-[#1e293b] border-gray-700 text-white font-mono flex-1" readOnly />
-                    <Button type="button" variant="outline" onClick={() => setTempPassword(generateTempPassword())} className="border-gray-700 text-gray-300 shrink-0">
-                      <Key className="w-4 h-4" />
-                    </Button>
-                    {tempPassword && (
-                      <Button type="button" variant="outline" onClick={() => copyToClipboard(tempPassword)} className="border-gray-700 text-blue-400 shrink-0">
-                        <Copy className="w-4 h-4" />
-                      </Button>
-                    )}
+                    <Input value={tempPw} readOnly onChange={e => setTempPw(e.target.value)}
+                      placeholder="Auto-generated" className="bg-[#1e293b] border-gray-700 text-white font-mono flex-1" />
+                    <Button type="button" variant="outline" onClick={() => setTempPw(makePw())} className="border-gray-700 text-gray-300 shrink-0"><Key className="w-4 h-4" /></Button>
+                    {tempPw && <Button type="button" variant="outline" onClick={async () => { await navigator.clipboard.writeText(tempPw); toast.success("Copied"); }} className="border-gray-700 text-blue-400 shrink-0"><Copy className="w-4 h-4" /></Button>}
                   </div>
-                  <p className="text-xs text-gray-500">User will change password on first login</p>
                 </div>
               )}
               <div className="space-y-2">
-                <Label className="text-gray-300">Trial Duration</Label>
-                <Select value={newUserTier} onValueChange={setNewUserTier}>
+                <Label className="text-gray-300">Duration</Label>
+                <Select value={newTier} onValueChange={setNewTier}>
                   <SelectTrigger className="bg-[#1e293b] border-gray-700 text-white"><SelectValue /></SelectTrigger>
                   <SelectContent className="bg-[#1e293b] border-gray-700">
-                    {Object.entries(PRICING).map(([key, value]) => (
-                      <SelectItem key={key} value={key}>
-                        <span className="font-medium">{value.label}</span>
-                        <span className="text-xs text-gray-500 ml-2">({value.days} days) • Ref: {value.referencePrice.toFixed(2)} USDT</span>
-                      </SelectItem>
+                    {Object.entries(PRICING).map(([k, v]) => (
+                      <SelectItem key={k} value={k}>{v.label} — {v.referencePrice.toFixed(2)} USDT ref</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="reason" className="text-gray-300">Trial Reason (Optional)</Label>
-                <Textarea id="reason" placeholder="e.g., YouTube influencer, Twitter promo, VIP access..."
-                  value={trialReason} onChange={(e) => setTrialReason(e.target.value)}
-                  className="bg-[#1e293b] border-gray-700 text-white min-h-[80px]" />
+                <Label className="text-gray-300">Reason (optional)</Label>
+                <Textarea value={trialReason} onChange={e => setTrialReason(e.target.value)}
+                  placeholder="e.g., YouTube influencer..." className="bg-[#1e293b] border-gray-700 text-white min-h-[80px]" />
               </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setShowAddTrial(false)} className="border-gray-700 text-gray-300">Cancel</Button>
-              <Button onClick={grantTrial} className="bg-yellow-500 hover:bg-yellow-600 text-black font-semibold" disabled={!newUserEmail}>
-                <Gift className="w-4 h-4 mr-2" /> Grant FREE Trial
+              <Button onClick={grantTrial} disabled={!newEmail} className="bg-yellow-500 hover:bg-yellow-600 text-black font-semibold">
+                <Gift className="w-4 h-4 mr-2" /> Grant Trial
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
-        {/* Trial Management Table */}
-        <Card className="bg-[#0b1120] border-gray-800 mb-6">
+        {/* ══ TRIAL TABLE ══════════════════════════════════════════════════ */}
+        <Card className="bg-[#0b1120] border-gray-800">
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
               <CardTitle className="text-yellow-400 flex items-center gap-2"><Users className="w-5 h-5" /> Trial Users</CardTitle>
               <CardDescription className="text-gray-400">Manage free trial access</CardDescription>
             </div>
-            <div className="flex gap-2">
-              {/* 🔑 NEW: Data Studio Button */}
-              <Button 
-                onClick={() => navigate('/studio')}
-                variant="outline"
-                className="border-gray-700 text-gray-300 hover:bg-gray-800 hover:text-white"
-              >
-                <Database className="w-4 h-4 mr-2" />
-                Data Studio
-              </Button>
-              {/* Existing Grant Button */}
-              <Button onClick={() => setShowAddTrial(true)} className="bg-yellow-500 hover:bg-yellow-600 text-black font-semibold">
-                <Gift className="w-4 h-4 mr-2" /> Grant New Trial
-              </Button>
-            </div>
+            <Button onClick={() => setShowAddTrial(true)} className="bg-yellow-500 hover:bg-yellow-600 text-black font-semibold">
+              <Gift className="w-4 h-4 mr-2" /> Grant New Trial
+            </Button>
           </CardHeader>
           <CardContent>
             {loadingUsers ? (
-              <div className="text-center py-8 text-gray-400">
-                <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />
-                Loading users...
-              </div>
+              <div className="text-center py-8 text-gray-400"><Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" /> Loading…</div>
             ) : users.filter(u => u.is_free_trial).length === 0 ? (
               <div className="text-center py-8 text-gray-400">
-                <Gift className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                <Gift className="w-10 h-10 mx-auto mb-3 opacity-40" />
                 <p>No trial users yet</p>
-                <Button variant="outline" onClick={() => setShowAddTrial(true)} className="mt-4 border-yellow-500/50 text-yellow-400">
-                  Grant First Trial
-                </Button>
+                <Button variant="outline" onClick={() => setShowAddTrial(true)} className="mt-3 border-yellow-500/50 text-yellow-400">Grant First Trial</Button>
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-gray-800">
-                      <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">User</th>
-                      <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">Trial Tier</th>
-                      <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">Status</th>
-                      <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">Ends</th>
-                      <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">Reason</th>
-                      <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">Actions</th>
+                      {["User", "Tier", "Status", "Ends", "Reason", "Actions"].map(h => (
+                        <th key={h} className={`py-3 px-4 text-sm font-semibold text-gray-400 ${h === "Actions" ? "text-right" : "text-left"}`}>{h}</th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {users.filter(u => u.is_free_trial).map((u) => {
-                      const expired = isTrialExpired(u.subscription_end);
+                    {users.filter(u => u.is_free_trial).map(u => {
+                      const exp  = expired(u.subscription_end);
                       const tier = PRICING[u.subscription_tier];
                       return (
                         <tr key={u.id} className="border-b border-gray-800/50 hover:bg-[#1e293b]/50">
                           <td className="py-3 px-4">
                             <div className="text-sm font-medium text-white">{u.email}</div>
-                            <div className="text-xs text-gray-500">
-                              {u.last_login ? `Last: ${new Date(u.last_login).toLocaleDateString()}` : 'Never logged in'}
-                            </div>
+                            <div className="text-xs text-gray-500">{u.last_login ? `Last: ${new Date(u.last_login).toLocaleDateString()}` : "Never logged in"}</div>
                           </td>
                           <td className="py-3 px-4">
-                            <div className="flex items-center gap-2">
-                              <Badge variant="outline" className="border-yellow-500/50 text-yellow-400">{tier?.label || u.subscription_tier}</Badge>
-                              <span className="text-xs text-gray-500">({tier?.days} days)</span>
-                            </div>
-                            <div className="text-xs text-gray-600 mt-1">Ref: {tier?.referencePrice.toFixed(2)} USDT</div>
+                            <Badge variant="outline" className="border-yellow-500/50 text-yellow-400">{tier?.label || u.subscription_tier}</Badge>
+                            <div className="text-xs text-gray-600 mt-1">Ref: {tier?.referencePrice?.toFixed(2)} USDT</div>
                           </td>
                           <td className="py-3 px-4">
-                            {expired ? (
-                              <Badge variant="secondary" className="bg-red-500/20 text-red-400"><XCircle className="w-3 h-3 mr-1" /> Expired</Badge>
-                            ) : u.is_active ? (
-                              <Badge className="bg-green-500/20 text-green-400"><CheckCircle className="w-3 h-3 mr-1" /> Active</Badge>
-                            ) : (
-                              <Badge variant="secondary" className="bg-gray-500/20 text-gray-400"><Clock className="w-3 h-3 mr-1" /> Inactive</Badge>
-                            )}
+                            {exp ? <Badge className="bg-red-500/20 text-red-400"><XCircle className="w-3 h-3 mr-1" />Expired</Badge>
+                              : u.is_active ? <Badge className="bg-green-500/20 text-green-400"><CheckCircle className="w-3 h-3 mr-1" />Active</Badge>
+                              : <Badge className="bg-gray-500/20 text-gray-400"><Clock className="w-3 h-3 mr-1" />Inactive</Badge>}
                           </td>
                           <td className="py-3 px-4 text-sm text-gray-400">
-                            {u.subscription_end ? new Date(u.subscription_end).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '∞'}
+                            {u.subscription_end ? new Date(u.subscription_end).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "∞"}
                           </td>
                           <td className="py-3 px-4">
-                            <div className="text-xs text-gray-400 max-w-[200px] truncate" title={u.trial_reason || ''}>{u.trial_reason || '—'}</div>
+                            <span className="text-xs text-gray-400 max-w-[180px] truncate block">{u.trial_reason || "—"}</span>
                           </td>
                           <td className="py-3 px-4">
                             <div className="flex justify-end gap-2">
-                              {!expired && u.is_active && (
-                                <Select onValueChange={(days) => extendTrial(u.id, parseInt(days))}>
+                              {!exp && u.is_active && (
+                                <Select onValueChange={d => extendTrial(u.id, +d)}>
                                   <SelectTrigger className="w-24 bg-[#1e293b] border-gray-700 text-xs"><SelectValue placeholder="Extend" /></SelectTrigger>
                                   <SelectContent className="bg-[#1e293b] border-gray-700">
                                     <SelectItem value="7">+7 days</SelectItem>
@@ -569,9 +585,7 @@ export default function Admin() {
                                 </Select>
                               )}
                               <Button size="sm" variant="outline" onClick={() => revokeTrial(u.id)} className="border-red-500/50 text-red-400 hover:bg-red-500/10 text-xs">Revoke</Button>
-                              <Button size="sm" variant="ghost" onClick={() => navigate(`/admin/user/${u.id}`)} className="text-gray-400 hover:text-white text-xs">
-                                <ExternalLink className="w-3 h-3" />
-                              </Button>
+                              <Button size="sm" variant="ghost" onClick={() => navigate(`/admin/user/${u.id}`)} className="text-gray-400 hover:text-white"><ExternalLink className="w-3 h-3" /></Button>
                             </div>
                           </td>
                         </tr>
@@ -584,63 +598,13 @@ export default function Admin() {
           </CardContent>
         </Card>
 
-        {/* Tier Distribution */}
-        {trialStats.totalTrials > 0 && (
-          <Card className="bg-[#0b1120] border-gray-800 mb-6">
-            <CardHeader><CardTitle className="text-yellow-400 text-sm">Trial Distribution by Tier</CardTitle></CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {Object.entries(PRICING).map(([key, value]) => (
-                  <div key={key} className="p-3 bg-[#1e293b] rounded-lg">
-                    <div className="text-sm font-medium text-white">{value.label}</div>
-                    <div className="text-2xl font-bold text-yellow-400">{trialStats.byTier[key] || 0}</div>
-                    <div className="text-xs text-gray-500">{value.days} days • Ref: {value.referencePrice.toFixed(2)} USDT</div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Sync Controls */}
-        <div className="bg-[#0b1120] p-4 rounded-xl mb-6 border border-gray-800">
-          <h3 className="font-bold mb-4 text-yellow-400 flex items-center gap-2"><Database className="w-4 h-4" /> Data Sync Controls</h3>
-          <div className="flex flex-wrap gap-3 mb-4">
-            {SPORTS.map((sport) => (
-              <button key={sport} onClick={() => syncSport(sport)} disabled={!!ingesting}
-                className="px-4 py-2 bg-[#1e293b] hover:bg-[#334155] rounded-lg text-sm font-semibold flex items-center gap-2 text-white disabled:opacity-50 transition">
-                {ingesting === sport ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
-                {sport.toUpperCase()}
-              </button>
-            ))}
-            <button onClick={syncAll} disabled={!!ingesting}
-              className="px-6 py-2 bg-yellow-500 text-black rounded-lg font-semibold flex items-center gap-2 hover:bg-yellow-600 disabled:opacity-50 transition">
-              {ingesting === "all" ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-              Sync ALL Sports
-            </button>
-          </div>
-          <div className="pt-3 border-t border-gray-700">
-            <p className="text-xs text-gray-500 mb-2">⚡ Quick Update (today's finished games only):</p>
-            <div className="flex flex-wrap gap-2">
-              {SPORTS.map((sport) => (
-                <button key={sport} onClick={() => syncBoxScores(sport)} disabled={!!ingesting}
-                  className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded text-xs text-gray-300 disabled:opacity-50 transition">
-                  {ingesting === sport ? <Loader2 className="w-3 h-3 animate-spin mr-1 inline" /> : null}
-                  {sport.toUpperCase()} Box Scores
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
+        {/* Info */}
         <div className="bg-blue-900/20 border border-blue-800 p-4 rounded-lg text-sm text-blue-400">
-          <strong>💡 How This Works:</strong><br />
-          • This panel grants <strong>FREE trial access</strong> to influencers & VIPs<br />
-          • Reference pricing (1 month = {REFERENCE_MONTHLY_RATE.toFixed(2)} USDT) is for context only<br />
-          • New users receive a temporary password<br />
-          • Extend or revoke trials anytime from the table above<br />
-          • <strong>Click "Data Studio"</strong> above to access advanced sync & prop analysis tools
+          <strong>💡 Sync Order:</strong> For each sport — <strong>Teams → Schedule → Players → Historical Stats</strong>.
+          Historical Stats pulls exactly <strong>20 games</strong> per player and fixes any orphaned stats.
+          Use <strong>Backfill</strong> to pull older box scores directly from ESPN box scores by date range.
         </div>
+
       </div>
     </DashboardLayout>
   );
