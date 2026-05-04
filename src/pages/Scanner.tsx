@@ -393,7 +393,7 @@ export default function Scanner() {
 
         {/* Controls */}
         <div className="flex flex-wrap gap-2 mb-2">
-          {/* Sport Select with redirect for horse racing */}
+          {/* Sport selector with redirect for horse racing */}
           <Select
             value={sport}
             onValueChange={(s) => {
@@ -585,7 +585,7 @@ export default function Scanner() {
                               </p>
                             </div>
                           </div>
-                        </tr>
+                        </td>
 
                         <td className="p-3">
                           <p className="text-xs text-gray-400">vs {p.opponent || '—'}</p>
@@ -668,7 +668,7 @@ export default function Scanner() {
                             );
                           })()}
                         </td>
-                      </tr>
+                      </table>
                     );
                   })}
                 </tbody>
