@@ -9,6 +9,7 @@ import AdminRoute from "@/components/AdminRoute";
 import Auth from "@/pages/Auth";
 import Scanner from "@/pages/Scanner";
 import Admin from "@/pages/Admin";
+import DataStudio from "@/pages/DataStudio"; // ✅ Import DataStudio
 
 const HorseRacing  = lazy(() => import("@/pages/HorseRacing"));
 const Injuries     = lazy(() => import("@/pages/Injuries"));
@@ -71,6 +72,8 @@ function AppContent() {
               <Route path="profile"      element={<Profile />} />
               <Route path="horse-racing" element={<HorseRacing />} />
               <Route path="admin"        element={<AdminRoute><Admin /></AdminRoute>} />
+              {/* ✅ Add Data Studio Route (Admin Only) */}
+              <Route path="studio"       element={<AdminRoute><DataStudio /></AdminRoute>} />
             </Route>
 
             {/* Fallback */}
