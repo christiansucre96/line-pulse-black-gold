@@ -239,8 +239,8 @@ export default function Admin() {
   };
 
   const makePw = () => {
-    const c = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    return Array.from({ length: 10 }, () => c[Math.floor(Math.random() * c.length)]).join("");
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    return Array.from({ length: 10 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
   };
 
   const grantTrial = async () => {
@@ -542,11 +542,11 @@ export default function Admin() {
                       {["User", "Tier", "Status", "Ends", "Reason", "Actions"].map(h => (
                         <th key={h} className={`py-3 px-4 text-sm font-semibold text-gray-400 ${h === "Actions" ? "text-right" : "text-left"}`}>{h}</th>
                       ))}
-                    </table>
+                    </tr>
                   </thead>
                   <tbody>
                     {users.filter(u => u.is_free_trial).map(u => {
-                      const exp  = expired(u.subscription_end);
+                      const exp = expired(u.subscription_end);
                       const tier = PRICING[u.subscription_tier];
                       return (
                         <tr key={u.id} className="border-b border-gray-800/50 hover:bg-[#1e293b]/50">
