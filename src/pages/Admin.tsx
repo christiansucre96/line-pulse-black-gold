@@ -392,7 +392,7 @@ export default function Admin() {
               const running  = opStates.includes("running");
               const allOk    = opStates.every(s => s === "success");
               const hasErr   = opStates.includes("error");
-              const isHorse = sport === "horse-racing";
+              const isHorse  = sport === "horse-racing";
 
               return (
                 <div key={sport}>
@@ -577,7 +577,7 @@ export default function Admin() {
                       {["User", "Tier", "Status", "Ends", "Reason", "Actions"].map(h => (
                         <th key={h} className={`py-3 px-4 text-sm font-semibold text-gray-400 ${h === "Actions" ? "text-right" : "text-left"}`}>{h}</th>
                       ))}
-                    <tr>
+                    </tr>
                   </thead>
                   <tbody>
                     {users.filter(u => u.is_free_trial).map(u => {
@@ -597,13 +597,13 @@ export default function Admin() {
                             {exp ? <Badge className="bg-red-500/20 text-red-400"><XCircle className="w-3 h-3 mr-1" />Expired</Badge>
                               : u.is_active ? <Badge className="bg-green-500/20 text-green-400"><CheckCircle className="w-3 h-3 mr-1" />Active</Badge>
                               : <Badge className="bg-gray-500/20 text-gray-400"><Clock className="w-3 h-3 mr-1" />Inactive</Badge>}
-                          </td>
+                           </td>
                           <td className="py-3 px-4 text-sm text-gray-400">
                             {u.subscription_end ? new Date(u.subscription_end).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "∞"}
-                          </td>
+                           </td>
                           <td className="py-3 px-4">
                             <span className="text-xs text-gray-400 max-w-[180px] truncate block">{u.trial_reason || "—"}</span>
-                          </td>
+                           </td>
                           <td className="py-3 px-4">
                             <div className="flex justify-end gap-2">
                               {!exp && u.is_active && (
@@ -619,7 +619,7 @@ export default function Admin() {
                               <Button size="sm" variant="outline" onClick={() => revokeTrial(u.id)} className="border-red-500/50 text-red-400 hover:bg-red-500/10 text-xs">Revoke</Button>
                               <Button size="sm" variant="ghost" onClick={() => navigate(`/admin/user/${u.id}`)} className="text-gray-400 hover:text-white"><ExternalLink className="w-3 h-3" /></Button>
                             </div>
-                          </td>
+                           </td>
                         </tr>
                       );
                     })}
