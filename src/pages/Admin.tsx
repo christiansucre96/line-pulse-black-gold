@@ -542,7 +542,7 @@ export default function Admin() {
                       {["User", "Tier", "Status", "Ends", "Reason", "Actions"].map(h => (
                         <th key={h} className={`py-3 px-4 text-sm font-semibold text-gray-400 ${h === "Actions" ? "text-right" : "text-left"}`}>{h}</th>
                       ))}
-                    </tr>
+                    </table>
                   </thead>
                   <tbody>
                     {users.filter(u => u.is_free_trial).map(u => {
