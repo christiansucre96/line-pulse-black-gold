@@ -29,7 +29,6 @@ import {
 } from "@/components/ui/card";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
-const HORSE_RACING_EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/horse-racing";
 
 const SPORTS = [
   { key: "nba",    icon: "🏀", label: "NBA" },
@@ -37,7 +36,6 @@ const SPORTS = [
   { key: "mlb",    icon: "⚾", label: "MLB" },
   { key: "nhl",    icon: "🏒", label: "NHL" },
   { key: "soccer", icon: "⚽", label: "Soccer" },
-  { key: "horse-racing", icon: "🏇", label: "Horse Racing" },
 ];
 
 const SPORT_OPS = [
@@ -119,17 +117,31 @@ export default function Admin() {
   };
 
   const runOp = async (sport: string, op: string) => {
-    if (sport === 'horse-racing') {
-      toast.error("Horse racing data cannot be synced using clever-action. Use the 'Full Sync' button instead.");
-      return;
-    }
     setJob(sport, op, "running");
     try {
-      const d = await callEdge({ operation: op, sport });
-      const n = d.count ?? d.archived ?? d.stats_upserted ?? "✓";
-      setJob(sport, op, "success", `${n}`);
-      toast.success(`${sport.toUpperCase()} ${op} — ${n}`);
-      if (op === "historical_stats" || op === "boxscores") refreshDbStats();
+      if (op === "historical_stats") {
+        let offset = 0;
+        let totalStats = 0;
+        let batch = 0;
+        while (true) {
+          const d = await callEdge({ operation: "historical_stats", sport, offset, batch_size: 50 }, 90000);
+          totalStats += d.total || 0;
+          batch++;
+          setJob(sport, op, "running", `Batch ${batch}: ${totalStats} stats so far…`);
+          if (!d.hasMore) break;
+          offset = d.nextOffset;
+          await new Promise(r => setTimeout(r, 500));
+        }
+        setJob(sport, op, "success", `${totalStats} stats synced`);
+        toast.success(`${sport.toUpperCase()} historical stats — ${totalStats} rows`);
+        refreshDbStats();
+      } else {
+        const d = await callEdge({ operation: op, sport });
+        const n = d.count ?? d.archived ?? d.stats_upserted ?? "✓";
+        setJob(sport, op, "success", `${n}`);
+        toast.success(`${sport.toUpperCase()} ${op} — ${n}`);
+        if (op === "boxscores") refreshDbStats();
+      }
     } catch (e: any) {
       setJob(sport, op, "error", e.message);
       toast.error(`${sport.toUpperCase()} ${op}: ${e.message}`);
@@ -137,50 +149,40 @@ export default function Admin() {
   };
 
   const syncSport = async (sport: string) => {
-    if (sport === 'horse-racing') {
-      setJob(sport, 'teams', 'running');
-      try {
-        const res = await fetch(HORSE_RACING_EDGE_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}` },
-          body: JSON.stringify({ operation: 'sync_cards' }),
-        });
-        const d = await res.json();
-        if (!d.success) throw new Error(d.error || 'Unknown error');
-        const uk = d.results?.uk || 0;
-        const aus = d.results?.aus || 0;
-        const usa = d.results?.usa || 0;
-        setJob(sport, 'teams', 'success', `UK:${uk} AUS:${aus} USA:${usa}`);
-        toast.success(`🏇 Horse Racing cards synced! (UK:${uk}, AUS:${aus}, USA:${usa})`);
-      } catch (e: any) {
-        setJob(sport, 'teams', 'error', e.message);
-        toast.error(`Horse Racing sync failed: ${e.message}`);
-      }
-      return;
-    }
-
-    const seq = ["teams", "schedule", "players", "historical_stats"];
-    for (const op of seq) {
+    for (const op of ["teams", "schedule", "players"]) {
       setJob(sport, op, "running");
       try {
-        const d = await callEdge({ operation: op, sport }, 120000);
-        const n = d.count ?? d.archived ?? "✓";
-        setJob(sport, op, "success", `${n}`);
+        const d = await callEdge({ operation: op, sport }, 90000);
+        setJob(sport, op, "success", `${d.count ?? "✓"}`);
       } catch (e: any) {
         setJob(sport, op, "error", e.message);
         toast.error(`${sport.toUpperCase()} ${op} failed: ${e.message}`);
         return;
       }
     }
+    setJob(sport, "historical_stats", "running", "Starting…");
+    try {
+      let offset = 0, totalStats = 0, batch = 0;
+      while (true) {
+        const d = await callEdge({ operation: "historical_stats", sport, offset, batch_size: 50 }, 90000);
+        totalStats += d.total || 0;
+        batch++;
+        setJob(sport, "historical_stats", "running", `Batch ${batch}: ${totalStats} stats…`);
+        if (!d.hasMore) break;
+        offset = d.nextOffset;
+        await new Promise(r => setTimeout(r, 500));
+      }
+      setJob(sport, "historical_stats", "success", `${totalStats} stats`);
+    } catch (e: any) {
+      setJob(sport, "historical_stats", "error", e.message);
+      toast.error(`${sport.toUpperCase()} historical_stats failed: ${e.message}`);
+      return;
+    }
     toast.success(`✅ ${sport.toUpperCase()} fully synced`);
     refreshDbStats();
   };
 
   const runBackfill = async () => {
-    if (bfSport === 'horse-racing') {
-      toast.error("Horse racing backfill is not supported (no free API).");
-      return;
-    }
     setBfRunning(true); setBfResult(null);
     try {
       const body: any = { operation: "sync_stats_range", sport: bfSport };
@@ -214,6 +216,7 @@ export default function Admin() {
         .select("id,email,created_at,last_login,subscription_tier,subscription_start,subscription_end,is_active,is_free_trial,trial_reason,revenue_generated")
         .order("created_at", { ascending: false });
       if (error) throw error;
+
       const mapped: UserProfile[] = (data || []).map(p => ({
         ...p, email: p.email || "unknown",
         subscription_tier: p.subscription_tier || "",
@@ -222,6 +225,7 @@ export default function Admin() {
         revenue_generated: p.revenue_generated ?? 0,
       }));
       setUsers(mapped);
+
       const trials = mapped.filter(u => u.is_free_trial);
       const now = new Date();
       setTrialStats({
@@ -295,19 +299,15 @@ export default function Admin() {
   return (
     <DashboardLayout>
       <div className="p-6 max-w-7xl mx-auto space-y-6">
+
         {/* Header */}
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold flex items-center gap-2 text-yellow-400">
             <Shield className="w-6 h-6" /> Admin Panel
           </h1>
-          <div className="flex gap-2">
-            <Button onClick={() => navigate('/studio')} variant="outline" className="border-gray-700 text-gray-300 hover:bg-gray-800 hover:text-white">
-              <Database className="w-4 h-4 mr-2" /> Data Studio
-            </Button>
-            <Badge variant="outline" className="border-green-500/50 text-green-400">
-              <Gift className="w-3 h-3 mr-1" /> Trial Manager
-            </Badge>
-          </div>
+          <Badge variant="outline" className="border-green-500/50 text-green-400">
+            <Gift className="w-3 h-3 mr-1" /> Trial Manager
+          </Badge>
         </div>
 
         {/* KPI row */}
@@ -329,7 +329,7 @@ export default function Admin() {
           ))}
         </div>
 
-        {/* DATA SYNC */}
+        {/* Data Sync */}
         <div className="bg-[#0b1120] rounded-xl border border-gray-800 overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
             <h3 className="font-bold text-yellow-400 flex items-center gap-2">
@@ -364,7 +364,7 @@ export default function Admin() {
                 <div key={sport}>
                   <div className="flex items-center gap-3 px-5 py-3">
                     <span className="text-lg">{icon}</span>
-                    <span className="font-semibold text-white w-24">{label}</span>
+                    <span className="font-semibold text-white w-16">{label}</span>
                     <span className={`text-xs px-2 py-0.5 rounded-full ${running ? "bg-yellow-500/20 text-yellow-400" : allOk ? "bg-green-500/20 text-green-400" : hasErr ? "bg-red-500/20 text-red-400" : "bg-gray-800 text-gray-500"}`}>
                       {running ? "Syncing…" : allOk ? "✓ Done" : hasErr ? "Error" : "Idle"}
                     </span>
@@ -391,7 +391,6 @@ export default function Admin() {
                     <div className="bg-[#060d1a] px-5 py-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
                       {SPORT_OPS.map(op => {
                         const job = getJob(sport, op.key);
-                        const isHorse = sport === 'horse-racing';
                         return (
                           <div key={op.key} className={`rounded-lg p-3 border flex flex-col gap-1.5 ${
                             job.status === "running" ? "border-yellow-500/40 bg-yellow-500/5" :
@@ -411,12 +410,11 @@ export default function Admin() {
                             )}
                             <button
                               onClick={() => runOp(sport, op.key)}
-                              disabled={anyRunning || isHorse}
-                              className={`mt-auto w-full py-1 rounded text-xs font-medium bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-40 flex items-center justify-center gap-1 transition ${isHorse ? 'cursor-not-allowed opacity-50' : ''}`}
-                              title={isHorse ? "Use 'Full Sync' for Horse Racing" : ""}
+                              disabled={anyRunning}
+                              className="mt-auto w-full py-1 rounded text-xs font-medium bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-40 flex items-center justify-center gap-1 transition"
                             >
                               {job.status === "running" && <Loader2 className="w-3 h-3 animate-spin" />}
-                              {job.status === "running" ? "Running…" : isHorse ? "N/A" : "Run"}
+                              {job.status === "running" ? "Running…" : "Run"}
                             </button>
                           </div>
                         );
@@ -429,7 +427,7 @@ export default function Admin() {
           </div>
         </div>
 
-        {/* BACKFILL */}
+        {/* Backfill */}
         <div className="bg-[#0b1120] rounded-xl border border-gray-800 p-5">
           <h3 className="font-bold text-yellow-400 mb-4">📦 Backfill Box Scores by Date Range</h3>
           <div className="flex flex-wrap gap-3 items-end">
@@ -465,7 +463,7 @@ export default function Admin() {
           </div>
         </div>
 
-        {/* TRIAL DIALOG */}
+        {/* Trial Dialog */}
         <Dialog open={showAddTrial} onOpenChange={setShowAddTrial}>
           <DialogContent className="bg-[#0b1120] border-gray-800 text-white max-w-lg">
             <DialogHeader>
@@ -518,7 +516,7 @@ export default function Admin() {
           </DialogContent>
         </Dialog>
 
-        {/* TRIAL TABLE */}
+        {/* Trial Table */}
         <Card className="bg-[#0b1120] border-gray-800">
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
@@ -548,7 +546,7 @@ export default function Admin() {
                   </thead>
                   <tbody>
                     {users.filter(u => u.is_free_trial).map(u => {
-                      const exp = expired(u.subscription_end);
+                      const exp  = expired(u.subscription_end);
                       const tier = PRICING[u.subscription_tier];
                       return (
                         <tr key={u.id} className="border-b border-gray-800/50 hover:bg-[#1e293b]/50">
@@ -597,13 +595,13 @@ export default function Admin() {
           </CardContent>
         </Card>
 
+        {/* Info */}
         <div className="bg-blue-900/20 border border-blue-800 p-4 rounded-lg text-sm text-blue-400">
           <strong>💡 Sync Order:</strong> For each sport — <strong>Teams → Schedule → Players → Historical Stats</strong>.
           Historical Stats pulls exactly <strong>20 games</strong> per player and fixes any orphaned stats.
           Use <strong>Backfill</strong> to pull older box scores directly from ESPN box scores by date range.
-          <br /><br />
-          <strong>🏇 Horse Racing:</strong> Use the <strong>Full Sync</strong> button (only) to fetch racing cards from the dedicated <code>horse-racing</code> Edge Function. Individual operations are not supported.
         </div>
+
       </div>
     </DashboardLayout>
   );
