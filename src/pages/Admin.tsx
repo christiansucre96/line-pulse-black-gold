@@ -1,11 +1,13 @@
 // src/pages/Admin.tsx
+// 🎁 Purpose: Grant FREE trial access to influencers & VIP users
+
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { useEffect, useState } from "react";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { toast } from "sonner";
-import {
-  Shield, Database, RefreshCw, Loader2, Users, Gift,
+import { 
+  Shield, Database, RefreshCw, Loader2, Users, Gift, 
   Clock, Key, CheckCircle, XCircle, ExternalLink, Copy,
   ChevronDown, ChevronUp,
 } from "lucide-react";
@@ -369,20 +371,31 @@ export default function Admin() {
               <Database className="w-4 h-4" /> Data Sync Controls
               <span className="text-xs font-normal text-gray-600 ml-1">— 20 games per player</span>
             </h3>
-            <button
-              onClick={async () => {
-                for (const { key } of SPORTS) {
-                  await syncSport(key);
-                  await new Promise(r => setTimeout(r, 500));
-                }
-                toast.success("🚀 All sports synced!");
-              }}
-              disabled={anyRunning}
-              className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded font-bold text-sm disabled:opacity-40 flex items-center gap-2 transition"
-            >
-              {anyRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-              Sync All
-            </button>
+            <div className="flex gap-2">
+              {/* 🔑 NEW: Data Studio Button */}
+              <Button 
+                onClick={() => navigate('/studio')}
+                variant="outline"
+                className="border-gray-700 text-gray-300 hover:bg-gray-800 hover:text-white"
+              >
+                <Database className="w-4 h-4 mr-2" />
+                Data Studio
+              </Button>
+              <button
+                onClick={async () => {
+                  for (const { key } of SPORTS) {
+                    await syncSport(key);
+                    await new Promise(r => setTimeout(r, 500));
+                  }
+                  toast.success("🚀 All sports synced!");
+                }}
+                disabled={anyRunning}
+                className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded font-bold text-sm disabled:opacity-40 flex items-center gap-2 transition"
+              >
+                {anyRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                Sync All
+              </button>
+            </div>
           </div>
 
           <div className="divide-y divide-gray-800/40">
