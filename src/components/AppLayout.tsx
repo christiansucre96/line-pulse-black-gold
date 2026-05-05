@@ -1,6 +1,7 @@
 // src/components/AppLayout.tsx
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { Database } from "lucide-react"; // ✅ Import Database icon
 
 interface NavItem {
   path: string;
@@ -86,6 +87,13 @@ const NAV: NavItem[] = [
       </svg>
     ),
   },
+  // ✅ NEW: Data Studio Nav Item
+  {
+    path: "/studio",
+    label: "Data Studio",
+    adminOnly: true,
+    icon: <Database className="w-5 h-5" />,
+  },
 ];
 
 export default function AppLayout() {
@@ -98,7 +106,6 @@ export default function AppLayout() {
     const auth = useAuth();
     isAdmin = auth?.isAdmin === true;
   } catch (e) {
-    // fallback: show admin link if hook not ready (or error)
     isAdmin = true;
   }
 
@@ -106,7 +113,7 @@ export default function AppLayout() {
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "#060a0f" }}>
-      {/* Sidebar (unchanged) */}
+      {/* Sidebar */}
       <aside
         style={{
           width: 56,
@@ -148,21 +155,14 @@ export default function AppLayout() {
         </div>
 
         {/* Nav links */}
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 2,
-            width: "100%",
-            flex: 1,
-          }}
-        >
+        <div style={{ display: "flex", flexDirection: "column", gap: 2, width: "100%", flex: 1 }}>
           {visibleNav.map(item => {
             const active = location.pathname === item.path;
             const isInjury = item.path === "/injuries";
             const isAdminLink = item.path === "/admin";
-            const activeColor = isInjury ? "#ff4444" : isAdminLink ? "#a855f7" : "#f5bc2f";
-            const activeBg = isInjury ? "#1a000018" : isAdminLink ? "#1a001a18" : "#1a120018";
+            const isStudio = item.path === "/studio";
+            const activeColor = isInjury ? "#ff4444" : isAdminLink ? "#a855f7" : isStudio ? "#3b82f6" : "#f5bc2f";
+            const activeBg = isInjury ? "#1a000018" : isAdminLink ? "#1a001a18" : isStudio ? "#1a305018" : "#1a120018";
 
             return (
               <div key={item.path} style={{ position: "relative", width: "100%" }} className="lp-nav-item">
@@ -264,7 +264,7 @@ export default function AppLayout() {
         </button>
       </aside>
 
-      {/* ✅ Main content – Outlet renders the nested route component */}
+      {/* Main content */}
       <main style={{ marginLeft: 56, flex: 1, minWidth: 0 }}>
         <Outlet />
       </main>
