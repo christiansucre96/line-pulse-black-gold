@@ -14,6 +14,7 @@ const supabase = createClient(
 );
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
+const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 function etToday(): string {
   return new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString().split("T")[0];
@@ -191,6 +192,7 @@ export default function Scanner() {
   const [sortDir, setSortDir] = useState<1 | -1>(-1);
   const [gameOptions, setGameOptions] = useState<GameOption[]>([]);
   const [selectedGame, setSelectedGame] = useState("__loading__");
+  const [selectedGameLabel, setSelectedGameLabel] = useState<string>("");
   const [marketLine, setMarketLine] = useState<number | null>(null);
   const [noStatsWarning, setNoStatsWarning] = useState(false);
   const [soccerLeague, setSoccerLeague] = useState("all");
@@ -235,22 +237,29 @@ export default function Scanner() {
     const first = options[0];
     const autoSelect = upcoming ?? live ?? first;
     setSelectedGame(autoSelect?.game_id ?? "all");
+    setSelectedGameLabel(autoSelect?.label ?? "");
   }, []);
 
   const fetchPlayers = useCallback(
-    async (s: string, gameId: string) => {
+    async (s: string, gameId: string, gameLabel: string) => {
       setLoading(true);
       setError(null);
       setNoStatsWarning(false);
       try {
         const body: any = { operation: "get_players", sport: s };
-        if (gameId && gameId !== "all") body.game_id = gameId;
+        
+        // For MLB, send the game label to filter by team abbreviations
+        if (s === "mlb" && gameId !== "all") {
+          body.game = gameLabel;   // e.g., "MIN vs WSH — 6:45 PM"
+        } else if (gameId && gameId !== "all") {
+          body.game_id = gameId;
+        }
 
         const res = await fetch(EDGE_URL, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+            Authorization: `Bearer ${ANON_KEY}`,
           },
           body: JSON.stringify(body),
         });
@@ -303,9 +312,11 @@ export default function Scanner() {
 
   useEffect(() => {
     if (selectedGame && selectedGame !== "__loading__") {
-      fetchPlayers(sport, selectedGame);
+      // Find the label for the selected game (used for MLB filtering)
+      const game = gameOptions.find(g => g.game_id === selectedGame);
+      fetchPlayers(sport, selectedGame, game?.label || "");
     }
-  }, [selectedGame]);
+  }, [selectedGame, gameOptions]);
 
   const handleSort = (key: string) => {
     if (sortKey === key) setSortDir((d) => (d === 1 ? -1 : 1));
@@ -387,7 +398,10 @@ export default function Scanner() {
             </p>
           </div>
           <button
-            onClick={() => fetchPlayers(sport, selectedGame)}
+            onClick={() => {
+              const game = gameOptions.find(g => g.game_id === selectedGame);
+              fetchPlayers(sport, selectedGame, game?.label || "");
+            }}
             disabled={loading}
             className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm text-gray-300 transition disabled:opacity-50"
           >
@@ -523,7 +537,10 @@ export default function Scanner() {
             </p>
             <div className="flex gap-2 justify-center mt-4">
               <button
-                onClick={() => fetchPlayers(sport, selectedGame)}
+                onClick={() => {
+                  const game = gameOptions.find(g => g.game_id === selectedGame);
+                  fetchPlayers(sport, selectedGame, game?.label || "");
+                }}
                 className="px-4 py-2 bg-yellow-500 text-black rounded font-semibold text-sm hover:bg-yellow-600"
               >
                 Retry
