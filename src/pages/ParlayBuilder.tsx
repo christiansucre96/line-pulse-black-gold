@@ -39,8 +39,9 @@ import {
 } from "lucide-react";
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
+const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// ✅ NBA CORE PROPS ONLY (can be extended later for other sports)
+// ✅ Prop labels (extended for MLB)
 const PROP_LABELS: Record<string, string> = {
   points: "Points",
   rebounds: "Rebounds",
@@ -52,9 +53,13 @@ const PROP_LABELS: Record<string, string> = {
   combo_pra: "PRA (P+R+A)",
   combo_pr: "P+R",
   combo_pa: "P+A",
+  hits: "Hits",
+  runs: "Runs",
+  rbi: "RBI",
+  home_runs: "HR",
 };
 
-// ✅ Only these props will be shown
+// ✅ Allowed props – now includes MLB props
 const ALLOWED_PROPS = [
   "points",
   "rebounds",
@@ -66,6 +71,10 @@ const ALLOWED_PROPS = [
   "combo_pra",
   "combo_pr",
   "combo_pa",
+  "hits",
+  "runs",
+  "rbi",
+  "home_runs",
 ];
 
 interface Player {
@@ -104,7 +113,6 @@ interface Game {
 
 export default function ParlayBuilder() {
   const navigate = useNavigate();
-  // ✅ Sport selector – default to MLB as requested
   const [sport, setSport] = useState<"mlb" | "nba" | "nfl" | "nhl" | "soccer">("mlb");
   const [games, setGames] = useState<Game[]>([]);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -119,7 +127,6 @@ export default function ParlayBuilder() {
   const [selectedPropFilter, setSelectedPropFilter] = useState<string>("all");
   const [expandedPlayers, setExpandedPlayers] = useState<Set<string>>(new Set());
 
-  // ✅ TODAY'S DATE (local timezone, YYYY-MM-DD)
   const today = useMemo(() => {
     const now = new Date();
     const year = now.getFullYear();
@@ -128,15 +135,21 @@ export default function ParlayBuilder() {
     return `${year}-${month}-${day}`;
   }, []);
 
+  // Load games (only needed for non‑MLB sports)
   useEffect(() => {
-    fetchGames();
+    if (sport === "mlb") {
+      // MLB uses get_parlay_players – no games needed
+      fetchParlayPlayers();
+    } else {
+      fetchGames();
+    }
   }, [sport]);
 
   useEffect(() => {
-    if (games.length > 0) {
+    if (sport !== "mlb" && games.length > 0) {
       fetchPlayersForGames();
     }
-  }, [games, selectedGame]);
+  }, [games, selectedGame, sport]);
 
   const fetchGames = async () => {
     try {
@@ -147,9 +160,7 @@ export default function ParlayBuilder() {
       });
       const data = await res.json();
       if (data.success) {
-        // ✅ FILTER: Only today's games
         const todaysGames = (data.games || []).filter((g: Game) => g.game_date === today);
-        console.log(`📅 Found ${todaysGames.length} games for today (${today})`);
         setGames(todaysGames);
       }
     } catch (err) {
@@ -157,10 +168,85 @@ export default function ParlayBuilder() {
     }
   };
 
+  // MLB‑specific: fetch players via get_parlay_players
+  const fetchParlayPlayers = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(EDGE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${ANON_KEY}` },
+        body: JSON.stringify({ operation: "get_parlay_players", sport }),
+      });
+      const data = await res.json();
+      if (data.success && data.players) {
+        // Transform MLB parlay players into the expected Player format
+        const transformedPlayers: Player[] = data.players.map((p: any) => ({
+          player_id: p.player_id,
+          name: p.name,
+          team_abbr: p.team_abbr,
+          position: p.position,
+          opponent: "TBD",
+          game_date: today,
+          all_props: {
+            hits: {
+              label: "Hits",
+              line: p.line_hits,
+              avg_l10: p.avg_hits,
+              l5: 0,
+              l10: 0,
+              l15: 0,
+              l20: 0,
+              games_n: p.games_played,
+              streak: null,
+            },
+            runs: {
+              label: "Runs",
+              line: p.line_runs,
+              avg_l10: p.avg_runs,
+              l5: 0,
+              l10: 0,
+              l15: 0,
+              l20: 0,
+              games_n: p.games_played,
+              streak: null,
+            },
+            rbi: {
+              label: "RBI",
+              line: p.line_rbi,
+              avg_l10: p.avg_rbi,
+              l5: 0,
+              l10: 0,
+              l15: 0,
+              l20: 0,
+              games_n: p.games_played,
+              streak: null,
+            },
+            home_runs: {
+              label: "Home Runs",
+              line: p.line_home_runs,
+              avg_l10: p.avg_home_runs,
+              l5: 0,
+              l10: 0,
+              l15: 0,
+              l20: 0,
+              games_n: p.games_played,
+              streak: null,
+            },
+          },
+        }));
+        setPlayers(transformedPlayers);
+        generateAllPropPicks(transformedPlayers);
+      }
+    } catch (err) {
+      console.error("Error fetching parlay players:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const fetchPlayersForGames = async () => {
     setLoading(true);
     try {
-      // ✅ Use only today's game IDs
       const gameIds = selectedGame === "all"
         ? games.map(g => g.external_id)
         : [selectedGame];
@@ -179,7 +265,6 @@ export default function ParlayBuilder() {
         });
         const data = await res.json();
         if (data.success) {
-          // ✅ Also filter players to today's game_date
           const todaysPlayers = (data.players || []).filter((p: Player) => p.game_date === today);
           allPlayers.push(...todaysPlayers);
         }
@@ -201,7 +286,6 @@ export default function ParlayBuilder() {
       if (!player.all_props) continue;
 
       for (const [propType, propData] of Object.entries(player.all_props)) {
-        // ✅ Filter: Only allow specific props (currently NBA‑centric)
         if (!ALLOWED_PROPS.includes(propType)) continue;
 
         const data = propData as any;
@@ -452,7 +536,7 @@ export default function ParlayBuilder() {
           </p>
         </div>
 
-        {/* ✅ Sport Selector (added as requested) */}
+        {/* Sport Selector */}
         <div className="mb-6">
           <label className="block text-sm font-medium text-gray-300 mb-2">Select Sport</label>
           <select
@@ -468,6 +552,7 @@ export default function ParlayBuilder() {
           </select>
         </div>
 
+        {/* Filters (unchanged) */}
         <Card className="mb-6 bg-gray-900/50 border-gray-700">
           <CardContent className="p-4 space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-4">
@@ -478,21 +563,14 @@ export default function ParlayBuilder() {
 
               <div className="flex items-center gap-4 flex-wrap">
                 <div className="flex items-center gap-2">
-                  <Label className="text-sm text-gray-400 whitespace-nowrap">
-                    Parlay Size:
-                  </Label>
-                  <Select
-                    value={parlaySize.toString()}
-                    onValueChange={(val) => setParlaySize(Number(val))}
-                  >
+                  <Label className="text-sm text-gray-400 whitespace-nowrap">Parlay Size:</Label>
+                  <Select value={parlaySize.toString()} onValueChange={(val) => setParlaySize(Number(val))}>
                     <SelectTrigger className="w-20 bg-gray-800 border-gray-700 text-white">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent className="bg-gray-900 border-gray-700">
-                      {[1, 2, 3, 4, 5].map(num => (
-                        <SelectItem key={num} value={num.toString()}>
-                          {num} Leg{num > 1 ? 's' : ''}
-                        </SelectItem>
+                      {[1,2,3,4,5].map(num => (
+                        <SelectItem key={num} value={num.toString()}>{num} Leg{num > 1 ? 's' : ''}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -506,19 +584,14 @@ export default function ParlayBuilder() {
                   className="w-48 bg-gray-800 border-gray-700 text-white"
                 />
 
-                <Select
-                  value={selectedPropFilter}
-                  onValueChange={setSelectedPropFilter}
-                >
+                <Select value={selectedPropFilter} onValueChange={setSelectedPropFilter}>
                   <SelectTrigger className="w-40 bg-gray-800 border-gray-700 text-white">
                     <SelectValue placeholder="All Props" />
                   </SelectTrigger>
                   <SelectContent className="bg-gray-900 border-gray-700 max-h-64">
                     <SelectItem value="all">All Props</SelectItem>
                     {availablePropTypes.map(prop => (
-                      <SelectItem key={prop} value={prop}>
-                        {PROP_LABELS[prop] || prop}
-                      </SelectItem>
+                      <SelectItem key={prop} value={prop}>{PROP_LABELS[prop] || prop}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -570,57 +643,36 @@ export default function ParlayBuilder() {
                 >
                   Reset
                 </Button>
-                <Button
-                  size="sm"
-                  onClick={autoPick}
-                  className="bg-yellow-500 hover:bg-yellow-600 text-black font-bold text-xs"
-                >
-                  <Sparkles className="w-3 h-3 mr-1" />
-                  Auto-Pick {parlaySize}
+                <Button size="sm" onClick={autoPick} className="bg-yellow-500 hover:bg-yellow-600 text-black font-bold text-xs">
+                  <Sparkles className="w-3 h-3 mr-1" /> Auto-Pick {parlaySize}
                 </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={smartPick}
-                  className="border-blue-500/50 text-blue-400 hover:bg-blue-500/10 text-xs"
-                >
-                  <ListChecks className="w-3 h-3 mr-1" />
-                  Smart Pick
+                <Button size="sm" variant="outline" onClick={smartPick} className="border-blue-500/50 text-blue-400 hover:bg-blue-500/10 text-xs">
+                  <ListChecks className="w-3 h-3 mr-1" /> Smart Pick
                 </Button>
               </div>
             </div>
           </CardContent>
         </Card>
 
+        {/* AI Suggestions Banner (unchanged) */}
         {filteredPicks.length > 0 && (
           <div className="mb-6 p-4 bg-gradient-to-r from-yellow-900/30 to-orange-900/30 border border-yellow-600/50 rounded-xl">
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div className="flex items-center gap-3">
                 <Sparkles className="w-6 h-6 text-yellow-400" />
                 <div>
-                  <p className="text-yellow-400 font-semibold">
-                    🤖 AI Suggestions Ready
-                  </p>
+                  <p className="text-yellow-400 font-semibold">🤖 AI Suggestions Ready</p>
                   <p className="text-sm text-gray-400">
                     Top pick: {filteredPicks[0]?.player.name} - {filteredPicks[0]?.propLabel} ({filteredPicks[0]?.confidence}% confidence)
                   </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Button
-                  onClick={autoPick}
-                  className="bg-yellow-500 hover:bg-yellow-600 text-black font-bold"
-                >
-                  <Sparkles className="w-4 h-4 mr-2" />
-                  AUTO-PICK {parlaySize}
+                <Button onClick={autoPick} className="bg-yellow-500 hover:bg-yellow-600 text-black font-bold">
+                  <Sparkles className="w-4 h-4 mr-2" /> AUTO-PICK {parlaySize}
                 </Button>
-                <Button
-                  onClick={smartPick}
-                  variant="outline"
-                  className="border-blue-500/50 text-blue-400 hover:bg-blue-500/10"
-                >
-                  <ListChecks className="w-4 h-4 mr-2" />
-                  SMART PICK
+                <Button onClick={smartPick} variant="outline" className="border-blue-500/50 text-blue-400 hover:bg-blue-500/10">
+                  <ListChecks className="w-4 h-4 mr-2" /> SMART PICK
                 </Button>
               </div>
             </div>
@@ -637,7 +689,7 @@ export default function ParlayBuilder() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={fetchPlayersForGames}
+                onClick={sport === "mlb" ? fetchParlayPlayers : fetchPlayersForGames}
                 disabled={loading}
                 className="border-gray-700 text-gray-300"
               >
@@ -677,28 +729,22 @@ export default function ParlayBuilder() {
                   const isExpanded = expandedPlayers.has(playerId);
 
                   return (
-                    <Collapsible
-                      key={playerId}
-                      open={isExpanded}
-                      onOpenChange={() => togglePlayerExpanded(playerId)}
-                    >
+                    <Collapsible key={playerId} open={isExpanded} onOpenChange={() => togglePlayerExpanded(playerId)}>
                       <Card className={`bg-gray-900/50 border hover:border-yellow-500/50 transition-all ${getConfidenceBg(playerPicks[0].confidence)}`}>
                         <CollapsibleTrigger asChild>
                           <CardContent className="p-4 cursor-pointer">
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-4">
                                 <div className="w-12 h-12 rounded-full bg-gradient-to-br from-yellow-500 to-orange-600 flex items-center justify-center text-black font-bold text-sm shrink-0">
-                                  {player.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2)}
+                                  {player.name.split(' ').map(n => n[0]).join('').slice(0,2)}
                                 </div>
                                 <div className="min-w-0">
-                                  <h3 className="font-bold text-white text-lg truncate">
-                                    {player.name}
-                                  </h3>
+                                  <h3 className="font-bold text-white text-lg truncate">{player.name}</h3>
                                   <p className="text-sm text-gray-400">
                                     {player.team_abbr} vs {player.opponent} • {playerPicks.length} props
                                   </p>
                                   <div className="flex items-center gap-2 mt-2 flex-wrap">
-                                    {playerPicks.slice(0, 3).map(pick => (
+                                    {playerPicks.slice(0,3).map(pick => (
                                       <Badge key={pick.propType} variant="outline" className="text-xs border-gray-500 text-gray-400">
                                         {pick.propLabel}: {pick.line}
                                       </Badge>
@@ -711,7 +757,6 @@ export default function ParlayBuilder() {
                                   </div>
                                 </div>
                               </div>
-
                               <div className="flex items-center gap-4 shrink-0">
                                 <div className="text-right">
                                   <div className={`text-xl font-bold ${getConfidenceColor(playerPicks[0].confidence)}`}>
@@ -719,33 +764,23 @@ export default function ParlayBuilder() {
                                   </div>
                                   <div className="text-[10px] text-gray-500">Top Prop</div>
                                 </div>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="text-gray-400"
-                                >
+                                <Button size="sm" variant="ghost" className="text-gray-400">
                                   {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                                 </Button>
                               </div>
                             </div>
                           </CardContent>
                         </CollapsibleTrigger>
-
                         <CollapsibleContent>
                           <div className="px-4 pb-4 space-y-2 border-t border-gray-800 pt-3">
                             {playerPicks.map(pick => (
-                              <div
-                                key={pick.id}
-                                className="flex items-center justify-between p-3 bg-gray-800/50 rounded-lg border border-gray-700 hover:border-yellow-500/50 transition-all"
-                              >
+                              <div key={pick.id} className="flex items-center justify-between p-3 bg-gray-800/50 rounded-lg border border-gray-700 hover:border-yellow-500/50 transition-all">
                                 <div className="flex items-center gap-3">
                                   <Badge variant="outline" className={`text-xs ${getConfidenceBg(pick.confidence)} ${getConfidenceColor(pick.confidence)}`}>
                                     {pick.confidence}%
                                   </Badge>
                                   <div>
-                                    <p className="font-medium text-white text-sm">
-                                      {pick.propLabel} Over {pick.line}
-                                    </p>
+                                    <p className="font-medium text-white text-sm">{pick.propLabel} Over {pick.line}</p>
                                     <p className="text-[10px] text-gray-400">
                                       Avg: {pick.avgL10} • HR: {pick.hitRate}% • {pick.reasoning}
                                     </p>
@@ -775,6 +810,7 @@ export default function ParlayBuilder() {
             )}
           </div>
 
+          {/* Bet Slip (unchanged) */}
           <div className="lg:col-span-1">
             <Card className="bg-gray-900/80 border-gray-700 sticky top-4">
               <CardHeader className="pb-3">
@@ -792,36 +828,22 @@ export default function ParlayBuilder() {
                 ) : (
                   <div className="space-y-3 mb-4 max-h-[400px] overflow-y-auto">
                     {parlayLegs.map((leg, index) => (
-                      <div
-                        key={leg.id}
-                        className="p-3 bg-gray-800/50 rounded-lg border border-gray-700"
-                      >
+                      <div key={leg.id} className="p-3 bg-gray-800/50 rounded-lg border border-gray-700">
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1">
                               <span className="text-xs text-gray-500">#{index + 1}</span>
-                              <h4 className="font-bold text-white text-sm truncate">
-                                {leg.player.name}
-                              </h4>
+                              <h4 className="font-bold text-white text-sm truncate">{leg.player.name}</h4>
                             </div>
-                            <p className="text-xs text-gray-400 truncate">
-                              {leg.propLabel} Over {leg.line}
-                            </p>
+                            <p className="text-xs text-gray-400 truncate">{leg.propLabel} Over {leg.line}</p>
                             <div className="flex items-center gap-2 mt-2">
                               <Badge className={`text-xs ${getConfidenceBg(leg.confidence)} ${getConfidenceColor(leg.confidence)}`}>
                                 {leg.confidence}%
                               </Badge>
-                              <span className="text-xs text-gray-500">
-                                {leg.odds > 0 ? '+' : ''}{leg.odds}
-                              </span>
+                              <span className="text-xs text-gray-500">{leg.odds > 0 ? '+' : ''}{leg.odds}</span>
                             </div>
                           </div>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => removeFromParlay(leg.id)}
-                            className="text-gray-500 hover:text-red-400 shrink-0"
-                          >
+                          <Button size="sm" variant="ghost" onClick={() => removeFromParlay(leg.id)} className="text-gray-500 hover:text-red-400 shrink-0">
                             <X className="w-4 h-4" />
                           </Button>
                         </div>
@@ -834,9 +856,7 @@ export default function ParlayBuilder() {
                   <div className="border-t border-gray-700 pt-4 space-y-3">
                     <div className="flex justify-between items-center">
                       <span className="text-gray-400">Parlay Odds:</span>
-                      <span className="text-xl font-bold text-yellow-400">
-                        {parlayOdds > 0 ? '+' : ''}{parlayOdds}
-                      </span>
+                      <span className="text-xl font-bold text-yellow-400">{parlayOdds > 0 ? '+' : ''}{parlayOdds}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-gray-400">Avg Confidence:</span>
@@ -855,13 +875,8 @@ export default function ParlayBuilder() {
                       Place {parlayLegs.length}-Leg Parlay
                       <ChevronRight className="w-5 h-5 ml-2" />
                     </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => setParlayLegs([])}
-                      className="w-full border-red-500/50 text-red-400 hover:bg-red-500/10"
-                    >
-                      <Trash2 className="w-4 h-4 mr-2" />
-                      Clear Slip
+                    <Button variant="outline" onClick={() => setParlayLegs([])} className="w-full border-red-500/50 text-red-400 hover:bg-red-500/10">
+                      <Trash2 className="w-4 h-4 mr-2" /> Clear Slip
                     </Button>
                   </div>
                 )}
