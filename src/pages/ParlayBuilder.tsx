@@ -40,7 +40,7 @@ import {
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 
-// ✅ NBA CORE PROPS ONLY
+// ✅ NBA CORE PROPS ONLY (can be extended later for other sports)
 const PROP_LABELS: Record<string, string> = {
   points: "Points",
   rebounds: "Rebounds",
@@ -104,7 +104,8 @@ interface Game {
 
 export default function ParlayBuilder() {
   const navigate = useNavigate();
-  const [sport, setSport] = useState("nba");
+  // ✅ Sport selector – default to MLB as requested
+  const [sport, setSport] = useState<"mlb" | "nba" | "nfl" | "nhl" | "soccer">("mlb");
   const [games, setGames] = useState<Game[]>([]);
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(false);
@@ -200,7 +201,7 @@ export default function ParlayBuilder() {
       if (!player.all_props) continue;
 
       for (const [propType, propData] of Object.entries(player.all_props)) {
-        // ✅ Filter: Only allow specific props
+        // ✅ Filter: Only allow specific props (currently NBA‑centric)
         if (!ALLOWED_PROPS.includes(propType)) continue;
 
         const data = propData as any;
@@ -445,11 +446,26 @@ export default function ParlayBuilder() {
             <Zap className="w-8 h-8" />
             ⚡ AI Parlay Builder
           </h1>
-          {/* ✅ Updated subtitle to show today's date */}
           <p className="text-gray-400 flex items-center gap-2">
             <Calendar className="w-4 h-4" />
             Today's games only ({new Date(today).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}) • {allPropPicks.length} prop picks available • You decide
           </p>
+        </div>
+
+        {/* ✅ Sport Selector (added as requested) */}
+        <div className="mb-6">
+          <label className="block text-sm font-medium text-gray-300 mb-2">Select Sport</label>
+          <select
+            value={sport}
+            onChange={(e) => setSport(e.target.value as any)}
+            className="w-full max-w-xs px-4 py-2 bg-[#1e293b] border border-gray-700 rounded-lg text-white focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
+          >
+            <option value="mlb">⚾ MLB</option>
+            <option value="nba">🏀 NBA</option>
+            <option value="nfl">🏈 NFL</option>
+            <option value="nhl">🏒 NHL</option>
+            <option value="soccer">⚽ Soccer</option>
+          </select>
         </div>
 
         <Card className="mb-6 bg-gray-900/50 border-gray-700">
