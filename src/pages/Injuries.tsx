@@ -1,12 +1,9 @@
 // src/pages/InjuryReport.tsx
 import { useState, useEffect } from "react";
-import { createClient } from "@supabase/supabase-js";
 import { useNavigate, useLocation } from "react-router-dom";
 
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL!,
-  import.meta.env.VITE_SUPABASE_ANON_KEY!
-);
+const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
+const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 interface Injury {
   id: string;
@@ -43,26 +40,17 @@ function cleanPosition(pos: string): string {
   }
 }
 
-// ─── NEW: Clean any field that might contain JSON ────────────────────────────
+// Clean any field that might contain JSON
 function cleanField(value: string | null | undefined): string {
   if (!value) return ''
-  
-  // If it's JSON, try to extract useful data
   if (value.includes('{')) {
     try {
       const parsed = JSON.parse(value)
-      // Return the most useful field
-      return parsed.description || 
-             parsed.name || 
-             parsed.abbreviation || 
-             parsed.text || 
-             ''
+      return parsed.description || parsed.name || parsed.abbreviation || parsed.text || ''
     } catch {
-      // Invalid JSON - return empty
       return ''
     }
   }
-  
   return value
 }
 
@@ -145,13 +133,11 @@ function InjuryCard({ injury }: { injury: Injury }) {
   const [open, setOpen] = useState(false)
   const c = cfg(injury.injury_status)
   
-  // ✅ Clean all fields before display
   const pos = cleanField(cleanPosition(injury.position))
   const injuryType = cleanField(injury.injury_type)
   const injurySide = cleanField(injury.injury_side)
   const description = cleanField(injury.injury_description)
   const longDesc = cleanField(injury.long_description)
-  
   const hasMore = longDesc && longDesc !== description
 
   return (
@@ -163,11 +149,8 @@ function InjuryCard({ injury }: { injury: Injury }) {
     onMouseEnter={e => e.currentTarget.style.borderColor = `${c.border}80`}
     onMouseLeave={e => e.currentTarget.style.borderColor = `${c.border}30`}
     >
-      {/* Main row */}
       <div style={{ padding: '12px 16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-
-          {/* Left: name + meta */}
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
               <StatusBadge status={injury.injury_status} />
@@ -181,9 +164,7 @@ function InjuryCard({ injury }: { injury: Injury }) {
               <ReturnChip estimate={cleanField(injury.return_estimate)} />
             </div>
 
-            {/* Meta row */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              {/* Team pill */}
               <span style={{
                 padding: '2px 8px', borderRadius: 4,
                 background: '#141820', border: '1px solid #1e2530',
@@ -214,7 +195,6 @@ function InjuryCard({ injury }: { injury: Injury }) {
             </div>
           </div>
 
-          {/* Right: date + expand */}
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
             <span style={{ fontSize: 9, color: '#2e3748', fontFamily: "'DM Mono', monospace" }}>
               {new Date(injury.last_updated).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
@@ -235,7 +215,6 @@ function InjuryCard({ injury }: { injury: Injury }) {
           </div>
         </div>
 
-        {/* Short description - now clean */}
         {description && (
           <div style={{
             marginTop: 10,
@@ -249,7 +228,6 @@ function InjuryCard({ injury }: { injury: Injury }) {
         )}
       </div>
 
-      {/* Expanded long description */}
       {open && hasMore && (
         <div style={{
           padding: '10px 16px 14px',
@@ -284,53 +262,55 @@ function Pill({ count, label, color, active, onClick }: any) {
 
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function InjuryReport() {
+  const [sport, setSport] = useState<"mlb" | "nba" | "nfl" | "nhl" | "soccer">("mlb");
   const [injuries, setInjuries] = useState<Injury[]>([])
   const [loading, setLoading]   = useState(true)
-  const [scraping, setScraping] = useState(false)
   const [filter, setFilter]     = useState('all')
   const [team, setTeam]         = useState('all')
   const [search, setSearch]     = useState('')
   const [lastUpdated, setLast]  = useState('')
-  const [msg, setMsg]           = useState('')
   const [error, setError]       = useState<string | null>(null)
 
-  async function loadFromDB() {
-    const { data, error: e } = await supabase
-      .from('injuries').select('*').eq('sport', 'nba')
-      .order('injury_status').order('team_abbreviation').order('full_name')
-    if (e) throw e
-    return (data || []).map(i => ({ ...i, position: cleanPosition(i.position) }))
-  }
-
-  async function runScraper() {
-    setScraping(true); setMsg('⏳ Fetching from ESPN...')
-    try {
-      const { data, error: e } = await supabase.functions.invoke('nba-injury-scraper', { body: {} })
-      if (e) throw new Error(e.message)
-      setMsg(`✅ ${data.stored} injuries loaded`)
-      const fresh = await loadFromDB()
-      setInjuries(fresh)
-      setLast(new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }))
-    } catch (e: any) { setError(`Scraper failed: ${e.message}`) }
-    finally { setScraping(false); setLoading(false) }
-  }
-
   async function fetchInjuries() {
-    setLoading(true); setError(null); setMsg('')
+    setLoading(true); setError(null)
     try {
-      const data = await loadFromDB()
-      if (data.length === 0) { await runScraper(); return }
-      setInjuries(data)
+      const res = await fetch(EDGE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${ANON_KEY}` },
+        body: JSON.stringify({ operation: "get_injuries", sport }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "Failed to fetch injuries");
+      
+      // Transform API response to match our Injury interface
+      const injuriesList: Injury[] = (data.injuries || []).map((i: any) => ({
+        id: i.player_id || `${i.name}-${i.team}`,
+        full_name: i.name,
+        team_abbreviation: i.team_abbr,
+        position: i.position,
+        injury_status: i.injury_status,
+        injury_type: i.description?.split(':')[0] || '',
+        injury_side: '',
+        injury_description: i.description,
+        long_description: i.description,
+        return_estimate: i.date,
+        last_updated: new Date().toISOString(),
+      }));
+      
+      setInjuries(injuriesList)
       setLast(new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }))
-    } catch (e: any) { setError(e.message) }
-    finally { setLoading(false) }
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
     fetchInjuries()
-    const t = setInterval(fetchInjuries, 10 * 60 * 1000)
-    return () => clearInterval(t)
-  }, [])
+    const interval = setInterval(fetchInjuries, 10 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [sport])
 
   const teams = [...new Set(injuries.map(i => i.team_abbreviation))].sort()
   const priority: Record<string, number> = { out: 1, doubtful: 2, questionable: 3, probable: 4 }
@@ -348,6 +328,8 @@ export default function InjuryReport() {
     probable:     injuries.filter(i => i.injury_status === 'probable').length,
   }
 
+  const sportDisplay = sport.toUpperCase();
+
   return (
     <>
       <style>{`
@@ -363,10 +345,28 @@ export default function InjuryReport() {
       <div style={{ minHeight: '100vh', background: '#060a0f', padding: '32px 24px', fontFamily: "'DM Mono', monospace" }}>
         <div style={{ maxWidth: 860, margin: '0 auto' }}>
 
-          {/* Nav */}
           <Nav />
 
-          {/* Header */}
+          {/* Sport Selector */}
+          <div style={{ marginBottom: 24 }}>
+            <label className="block text-sm font-medium text-gray-300 mb-2" style={{ color: '#cbd5e1', fontSize: 11 }}>Sport</label>
+            <select
+              value={sport}
+              onChange={(e) => setSport(e.target.value as any)}
+              style={{
+                width: '100%', maxWidth: 200, padding: '8px 12px', borderRadius: 8,
+                background: '#0d1117', border: '1px solid #1e2530',
+                color: '#cbd5e1', fontSize: 12, fontFamily: "'DM Mono', monospace", cursor: 'pointer',
+              }}
+            >
+              <option value="mlb">⚾ MLB</option>
+              <option value="nba">🏀 NBA</option>
+              <option value="nfl">🏈 NFL</option>
+              <option value="nhl">🏒 NHL</option>
+              <option value="soccer">⚽ Soccer</option>
+            </select>
+          </div>
+
           <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
@@ -374,7 +374,7 @@ export default function InjuryReport() {
                   <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
                   <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
                 </svg>
-                <span style={{ fontSize: 10, color: '#ff4444', fontWeight: 700, letterSpacing: '0.2em' }}>NBA INJURY REPORT</span>
+                <span style={{ fontSize: 10, color: '#ff4444', fontWeight: 700, letterSpacing: '0.2em' }}>{sportDisplay} INJURY REPORT</span>
               </div>
               <div style={{ fontSize: 26, fontWeight: 900, color: '#e8d48b', fontFamily: "'Barlow Condensed', sans-serif" }}>
                 {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).toUpperCase()}
@@ -382,28 +382,20 @@ export default function InjuryReport() {
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               {lastUpdated && <span style={{ fontSize: 10, color: '#2e3748' }}>Updated {lastUpdated}</span>}
-              <button onClick={fetchInjuries} disabled={loading || scraping} style={{
+              <button onClick={fetchInjuries} disabled={loading} style={{
                 padding: '6px 14px', borderRadius: 8, border: '1px solid #1e2530',
                 background: '#0d1117', color: '#4a5568', fontSize: 11, fontWeight: 700,
                 cursor: 'pointer', fontFamily: "'DM Mono', monospace",
                 display: 'flex', alignItems: 'center', gap: 6,
               }}>
-                <span style={{ display: 'inline-block', animation: (loading || scraping) ? 'spin 1s linear infinite' : 'none' }}>↻</span>
-                {scraping ? 'Scraping...' : 'Refresh'}
+                <span style={{ display: 'inline-block', animation: loading ? 'spin 1s linear infinite' : 'none' }}>↻</span>
+                Refresh
               </button>
-              <button onClick={runScraper} disabled={scraping} style={{
-                padding: '6px 14px', borderRadius: 8, border: '1px solid #8b000060',
-                background: '#1a0000', color: '#ff4444', fontSize: 11, fontWeight: 700,
-                cursor: 'pointer', fontFamily: "'DM Mono', monospace",
-              }}>⚡ Pull ESPN</button>
             </div>
           </div>
 
-          {/* Banners */}
           {error && <div style={{ marginBottom: 16, padding: '10px 14px', background: '#1a0000', border: '1px solid #8b0000', borderRadius: 8, color: '#ff4444', fontSize: 11 }}>❌ {error}</div>}
-          {msg && !error && <div style={{ marginBottom: 16, padding: '10px 14px', background: '#001200', border: '1px solid #16a34a', borderRadius: 8, color: '#22c55e', fontSize: 11 }}>{msg}</div>}
 
-          {/* Status pills */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
             <Pill count={injuries.length} label="Total"        color="#94a3b8" active={filter === 'all'}          onClick={() => setFilter('all')} />
             <Pill count={counts.out}          label="Out"          color="#ff4444" active={filter === 'out'}          onClick={() => setFilter('out')} />
@@ -412,7 +404,6 @@ export default function InjuryReport() {
             <Pill count={counts.probable}     label="Probable"     color="#22c55e" active={filter === 'probable'}     onClick={() => setFilter('probable')} />
           </div>
 
-          {/* Search + team */}
           <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
             <input
               placeholder="Search player..."
@@ -434,30 +425,26 @@ export default function InjuryReport() {
             </select>
           </div>
 
-          {/* Loading */}
-          {(loading || scraping) && injuries.length === 0 && (
+          {loading && injuries.length === 0 && (
             <div style={{ textAlign: 'center', padding: '60px 20px', color: '#4a5568' }}>
               <div style={{ width: 40, height: 40, borderRadius: '50%', border: '2px solid #1e2530', borderTopColor: '#ff4444', animation: 'spin 1s linear infinite', margin: '0 auto 16px' }} />
-              <div style={{ animation: 'pulse 2s ease infinite' }}>{scraping ? 'Fetching from ESPN...' : 'Loading...'}</div>
+              <div style={{ animation: 'pulse 2s ease infinite' }}>Loading...</div>
             </div>
           )}
 
-          {/* Empty */}
-          {!loading && !scraping && filtered.length === 0 && (
+          {!loading && filtered.length === 0 && (
             <div style={{ textAlign: 'center', padding: '60px 20px', color: '#4a5568' }}>
               <div style={{ fontSize: 14, marginBottom: 8 }}>No injuries found</div>
-              <div style={{ fontSize: 11, color: '#2e3748' }}>Click ⚡ Pull ESPN to fetch latest</div>
+              <div style={{ fontSize: 11, color: '#2e3748' }}>Try selecting a different sport or refresh.</div>
             </div>
           )}
 
-          {/* List */}
           {filtered.map(i => <InjuryCard key={i.id} injury={i} />)}
 
-          {/* Footer */}
           {filtered.length > 0 && (
             <div style={{ marginTop: 16, padding: '12px 16px', background: '#0a0e14', borderRadius: 8, border: '1px solid #1a2030', fontSize: 10, color: '#2e3748', fontFamily: "'DM Mono', monospace", display: 'flex', justifyContent: 'space-between' }}>
               <span>Showing {filtered.length} of {injuries.length} players</span>
-              <span>ESPN • Click ▾ more to expand details</span>
+              <span>Data via Edge Function • Click ▾ more to expand</span>
             </div>
           )}
 
