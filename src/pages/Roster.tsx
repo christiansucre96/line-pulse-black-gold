@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 const CLEVER_ACTION_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Unified Player interface that handles ALL sports
+// 🔥 Unified Player interface that handles ALL sports
 interface Player {
   player_id?: string;
   name?: string;
@@ -16,12 +16,14 @@ interface Player {
   external_id?: string;
   mlb_id?: string;
   espn_id?: string;
-  // Nested structures
+  // Nested structures (ESPN format)
   athlete?: {
     id?: string;
     displayName?: string;
+    fullName?: string;
     position?: { abbreviation?: string };
     jersey?: string;
+    number?: string | number;
   };
 }
 
@@ -82,24 +84,33 @@ export default function RosterPage() {
     }
   };
 
-  // 🔥 Robust player normalization for ANY sport
+  // 🔥 Robust player normalization for ANY sport/API
   const normalizePlayer = (player: any, sport: string): Player => {
-    // Handle ESPN's nested athlete object (common in NBA)
+    // Handle ESPN's nested athlete object (common in NBA/NFL)
     const athlete = player.athlete || player;
 
     return {
-      player_id: player.player_id || athlete.id || '',
+      player_id: player.player_id || athlete.id?.toString() || '',
       name: player.name || athlete.displayName || athlete.fullName || player.full_name || '',
       position: player.position || athlete.position?.abbreviation || player.pos || '',
       jersey: player.jersey || athlete.jersey || player.jerseyNumber || athlete.number?.toString() || '',
-      is_starter: player.is_starter !== undefined ? player.is_starter : player.starter || player.isStarter || false,
+      is_starter: player.is_starter !== undefined ? player.is_starter : 
+                  player.starter !== undefined ? player.starter :
+                  player.isStarter !== undefined ? player.isStarter : false,
       external_id: player.external_id || athlete.id?.toString() || '',
+      mlb_id: player.mlb_id || '',
+      espn_id: athlete.id?.toString() || '',
     };
   };
 
-  const getPlayerName = (player: Player): string => player.name || player.full_name || 'Unknown Player';
-  const getPlayerPosition = (player: Player): string => player.position || 'N/A';
-  const getPlayerJersey = (player: Player): string => player.jersey || '';
+  const getPlayerName = (player: Player): string => 
+    player.name || player.full_name || player.athlete?.displayName || 'Unknown Player';
+  
+  const getPlayerPosition = (player: Player): string => 
+    player.position || player.athlete?.position?.abbreviation || 'N/A';
+  
+  const getPlayerJersey = (player: Player): string => 
+    player.jersey || player.athlete?.jersey || player.athlete?.number?.toString() || '';
 
   const dateLabel = new Date()
     .toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
@@ -130,26 +141,42 @@ export default function RosterPage() {
     );
   };
 
-  const PlayerCard = ({ player, isStarter }: { player: Player; isStarter?: boolean }) => {
+  // 🔥 PlayerCard with amber styling for projected starters
+  const PlayerCard = ({ 
+    player, 
+    isStarter, 
+    isProjectedStarter 
+  }: { 
+    player: Player; 
+    isStarter?: boolean;
+    isProjectedStarter?: boolean;
+  }) => {
     const name = getPlayerName(player);
     const position = getPlayerPosition(player);
     const jersey = getPlayerJersey(player);
     const starter = isStarter !== undefined ? isStarter : (player.is_starter || false);
     const isMLB = sport === 'mlb';
+    
+    // 🔥 Amber styling triggers for projected starters (all sports)
+    const isAmber = isProjectedStarter && starter;
 
     return (
       <div
         style={{
-          background: starter && isMLB ? "rgba(234, 179, 8, 0.08)" : "#0d1117",
-          border: starter && isMLB ? "1px solid rgba(234, 179, 8, 0.3)" : "1px solid #1e2530",
-          borderRadius: 8, padding: "12px 14px",
+          background: isAmber ? "rgba(234, 179, 8, 0.12)" : 
+                     (starter && isMLB) ? "rgba(234, 179, 8, 0.08)" : "#0d1117",
+          border: isAmber ? "1px solid rgba(234, 179, 8, 0.5)" : 
+                 (starter && isMLB) ? "1px solid rgba(234, 179, 8, 0.3)" : "1px solid #1e2530",
+          borderRadius: 8, 
+          padding: "12px 14px",
           transition: "all 0.15s ease",
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{
-            fontSize: 13, fontWeight: starter && isMLB ? 800 : 700,
-            color: starter && isMLB ? "#fde68a" : "#cbd5e1",
+          <span style={{ 
+            fontSize: 13, 
+            fontWeight: isAmber ? 800 : ((starter && isMLB) ? 800 : 700), 
+            color: isAmber ? "#fde68a" : ((starter && isMLB) ? "#fde68a" : "#cbd5e1"), 
             fontFamily: "'Barlow Condensed', sans-serif",
             wordBreak: "break-word",
           }}>
@@ -159,8 +186,10 @@ export default function RosterPage() {
             {jersey && (
               <span style={{
                 padding: "2px 6px", borderRadius: 3,
-                background: "#141820", border: "1px solid #1e2530",
-                fontSize: 8, fontWeight: 700, color: "#94a3b8",
+                background: isAmber ? "rgba(234, 179, 8, 0.2)" : "#141820", 
+                border: isAmber ? "1px solid rgba(234, 179, 8, 0.4)" : "1px solid #1e2530",
+                fontSize: 8, fontWeight: 700, 
+                color: isAmber ? "#fde68a" : "#94a3b8",
                 fontFamily: "'DM Mono', monospace",
                 minWidth: 20, textAlign: "center",
               }}>
@@ -169,17 +198,19 @@ export default function RosterPage() {
             )}
             <span style={{
               padding: "2px 8px", borderRadius: 4,
-              background: "#141820", border: "1px solid #1e2530",
-              fontSize: 9, fontWeight: 700, color: "#5b6e8c",
+              background: isAmber ? "rgba(234, 179, 8, 0.2)" : "#141820", 
+              border: isAmber ? "1px solid rgba(234, 179, 8, 0.4)" : "1px solid #1e2530",
+              fontSize: 9, fontWeight: 700, 
+              color: isAmber ? "#fde68a" : "#5b6e8c",
               fontFamily: "'DM Mono', monospace",
             }}>
               {position}
             </span>
           </div>
         </div>
-        {starter && isMLB && (
+        {starter && (isMLB || isProjectedStarter) && (
           <div style={{ fontSize: 8, color: "#eab308", marginTop: 4, fontFamily: "'DM Mono', monospace" }}>
-            STARTER
+            ★ STARTER
           </div>
         )}
       </div>
@@ -270,7 +301,7 @@ export default function RosterPage() {
             </div>
           )}
 
-          {/* All sports (including MLB) use the same display logic */}
+          {/* All sports use the same display logic with amber starters */}
           {teams.map((team, teamIdx) => (
             <div key={team.team || teamIdx} style={{
               background: "#0a0e14", border: "1px solid #1a2030",
@@ -295,29 +326,78 @@ export default function RosterPage() {
                 </div>
               </div>
 
-              {/* PROJECTED STARTERS */}
+              {/* 🔥 PROJECTED STARTERS — AMBER THEME */}
               {team.projected_starters.length > 0 && (
                 <>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#eab308", marginBottom: 10, fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: "0.05em" }}>
-                    ★ PROJECTED STARTERS
+                  <div style={{ 
+                    fontSize: 11, 
+                    fontWeight: 700, 
+                    color: "#eab308", 
+                    marginBottom: 10, 
+                    fontFamily: "'Barlow Condensed', sans-serif", 
+                    letterSpacing: "0.05em",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6
+                  }}>
+                    <span style={{
+                      padding: "2px 6px",
+                      borderRadius: 4,
+                      background: "rgba(234, 179, 8, 0.15)",
+                      border: "1px solid rgba(234, 179, 8, 0.3)",
+                      fontSize: 9
+                    }}>★</span>
+                    PROJECTED STARTERS
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10, marginBottom: 24 }}>
+                  
+                  {/* 🔥 Amber-themed grid container for starters */}
+                  <div style={{ 
+                    display: "grid", 
+                    gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", 
+                    gap: 10, 
+                    marginBottom: 24,
+                    padding: "12px",
+                    background: "rgba(234, 179, 8, 0.04)",
+                    border: "1px dashed rgba(234, 179, 8, 0.2)",
+                    borderRadius: 8
+                  }}>
                     {team.projected_starters.map((player, playerIdx) => (
-                      <PlayerCard key={player.player_id || playerIdx} player={player} isStarter={true} />
+                      <PlayerCard 
+                        key={player.player_id || `${player.name}-${playerIdx}`} 
+                        player={player} 
+                        isStarter={true}
+                        isProjectedStarter={true}  // 🔥 Triggers amber styling
+                      />
                     ))}
                   </div>
                 </>
               )}
 
-              {/* BENCH */}
+              {/* 🔥 BENCH — Standard dark theme */}
               {team.bench_depth.length > 0 && (
                 <>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", marginBottom: 10, fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: "0.05em" }}>
+                  <div style={{ 
+                    fontSize: 11, 
+                    fontWeight: 700, 
+                    color: "#64748b", 
+                    marginBottom: 10, 
+                    fontFamily: "'Barlow Condensed', sans-serif", 
+                    letterSpacing: "0.05em" 
+                  }}>
                     BENCH / RESERVES
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}>
+                  <div style={{ 
+                    display: "grid", 
+                    gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", 
+                    gap: 10 
+                  }}>
                     {team.bench_depth.map((player, playerIdx) => (
-                      <PlayerCard key={player.player_id || playerIdx} player={player} isStarter={false} />
+                      <PlayerCard 
+                        key={player.player_id || `${player.name}-${playerIdx}`} 
+                        player={player} 
+                        isStarter={false}
+                        isProjectedStarter={false}
+                      />
                     ))}
                   </div>
                 </>
