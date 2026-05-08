@@ -5,17 +5,41 @@ const CLEVER_ACTION_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1
 const MLB_LINEUP_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/mlb-lineup-scraper";
 const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
+// 🔥 Unified Player interface that handles ALL sports
 interface Player {
+  // Common fields
   player_id?: string;
   mlb_id?: string;
+  espn_id?: string;
+  nba_id?: string;
+  
+  // Name fields (different APIs use different names)
   name?: string;
   full_name?: string;
   displayName?: string;
+  firstName?: string;
+  lastName?: string;
+  athlete?: { displayName?: string; fullName?: string };
+  
+  // Position/jersey
   position?: string;
+  pos?: string;
   jersey?: string;
   jerseyNumber?: string;
+  number?: string;
+  
+  // Starter status
   is_starter?: boolean;
   starter?: boolean;
+  isStarter?: boolean;
+  
+  // ESPN-specific nested structure
+  athlete?: {
+    id?: string;
+    displayName?: string;
+    position?: { abbreviation?: string };
+    jersey?: string;
+  };
 }
 
 interface SimpleTeam {
@@ -136,7 +160,17 @@ export default function RosterPage() {
         throw new Error(data.error || "Failed to load lineups");
       }
       
-      const lineups = data.lineups || [];
+      // 🔥 NBA-specific data normalization
+      let lineups = data.lineups || [];
+      
+      if (sport === 'nba' && lineups.length > 0) {
+        // Normalize NBA player data structure from ESPN API
+        lineups = lineups.map((team: any) => ({
+          ...team,
+          players: (team.players || []).map((p: any) => normalizeNBAPlayer(p))
+        }));
+      }
+      
       setSimpleTeams(lineups);
       setMlbLineups([]);
       
@@ -153,25 +187,78 @@ export default function RosterPage() {
     }
   };
 
+  // 🔥 Normalize NBA player data from ESPN API format
+  const normalizeNBAPlayer = (player: any): Player => {
+    // Handle ESPN's nested athlete object
+    const athlete = player.athlete || player;
+    
+    return {
+      // IDs
+      player_id: player.player_id || athlete.id || athlete.athleteId || '',
+      espn_id: athlete.id?.toString() || '',
+      
+      // Names - try all possible fields
+      name: player.name || athlete.displayName || athlete.fullName || player.full_name || '',
+      firstName: athlete.firstName || '',
+      lastName: athlete.lastName || '',
+      
+      // Position
+      position: player.position || athlete.position?.abbreviation || athlete.pos || player.pos || '',
+      
+      // Jersey
+      jersey: player.jersey || athlete.jersey || player.jerseyNumber || athlete.number?.toString() || '',
+      
+      // Starter status
+      is_starter: player.is_starter !== undefined ? player.is_starter : 
+                  player.starter !== undefined ? player.starter :
+                  player.isStarter !== undefined ? player.isStarter : false,
+    };
+  };
+
+  // 🔥 Robust name extraction for ANY data structure
   const getPlayerName = (player: Player): string => {
-    return player.name || 
-           player.full_name || 
-           player.displayName || 
-           `${player.first_name || ''} ${player.last_name || ''}`.trim() ||
-           'Unknown Player';
+    // Try direct name fields first
+    if (player.name) return player.name;
+    if (player.full_name) return player.full_name;
+    if (player.displayName) return player.displayName;
+    
+    // Try nested athlete object (ESPN format)
+    if (player.athlete) {
+      if (player.athlete.displayName) return player.athlete.displayName;
+      if (player.athlete.fullName) return player.athlete.fullName;
+    }
+    
+    // Try first + last name combo
+    const first = player.firstName || player.first_name || '';
+    const last = player.lastName || player.last_name || '';
+    if (first && last) return `${first} ${last}`.trim();
+    
+    // Fallback to ID or unknown
+    return player.player_id?.split('-')[0] || 'Unknown Player';
   };
 
   const getPlayerPosition = (player: Player): string => {
-    return player.position || 'N/A';
+    // Try all possible position fields
+    return player.position || 
+           player.pos || 
+           player.athlete?.position?.abbreviation ||
+           'N/A';
   };
 
   const getPlayerJersey = (player: Player): string => {
-    return player.jersey || player.jerseyNumber || '';
+    // Try all possible jersey fields
+    return player.jersey || 
+           player.jerseyNumber || 
+           player.number?.toString() ||
+           player.athlete?.jersey ||
+           '';
   };
 
   const isPlayerStarter = (player: Player): boolean => {
+    // Try all possible starter fields
     return player.is_starter !== undefined ? player.is_starter : 
-           player.starter !== undefined ? player.starter : false;
+           player.starter !== undefined ? player.starter :
+           player.isStarter !== undefined ? player.isStarter : false;
   };
 
   const dateLabel = new Date()
@@ -424,7 +511,7 @@ export default function RosterPage() {
             </div>
           ))}
 
-          {/* Other Sports Display */}
+          {/* Other Sports Display (NBA/NFL/NHL) */}
           {sport !== 'mlb' && simpleTeams.map((team, teamIdx) => (
             <div key={team.team || teamIdx} style={{
               background: "#0a0e14", border: "1px solid #1a2030",
@@ -444,9 +531,17 @@ export default function RosterPage() {
 
               {team.players?.length > 0 ? (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}>
-                  {team.players.map((player, playerIdx) => (
-                    <PlayerCard key={player.player_id || player.mlb_id || playerIdx} player={player} isMLB={false} />
-                  ))}
+                  {team.players.map((player, playerIdx) => {
+                    // 🔥 Normalize player on-the-fly for display
+                    const normalizedPlayer = sport === 'nba' ? normalizeNBAPlayer(player) : player;
+                    return (
+                      <PlayerCard 
+                        key={normalizedPlayer.player_id || normalizedPlayer.espn_id || playerIdx} 
+                        player={normalizedPlayer} 
+                        isMLB={false} 
+                      />
+                    );
+                  })}
                 </div>
               ) : (
                 <div style={{ padding: "20px", textAlign: "center", color: "#4a5568", fontSize: 11 }}>
