@@ -43,7 +43,7 @@ export default function RosterPage() {
   const [sport, setSport] = useState<"mlb" | "nba" | "nfl" | "nhl" | "soccer">("mlb");
   const [teams, setTeams] = useState<SimpleTeam[]>([]);
   const [games, setGames] = useState<Game[]>([]);
-  const [showAllTeams, setShowAllTeams] = useState(false);
+  const [filterByToday, setFilterByToday] = useState(false); // 🔥 Start with FALSE (show all)
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState("");
@@ -51,7 +51,7 @@ export default function RosterPage() {
 
   useEffect(() => {
     fetchLineups();
-  }, [sport, showAllTeams]);
+  }, [sport, filterByToday]);
 
   const fetchLineups = async () => {
     setLoading(true);
@@ -59,26 +59,32 @@ export default function RosterPage() {
     setDebugInfo("");
     
     try {
-      // 1. Fetch today's games first
-      const gamesRes = await fetch(CLEVER_ACTION_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${ANON_KEY}` },
-        body: JSON.stringify({ operation: "get_games", sport }),
-      });
-      const gamesData = await gamesRes.json();
-      const todayGames: Game[] = gamesData.games || [];
-      setGames(todayGames);
+      // 1. Try to fetch today's games (but don't fail if it returns 0)
+      let todayTeamAbbrs = new Set<string>();
+      let todayGamesCount = 0;
       
-      // 2. Get team abbreviations from today's games
-      const todayTeamAbbrs = new Set<string>();
-      for (const game of todayGames) {
-        if (game.home_team?.abbreviation) todayTeamAbbrs.add(game.home_team.abbreviation);
-        if (game.away_team?.abbreviation) todayTeamAbbrs.add(game.away_team.abbreviation);
+      try {
+        const gamesRes = await fetch(CLEVER_ACTION_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${ANON_KEY}` },
+          body: JSON.stringify({ operation: "get_games", sport }),
+        });
+        const gamesData = await gamesRes.json();
+        const todayGames: Game[] = gamesData.games || [];
+        todayGamesCount = todayGames.length;
+        setGames(todayGames);
+        
+        // Extract team abbreviations
+        for (const game of todayGames) {
+          if (game.home_team?.abbreviation) todayTeamAbbrs.add(game.home_team.abbreviation);
+          if (game.away_team?.abbreviation) todayTeamAbbrs.add(game.away_team.abbreviation);
+        }
+        console.log(`[${sport}] Fetched ${todayGamesCount} games, ${todayTeamAbbrs.size} teams`);
+      } catch (e) {
+        console.warn(`[${sport}] Failed to fetch games, showing all teams`);
       }
       
-      console.log(`[${sport}] Today's games: ${todayGames.length}, Teams: ${todayTeamAbbrs.size}`);
-      
-      // 3. Fetch lineups
+      // 2. Fetch all lineups
       const lineupsRes = await fetch(CLEVER_ACTION_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${ANON_KEY}` },
@@ -92,14 +98,14 @@ export default function RosterPage() {
       
       const allTeams = lineupsData.lineups || [];
       
-      // 4. Filter teams: only show teams playing today (unless "show all" is enabled)
-      const filteredTeams = showAllTeams 
-        ? allTeams 
-        : allTeams.filter((team: any) => todayTeamAbbrs.has(team.team));
+      // 3. Filter logic: only filter if we have games AND filter is enabled
+      const filteredTeams = (filterByToday && todayTeamAbbrs.size > 0)
+        ? allTeams.filter((team: any) => todayTeamAbbrs.has(team.team))
+        : allTeams; // 🔥 Default: show all teams
       
-      console.log(`[${sport}] Total teams: ${allTeams.length}, Filtered: ${filteredTeams.length}`);
+      console.log(`[${sport}] Total: ${allTeams.length}, Filtered: ${filteredTeams.length}`);
       
-      // 5. Normalize players
+      // 4. Normalize players
       const normalizedTeams = filteredTeams.map((team: any) => ({
         team: team.team,
         team_name: team.team_name,
@@ -108,7 +114,12 @@ export default function RosterPage() {
       }));
       
       setTeams(normalizedTeams);
-      setDebugInfo(`${todayGames.length} games today • ${filteredTeams.length} teams${showAllTeams ? ' (showing all)' : ''}`);
+      
+      // 5. Update debug info
+      const filterStatus = filterByToday && todayTeamAbbrs.size > 0 
+        ? `• Showing ${filteredTeams.length}/${allTeams.length} teams` 
+        : `• Showing all ${allTeams.length} teams`;
+      setDebugInfo(`${todayGamesCount} games today${filterStatus}`);
       setLastUpdated(new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }));
       
     } catch (err: any) {
@@ -289,19 +300,23 @@ export default function RosterPage() {
                 <option value="soccer">Soccer</option>
               </select>
               
-              {/* 🔥 Toggle: Show All Teams vs Today's Games Only */}
+              {/* 🔥 Toggle: Filter by Today's Games */}
               <button 
-                onClick={() => setShowAllTeams(!showAllTeams)}
+                onClick={() => setFilterByToday(!filterByToday)}
+                disabled={games.length === 0}
                 style={{
                   padding: "6px 12px", borderRadius: 8,
-                  background: showAllTeams ? "rgba(234, 179, 8, 0.2)" : "#0d1117",
-                  border: showAllTeams ? "1px solid rgba(234, 179, 8, 0.4)" : "1px solid #1e2530",
-                  color: showAllTeams ? "#eab308" : "#4a5568",
-                  fontSize: 11, fontWeight: 700, cursor: "pointer",
+                  background: filterByToday ? "rgba(234, 179, 8, 0.2)" : "#0d1117",
+                  border: filterByToday ? "1px solid rgba(234, 179, 8, 0.4)" : "1px solid #1e2530",
+                  color: filterByToday ? "#eab308" : (games.length === 0 ? "#2e3748" : "#4a5568"),
+                  fontSize: 11, fontWeight: 700, 
+                  cursor: games.length === 0 ? "not-allowed" : "pointer",
                   fontFamily: "'DM Mono', monospace",
+                  opacity: games.length === 0 ? 0.5 : 1,
                 }}
+                title={games.length === 0 ? "No games fetched - showing all teams" : "Toggle filter by today's games"}
               >
-                {showAllTeams ? '📋 Show Today Only' : '📋 Show All Teams'}
+                {filterByToday ? '✓ Today Only' : '📅 Filter by Today'}
               </button>
               
               {lastUpdated && <span style={{ fontSize: 10, color: "#2e3748" }}>Updated {lastUpdated}</span>}
@@ -340,19 +355,15 @@ export default function RosterPage() {
           {!loading && teams.length === 0 && !error && (
             <div style={{ textAlign: "center", padding: "60px 20px", color: "#4a5568" }}>
               <div style={{ fontSize: 14, marginBottom: 8 }}>
-                {showAllTeams 
-                  ? `No roster data available for ${sport.toUpperCase()}`
-                  : `No games today for ${sport.toUpperCase()}`}
+                No roster data available for {sport.toUpperCase()}
               </div>
               <div style={{ fontSize: 11, color: "#2e3748" }}>
-                {showAllTeams 
-                  ? 'Run `sync_sport` or `get_lineups` in Admin to populate rosters.'
-                  : 'Click "Show All Teams" to see all teams regardless of schedule.'}
+                Run `sync_sport` or `get_lineups` in Admin to populate rosters.
               </div>
             </div>
           )}
 
-          {/* Team Cards - Only teams playing today (unless "Show All" is enabled) */}
+          {/* Team Cards */}
           {teams.map((team, teamIdx) => (
             <div key={team.team || teamIdx} style={{
               background: "#0a0e14", border: "1px solid #1a2030",
@@ -456,9 +467,9 @@ export default function RosterPage() {
           ))}
 
           <div style={{ marginTop: 16, padding: "12px 16px", background: "#0a0e14", borderRadius: 8, border: "1px solid #1a2030", fontSize: 9, color: "#2e3748", fontFamily: "'DM Mono', monospace", textAlign: "center" }}>
-            {showAllTeams 
-              ? 'Showing all teams • Click "Show Today Only" to filter by games'
-              : 'Showing teams with games today • Click "Show All Teams" to see everyone'}
+            {filterByToday && games.length > 0 
+              ? `Showing ${teams.length} teams playing today • Click "Filter by Today" to show all`
+              : `Showing all ${teams.length} teams • Click "Filter by Today" to see only today's games`}
           </div>
         </div>
       </div>
