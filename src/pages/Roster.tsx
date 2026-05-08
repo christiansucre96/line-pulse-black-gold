@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 const CLEVER_ACTION_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// 🔥 Unified Player interface that handles ALL sports
 interface Player {
   player_id?: string;
   name?: string;
@@ -12,11 +11,9 @@ interface Player {
   position?: string;
   jersey?: string;
   is_starter?: boolean;
-  // Additional fields from different APIs
   external_id?: string;
   mlb_id?: string;
   espn_id?: string;
-  // Nested structures (ESPN format)
   athlete?: {
     id?: string;
     displayName?: string;
@@ -34,9 +31,19 @@ interface SimpleTeam {
   bench_depth: Player[];
 }
 
+interface Game {
+  external_id: string;
+  home_team: { abbreviation: string; name: string };
+  away_team: { abbreviation: string; name: string };
+  start_time: string;
+  status: string;
+}
+
 export default function RosterPage() {
   const [sport, setSport] = useState<"mlb" | "nba" | "nfl" | "nhl" | "soccer">("mlb");
   const [teams, setTeams] = useState<SimpleTeam[]>([]);
+  const [games, setGames] = useState<Game[]>([]);
+  const [showAllTeams, setShowAllTeams] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState("");
@@ -44,38 +51,66 @@ export default function RosterPage() {
 
   useEffect(() => {
     fetchLineups();
-  }, [sport]);
+  }, [sport, showAllTeams]);
 
   const fetchLineups = async () => {
     setLoading(true);
     setError(null);
     setDebugInfo("");
+    
     try {
-      const res = await fetch(CLEVER_ACTION_URL, {
+      // 1. Fetch today's games first
+      const gamesRes = await fetch(CLEVER_ACTION_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${ANON_KEY}` },
+        body: JSON.stringify({ operation: "get_games", sport }),
+      });
+      const gamesData = await gamesRes.json();
+      const todayGames: Game[] = gamesData.games || [];
+      setGames(todayGames);
+      
+      // 2. Get team abbreviations from today's games
+      const todayTeamAbbrs = new Set<string>();
+      for (const game of todayGames) {
+        if (game.home_team?.abbreviation) todayTeamAbbrs.add(game.home_team.abbreviation);
+        if (game.away_team?.abbreviation) todayTeamAbbrs.add(game.away_team.abbreviation);
+      }
+      
+      console.log(`[${sport}] Today's games: ${todayGames.length}, Teams: ${todayTeamAbbrs.size}`);
+      
+      // 3. Fetch lineups
+      const lineupsRes = await fetch(CLEVER_ACTION_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${ANON_KEY}` },
         body: JSON.stringify({ operation: "get_lineups", sport }),
       });
-      const data = await res.json();
-      console.log(`${sport.toUpperCase()} Response:`, data);
-      setDebugInfo(`API returned: ${data.count || 0} teams`);
-
-      if (!data.success) {
-        throw new Error(data.error || "Failed to load lineups");
+      const lineupsData = await lineupsRes.json();
+      
+      if (!lineupsData.success) {
+        throw new Error(lineupsData.error || "Failed to load lineups");
       }
-
-      const rawTeams = data.lineups || [];
-
-      // Normalize each team's players (applies to all sports)
-      const normalizedTeams = rawTeams.map((team: any) => ({
+      
+      const allTeams = lineupsData.lineups || [];
+      
+      // 4. Filter teams: only show teams playing today (unless "show all" is enabled)
+      const filteredTeams = showAllTeams 
+        ? allTeams 
+        : allTeams.filter((team: any) => todayTeamAbbrs.has(team.team));
+      
+      console.log(`[${sport}] Total teams: ${allTeams.length}, Filtered: ${filteredTeams.length}`);
+      
+      // 5. Normalize players
+      const normalizedTeams = filteredTeams.map((team: any) => ({
         team: team.team,
         team_name: team.team_name,
         projected_starters: (team.projected_starters || []).map((p: any) => normalizePlayer(p, sport)),
         bench_depth: (team.bench_depth || []).map((p: any) => normalizePlayer(p, sport)),
       }));
-
+      
       setTeams(normalizedTeams);
+      setDebugInfo(`${todayGames.length} games today • ${filteredTeams.length} teams${showAllTeams ? ' (showing all)' : ''}`);
       setLastUpdated(new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }));
+      
     } catch (err: any) {
       console.error("Fetch error:", err);
       setError(err.message);
@@ -84,11 +119,8 @@ export default function RosterPage() {
     }
   };
 
-  // 🔥 Robust player normalization for ANY sport/API
   const normalizePlayer = (player: any, sport: string): Player => {
-    // Handle ESPN's nested athlete object (common in NBA/NFL)
     const athlete = player.athlete || player;
-
     return {
       player_id: player.player_id || athlete.id?.toString() || '',
       name: player.name || athlete.displayName || athlete.fullName || player.full_name || '',
@@ -141,7 +173,6 @@ export default function RosterPage() {
     );
   };
 
-  // 🔥 PlayerCard with amber styling for projected starters
   const PlayerCard = ({ 
     player, 
     isStarter, 
@@ -156,8 +187,6 @@ export default function RosterPage() {
     const jersey = getPlayerJersey(player);
     const starter = isStarter !== undefined ? isStarter : (player.is_starter || false);
     const isMLB = sport === 'mlb';
-    
-    // 🔥 Amber styling triggers for projected starters (all sports)
     const isAmber = isProjectedStarter && starter;
 
     return (
@@ -259,6 +288,22 @@ export default function RosterPage() {
                 <option value="nhl">NHL</option>
                 <option value="soccer">Soccer</option>
               </select>
+              
+              {/* 🔥 Toggle: Show All Teams vs Today's Games Only */}
+              <button 
+                onClick={() => setShowAllTeams(!showAllTeams)}
+                style={{
+                  padding: "6px 12px", borderRadius: 8,
+                  background: showAllTeams ? "rgba(234, 179, 8, 0.2)" : "#0d1117",
+                  border: showAllTeams ? "1px solid rgba(234, 179, 8, 0.4)" : "1px solid #1e2530",
+                  color: showAllTeams ? "#eab308" : "#4a5568",
+                  fontSize: 11, fontWeight: 700, cursor: "pointer",
+                  fontFamily: "'DM Mono', monospace",
+                }}
+              >
+                {showAllTeams ? '📋 Show Today Only' : '📋 Show All Teams'}
+              </button>
+              
               {lastUpdated && <span style={{ fontSize: 10, color: "#2e3748" }}>Updated {lastUpdated}</span>}
               <button onClick={fetchLineups} disabled={loading} style={{
                 padding: "6px 16px", borderRadius: 8,
@@ -294,14 +339,20 @@ export default function RosterPage() {
 
           {!loading && teams.length === 0 && !error && (
             <div style={{ textAlign: "center", padding: "60px 20px", color: "#4a5568" }}>
-              <div style={{ fontSize: 14, marginBottom: 8 }}>No roster data available for {sport.toUpperCase()}</div>
+              <div style={{ fontSize: 14, marginBottom: 8 }}>
+                {showAllTeams 
+                  ? `No roster data available for ${sport.toUpperCase()}`
+                  : `No games today for ${sport.toUpperCase()}`}
+              </div>
               <div style={{ fontSize: 11, color: "#2e3748" }}>
-                Run `sync_sport` or `get_lineups` in Admin to populate rosters.
+                {showAllTeams 
+                  ? 'Run `sync_sport` or `get_lineups` in Admin to populate rosters.'
+                  : 'Click "Show All Teams" to see all teams regardless of schedule.'}
               </div>
             </div>
           )}
 
-          {/* All sports use the same display logic with amber starters */}
+          {/* Team Cards - Only teams playing today (unless "Show All" is enabled) */}
           {teams.map((team, teamIdx) => (
             <div key={team.team || teamIdx} style={{
               background: "#0a0e14", border: "1px solid #1a2030",
@@ -326,7 +377,7 @@ export default function RosterPage() {
                 </div>
               </div>
 
-              {/* 🔥 PROJECTED STARTERS — AMBER THEME */}
+              {/* PROJECTED STARTERS — AMBER THEME */}
               {team.projected_starters.length > 0 && (
                 <>
                   <div style={{ 
@@ -350,7 +401,6 @@ export default function RosterPage() {
                     PROJECTED STARTERS
                   </div>
                   
-                  {/* 🔥 Amber-themed grid container for starters */}
                   <div style={{ 
                     display: "grid", 
                     gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", 
@@ -366,14 +416,14 @@ export default function RosterPage() {
                         key={player.player_id || `${player.name}-${playerIdx}`} 
                         player={player} 
                         isStarter={true}
-                        isProjectedStarter={true}  // 🔥 Triggers amber styling
+                        isProjectedStarter={true}
                       />
                     ))}
                   </div>
                 </>
               )}
 
-              {/* 🔥 BENCH — Standard dark theme */}
+              {/* BENCH — Standard dark theme */}
               {team.bench_depth.length > 0 && (
                 <>
                   <div style={{ 
@@ -406,7 +456,9 @@ export default function RosterPage() {
           ))}
 
           <div style={{ marginTop: 16, padding: "12px 16px", background: "#0a0e14", borderRadius: 8, border: "1px solid #1a2030", fontSize: 9, color: "#2e3748", fontFamily: "'DM Mono', monospace", textAlign: "center" }}>
-            Rosters pulled from the Edge Function `get_lineups` endpoint. Use Admin sync to refresh.
+            {showAllTeams 
+              ? 'Showing all teams • Click "Show Today Only" to filter by games'
+              : 'Showing teams with games today • Click "Show All Teams" to see everyone'}
           </div>
         </div>
       </div>
