@@ -5,12 +5,9 @@ const CLEVER_ACTION_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1
 const MLB_LINEUP_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/mlb-lineup-scraper";
 const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Common player interface with fallback fields
 interface Player {
   player_id?: string;
   mlb_id?: string;
-  espn_id?: string;
-  nba_id?: string;
   name?: string;
   full_name?: string;
   displayName?: string;
@@ -19,7 +16,6 @@ interface Player {
   jerseyNumber?: string;
   is_starter?: boolean;
   starter?: boolean;
-  external_id?: string;
 }
 
 interface SimpleTeam {
@@ -104,7 +100,6 @@ export default function RosterPage() {
       const lineups: MLBLineup[] = await response.json();
       setDebugInfo(`Found ${lineups.length} MLB lineups`);
       
-      // Group by team_abbreviation (in case of duplicates)
       const uniqueLineups = Array.from(
         new Map(lineups.map(l => [l.team_abbreviation, l])).values()
       );
@@ -112,11 +107,10 @@ export default function RosterPage() {
       setMlbLineups(uniqueLineups);
       setSimpleTeams([]);
       
-      // 🔍 Debug: Log first lineup structure
       if (uniqueLineups.length > 0) {
-        console.log("🔍 MLB Lineup Sample:", uniqueLineups[0]);
+        console.log("MLB Lineup Sample:", uniqueLineups[0]);
         if (uniqueLineups[0].projected_starters?.length > 0) {
-          console.log("🔍 First starter:", uniqueLineups[0].projected_starters[0]);
+          console.log("First starter:", uniqueLineups[0].projected_starters[0]);
         }
       }
     } catch (err: any) {
@@ -146,11 +140,10 @@ export default function RosterPage() {
       setSimpleTeams(lineups);
       setMlbLineups([]);
       
-      // 🔍 Debug: Log first team structure
       if (lineups.length > 0) {
-        console.log("🔍 Team Sample:", lineups[0]);
+        console.log("Team Sample:", lineups[0]);
         if (lineups[0].players?.length > 0) {
-          console.log("🔍 First player:", lineups[0].players[0]);
+          console.log("First player:", lineups[0].players[0]);
         }
       }
     } catch (err: any) {
@@ -160,27 +153,22 @@ export default function RosterPage() {
     }
   };
 
-  // 🔧 Helper to extract player name from any data structure
   const getPlayerName = (player: Player): string => {
     return player.name || 
            player.full_name || 
            player.displayName || 
            `${player.first_name || ''} ${player.last_name || ''}`.trim() ||
-           player.player_id?.split('-')[0] || // Fallback to ID fragment
            'Unknown Player';
   };
 
-  // 🔧 Helper to extract player position
   const getPlayerPosition = (player: Player): string => {
     return player.position || 'N/A';
   };
 
-  // 🔧 Helper to extract jersey number
   const getPlayerJersey = (player: Player): string => {
     return player.jersey || player.jerseyNumber || '';
   };
 
-  // 🔧 Helper to check if player is starter
   const isPlayerStarter = (player: Player): boolean => {
     return player.is_starter !== undefined ? player.is_starter : 
            player.starter !== undefined ? player.starter : false;
@@ -199,7 +187,7 @@ export default function RosterPage() {
           fontSize: 9, fontWeight: 700, color: "#22c55e",
           fontFamily: "'DM Mono', monospace", letterSpacing: "0.05em",
         }}>
-          ✅ CONFIRMED
+          CONFIRMED
         </span>
       );
     }
@@ -211,7 +199,7 @@ export default function RosterPage() {
           fontSize: 9, fontWeight: 700, color: "#eab308",
           fontFamily: "'DM Mono', monospace", letterSpacing: "0.05em",
         }}>
-          🟡 PROJECTED
+          PROJECTED
         </span>
       );
     }
@@ -222,7 +210,7 @@ export default function RosterPage() {
         fontSize: 9, fontWeight: 700, color: "#6b7280",
         fontFamily: "'DM Mono', monospace", letterSpacing: "0.05em",
       }}>
-        ⚪ TBD
+        TBD
       </span>
     );
   };
@@ -275,7 +263,7 @@ export default function RosterPage() {
         </div>
         {starter && isMLB && (
           <div style={{ fontSize: 8, color: "#eab308", marginTop: 4, fontFamily: "'DM Mono', monospace" }}>
-            ★ STARTER
+            STARTER
           </div>
         )}
       </div>
@@ -302,7 +290,7 @@ export default function RosterPage() {
           <div style={{ marginBottom: 28, display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 16 }}>
             <div>
               <div style={{ fontSize: 10, color: "#c8970a", fontWeight: 700, letterSpacing: "0.2em", marginBottom: 6 }}>
-                ◈ {sport.toUpperCase()} ROSTERS
+                {sport.toUpperCase()} ROSTERS
               </div>
               <div style={{ fontSize: 28, fontWeight: 900, color: "#e8d48b", fontFamily: "'Barlow Condensed', sans-serif" }}>
                 {dateLabel}
@@ -318,11 +306,11 @@ export default function RosterPage() {
                   color: "#cbd5e1", fontSize: 12, fontFamily: "'DM Mono', monospace", cursor: "pointer",
                 }}
               >
-                <option value="mlb">⚾ MLB</option>
-                <option value="nba">🏀 NBA</option>
-                <option value="nfl">🏈 NFL</option>
-                <option value="nhl">🏒 NHL</option>
-                <option value="soccer">⚽ Soccer</option>
+                <option value="mlb">MLB</option>
+                <option value="nba">NBA</option>
+                <option value="nfl">NFL</option>
+                <option value="nhl">NHL</option>
+                <option value="soccer">Soccer</option>
               </select>
               {lastUpdated && <span style={{ fontSize: 10, color: "#2e3748" }}>Updated {lastUpdated}</span>}
               <button onClick={fetchLineups} disabled={loading} style={{
@@ -333,21 +321,20 @@ export default function RosterPage() {
                 fontFamily: "'DM Mono', monospace", letterSpacing: "0.08em",
                 display: "flex", alignItems: "center", gap: 6,
               }}>
-                <span style={{ display: "inline-block", animation: loading ? "spin 1s linear infinite" : "none" }}>↻</span>
-                Refresh
+                <span style={{ display: "inline-block", animation: loading ? "spin 1s linear infinite" : "none" }}>Refresh</span>
               </button>
             </div>
           </div>
 
           {error && (
             <div style={{ marginBottom: 16, padding: "10px 14px", background: "#200000", border: "1px solid #8b0000", borderRadius: 8, color: "#ff4444", fontSize: 11 }}>
-              ❌ {error}
+              Error: {error}
             </div>
           )}
 
           {debugInfo && (
             <div style={{ marginBottom: 16, padding: "8px 12px", background: "#0d1117", border: "1px solid #1e2530", borderRadius: 8, color: "#94a3b8", fontSize: 10, fontFamily: "'DM Mono', monospace" }}>
-              🔍 {debugInfo}
+              {debugInfo}
             </div>
           )}
 
@@ -390,18 +377,18 @@ export default function RosterPage() {
                   </span>
                   {lineup.probable_pitcher && !lineup.confirmed && (
                     <div style={{ fontSize: 10, color: "#eab308", marginTop: 6, fontFamily: "'DM Mono', monospace" }}>
-                      🎯 Probable: {lineup.probable_pitcher}
+                      Probable: {lineup.probable_pitcher}
                     </div>
                   )}
                   {lineup.opponent_abbreviation && (
                     <div style={{ fontSize: 10, color: "#4a5568", marginTop: 2, fontFamily: "'DM Mono', monospace" }}>
-                      vs {lineup.opponent_abbreviation} • {lineup.game_date}
+                      vs {lineup.opponent_abbreviation} - {lineup.game_date}
                     </div>
                   )}
                 </div>
                 <div style={{ textAlign: "right" }}>
                   <div style={{ fontSize: 10, color: "#4a5568", fontFamily: "'DM Mono', monospace" }}>
-                    {lineup.projected_starters.length} starters • {lineup.bench_depth?.length || 0} bench
+                    {lineup.projected_starters.length} starters - {lineup.bench_depth?.length || 0} bench
                   </div>
                   <div style={{ fontSize: 9, color: lineup.lineup_confidence === 'high' ? '#22c55e' : lineup.lineup_confidence === 'medium' ? '#eab308' : '#6b7280', marginTop: 2 }}>
                     Confidence: {lineup.lineup_confidence.toUpperCase()}
@@ -412,7 +399,7 @@ export default function RosterPage() {
               {lineup.projected_starters.length > 0 && (
                 <>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "#eab308", marginBottom: 10, fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: "0.05em" }}>
-                    ★ PROJECTED STARTERS
+                    PROJECTED STARTERS
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10, marginBottom: 20 }}>
                     {lineup.projected_starters.map((player, idx) => (
@@ -437,7 +424,7 @@ export default function RosterPage() {
             </div>
           ))}
 
-          {/* Other Sports Display (NBA/NFL/NHL) */}
+          {/* Other Sports Display */}
           {sport !== 'mlb' && simpleTeams.map((team, teamIdx) => (
             <div key={team.team || teamIdx} style={{
               background: "#0a0e14", border: "1px solid #1a2030",
@@ -472,7 +459,7 @@ export default function RosterPage() {
           <div style={{ marginTop: 16, padding: "12px 16px", background: "#0a0e14", borderRadius: 8, border: "1px solid #1a2030", fontSize: 9, color: "#2e3748", fontFamily: "'DM Mono', monospace", textAlign: "center" }}>
             {sport === 'mlb' 
               ? 'MLB lineups pulled from projected_lineups table. Starters highlighted in gold.'
-              : 'Rosters pulled from the Edge Function `get_lineups` endpoint. Use Admin sync to refresh.'}
+              : 'Rosters pulled from the Edge Function get_lineups endpoint. Use Admin sync to refresh.'}
           </div>
         </div>
       </div>
