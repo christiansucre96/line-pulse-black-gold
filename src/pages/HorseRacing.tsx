@@ -4,9 +4,13 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RefreshCw, Trophy, Flag, TrendingUp, ExternalLink, ChevronDown, ChevronUp } from "lucide-react";
 
-// 🔥 FIXED: Correct Edge Function URL (with -scraper suffix)
+// 🔥 FIXED: Correct URL + hardcoded ANON_KEY as fallback
 const RACING_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/horse-racing-scraper";
-const ANON_KEY   = import.meta.env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJldGZrcGZ2aHVzZXlwaHZ3enhnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUwODA3NTUsImV4cCI6MjA5MDY1Njc1NX0.pOlzUfCGH4jba_EaTYJkc4GpDrfcvxz9I-Vy7CVspK8";
+const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJldGZrcGZ2aHVzZXlwaHZ3enhnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUwODA3NTUsImV4cCI6MjA5MDY1Njc1NX0.pOlzUfCGH4jba_EaTYJkc4GpDrfcvxz9I-Vy7CVspK8";
+
+console.log("🔍 Horse Racing Debug:");
+console.log("  RACING_URL:", RACING_URL);
+console.log("  ANON_KEY:", ANON_KEY ? "✅ Present" : "❌ Missing");
 
 const REGIONS = [
   { value: "all", label: "🌍 All Regions" },
@@ -32,15 +36,36 @@ function etToday(): string {
 }
 
 async function callRacing(body: Record<string, unknown>) {
-  const res = await fetch(RACING_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${ANON_KEY}`,
-    },
-    body: JSON.stringify(body),
-  });
-  return res.json();
+  console.log("📡 Calling Edge Function:", body);
+  console.log("  URL:", RACING_URL);
+  console.log("  Auth:", ANON_KEY ? "Bearer ***" : "❌ No key");
+  
+  try {
+    const res = await fetch(RACING_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${ANON_KEY}`,
+      },
+      body: JSON.stringify(body),
+    });
+    
+    console.log("📥 Response status:", res.status);
+    console.log("📥 Response OK:", res.ok);
+    
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error("❌ Response error:", errorText);
+      throw new Error(`HTTP ${res.status}: ${errorText}`);
+    }
+    
+    const data = await res.json();
+    console.log("✅ Response data:", data);
+    return data;
+  } catch (err) {
+    console.error("❌ Fetch error:", err);
+    throw err;
+  }
 }
 
 interface Pick {
@@ -78,31 +103,47 @@ export default function HorseRacing() {
   const today = etToday();
 
   const loadPicks = async (r: string) => {
-    setLoading(true); setError(null);
+    console.log("🔄 Loading picks for region:", r);
+    setLoading(true); 
+    setError(null);
     try {
       const body: any = { operation: "get_picks", date: today };
       if (r !== "all") body.region = r;
+      
+      console.log("📤 Request body:", body);
       const d = await callRacing(body);
+      
       if (!d.success) throw new Error(d.error || "Failed to load picks");
+      
+      console.log("✅ Loaded picks:", d.picks?.length || 0);
       setPicks(d.picks || []);
       setLastRefresh(new Date().toLocaleTimeString());
     } catch(e: any) {
-      setError(e.message);
+      console.error("❌ Error loading picks:", e);
+      setError(e.message || "Failed to fetch data");
     } finally {
       setLoading(false);
     }
   };
 
   const syncCards = async () => {
-    setSyncing(true); setError(null);
+    console.log("🔄 Syncing cards for region:", region);
+    setSyncing(true); 
+    setError(null);
     try {
       const body: any = { operation: "sync_cards", date: today };
       if (region !== "all") body.region = region;
+      
+      console.log("📤 Sync request:", body);
       const d = await callRacing(body);
+      
       if (!d.success) throw new Error(d.error);
+      
+      console.log("✅ Sync result:", d);
       await loadPicks(region);
     } catch(e: any) {
-      setError(e.message);
+      console.error("❌ Error syncing:", e);
+      setError(e.message || "Failed to sync cards");
     } finally {
       setSyncing(false);
     }
@@ -110,19 +151,32 @@ export default function HorseRacing() {
 
   const loadRaceCard = async (pick: Pick) => {
     const key = `${pick.track_name}-${pick.race_number}`;
-    if (expandedRace === key) { setExpandedRace(null); setRaceCard([]); return; }
-    setExpandedRace(key); setLoadingCard(true);
+    if (expandedRace === key) { 
+      setExpandedRace(null); 
+      setRaceCard([]); 
+      return; 
+    }
+    setExpandedRace(key); 
+    setLoadingCard(true);
     try {
       const d = await callRacing({
-        operation: "get_race_card", date: today,
-        track_name: pick.track_name, race_number: pick.race_number,
+        operation: "get_race_card", 
+        date: today,
+        track_name: pick.track_name, 
+        race_number: pick.race_number,
       });
       setRaceCard(d.runners || []);
-    } catch(_) {}
-    finally { setLoadingCard(false); }
+    } catch(err) {
+      console.error("❌ Error loading race card:", err);
+    } finally { 
+      setLoadingCard(false); 
+    }
   };
 
-  useEffect(() => { loadPicks(region); }, [region]);
+  useEffect(() => { 
+    console.log("🔄 useEffect triggered, region:", region);
+    loadPicks(region); 
+  }, [region]);
 
   // Group picks by track
   const byTrack = picks.reduce((acc, pick) => {
@@ -175,7 +229,17 @@ export default function HorseRacing() {
           </div>
         </div>
 
-        {error && <div className="mb-4 p-3 bg-red-900/20 border border-red-800 rounded-lg text-red-400 text-sm">❌ {error}</div>}
+        {error && (
+          <div className="mb-4 p-3 bg-red-900/20 border border-red-800 rounded-lg text-red-400 text-sm">
+            ❌ {error}
+            <button 
+              onClick={() => setError(null)} 
+              className="ml-4 text-xs underline"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {loading && (
           <div className="text-center py-16">
