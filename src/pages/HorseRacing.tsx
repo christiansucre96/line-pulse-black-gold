@@ -4,12 +4,12 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RefreshCw, Trophy, Flag, TrendingUp, ExternalLink, ChevronDown, ChevronUp } from "lucide-react";
 
-const RACING_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/horse-racing";
-const ANON_KEY   = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// 🔥 FIXED: Correct Edge Function URL (with -scraper suffix)
+const RACING_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/horse-racing-scraper";
+const ANON_KEY   = import.meta.env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJldGZrcGZ2aHVzZXlwaHZ3enhnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUwODA3NTUsImV4cCI6MjA5MDY1Njc1NX0.pOlzUfCGH4jba_EaTYJkc4GpDrfcvxz9I-Vy7CVspK8";
 
 const REGIONS = [
   { value: "all", label: "🌍 All Regions" },
-  { value: "uk",  label: "🇬🇧 UK / Ireland" },
   { value: "aus", label: "🇦🇺 Australia" },
   { value: "usa", label: "🇺🇸 USA" },
 ];
@@ -132,7 +132,7 @@ export default function HorseRacing() {
     return acc;
   }, {} as Record<string, { region: string; track: string; country: string; picks: Pick[] }>);
 
-  const regionFlag = (r: string) => r === 'uk' ? '🇬🇧' : r === 'aus' ? '🇦🇺' : r === 'usa' ? '🇺🇸' : '🌍';
+  const regionFlag = (r: string) => r === 'aus' ? '🇦🇺' : r === 'usa' ? '🇺🇸' : '🌍';
 
   return (
     <DashboardLayout>
@@ -142,7 +142,7 @@ export default function HorseRacing() {
         <div className="mb-5 flex items-start justify-between">
           <div>
             <h1 className="text-2xl font-bold text-yellow-400">🏇 Horse Racing</h1>
-            <p className="text-gray-500 text-sm mt-0.5">Today's top picks · {today} · UK, Australia, USA</p>
+            <p className="text-gray-500 text-sm mt-0.5">Today's top picks · {today} · Australia & USA</p>
           </div>
           <div className="flex gap-2">
             <button onClick={syncCards} disabled={syncing}
@@ -204,17 +204,16 @@ export default function HorseRacing() {
                 <span className="text-lg">{regionFlag(r)}</span>
                 <div>
                   <span className="font-bold text-white">{track}</span>
-                  <span className="ml-2 text-xs text-gray-500">{country} · {trackPicks.length} races</span>
+                  <span className="ml-2 text-xs text-gray-500">{country} · {trackPicks.length} picks</span>
                 </div>
               </div>
               <span className={`text-xs px-2 py-0.5 rounded-full border font-semibold uppercase ${
-                r === 'uk' ? 'border-blue-500/40 text-blue-400' :
                 r === 'aus' ? 'border-green-500/40 text-green-400' :
                 'border-red-500/40 text-red-400'
               }`}>{r.toUpperCase()}</span>
             </div>
 
-            {/* Races */}
+            {/* Picks */}
             {trackPicks.sort((a,b) => a.race_number - b.race_number).map(pick => {
               const key = `${pick.track_name}-${pick.race_number}`;
               const isExpanded = expandedRace === key;
