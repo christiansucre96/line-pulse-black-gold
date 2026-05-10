@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Search, RefreshCw, Calendar } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 
-// ✅ NEW IMPORTS for Pitcher Props
+// ✅ Pitcher Props Scanner & Details (already implemented elsewhere)
 import { PitcherPropsScanner } from "@/components/PitcherPropsScanner";
 import { PitcherPlayerDetails } from "@/components/PitcherPlayerDetails";
 
@@ -118,12 +118,15 @@ const SPORT_PROPS: Record<string, { id: string; label: string }[]> = {
     { id: "stolen_bases", label: "Stolen Bases" },
     { id: "combo_hrr", label: "H+R+RBI" },
     { id: "combo_tb_hits", label: "TB+Hits" },
-    // 🔥 NEW: Pitcher props
+    // 🔥 ALL 8 PITCHER PROPS (Stake)
     { id: "strikeouts_pitching", label: "K (Pitcher)" },
-    { id: "hits_allowed", label: "Hits Allowed" },
     { id: "earned_runs", label: "Earned Runs" },
-    { id: "walks_allowed", label: "Walks Allowed" },
+    { id: "hits_allowed", label: "Hits Allowed" },
     { id: "outs_pitched", label: "Outs Pitched" },
+    { id: "walks_allowed", label: "Walks" },
+    { id: "win_probability", label: "Win Probability" },
+    { id: "first_strikeout", label: "First Strike Out" },
+    { id: "first_earned_run", label: "First Earned Run" },
   ],
   nhl: [
     { id: "goals", label: "Goals" },
@@ -543,7 +546,7 @@ export default function Scanner() {
               {marketLine && <span className="text-xs text-gray-600">Trend shows vs {marketLine}</span>}
             </div>
 
-            {/* Warnings, loading, empty state, table – unchanged */}
+            {/* Warnings, loading, empty state */}
             {noStatsWarning && !loading && (
               <div className="mb-4 p-3 bg-yellow-900/20 border border-yellow-700/50 rounded-lg flex items-start gap-2">
                 <span className="text-yellow-400 text-lg">⚠️</span>
