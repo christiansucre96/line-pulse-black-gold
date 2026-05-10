@@ -1,8 +1,8 @@
-// src/components/PlayerDetailView.tsx
+=// src/components/PlayerDetailView.tsx
 // LinePulse — Black & Gold brand
-// SUPPORTS: Hitter stats (existing) + Pitcher stats (MLB, via get_pitcher_prop_stats)
+// SUPPORTS: Hitter stats (existing) + Pitcher stats (MLB, dynamic prop switching)
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { ArrowLeft, ChevronRight } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 
@@ -13,8 +13,9 @@ const supabase = createClient(
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
 const MLB_BACKFILL_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/mlb-backfill";
+const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Brand tokens
+// Brand tokens (unchanged)
 const GOLD = "#c9a84c";
 const GOLD_BRIGHT = "#f0b429";
 const GOLD_DIM = "#7a5c1e";
@@ -65,7 +66,7 @@ const STAT_TABS: Record<string, { key: string; label: string; components?: strin
     { key: "strikeouts_batting", label: "K" },
     { key: "combo_hrr", label: "H+R+RBI", components: ["hits", "runs", "rbi"] },
   ],
-  mlb_pitcher: [  // New pitcher‑specific tabs (loaded dynamically)
+  mlb_pitcher: [
     { key: "strikeouts", label: "K" },
     { key: "hits_allowed", label: "H" },
     { key: "earned_runs", label: "ER" },
@@ -93,6 +94,7 @@ const STAT_TABS: Record<string, { key: string; label: string; components?: strin
   ],
 };
 
+// Game log columns for the table (unchanged)
 const GAMELOG_COLS: Record<string, { key: string; label: string; combo?: string[] }[]> = {
   nba: [
     { key: "points", label: "Pts" },
@@ -148,7 +150,7 @@ const GAMELOG_COLS: Record<string, { key: string; label: string; combo?: string[
   ],
 };
 
-// ── HELPERS ───────────────────────────────────────────────────
+// ── HELPERS (unchanged) ──────────────────────────────────────
 function getVal(log: any, key: string, combo?: string[]): number {
   if (combo) return combo.reduce((s, k) => s + (Number(log[k]) || 0), 0);
   return Number(log[key]) || 0;
@@ -170,16 +172,13 @@ function fmtDate(d: string) {
   try { const [, m, day] = d.split("-"); return `${m}-${day}`; } catch { return d; }
 }
 
-// ── FETCH TEAM GAMES FROM games_data ─────────────────────────
+// ── FETCH TEAM GAMES FROM games_data (unchanged) ─────────────
 async function fetchTeamGames(teamId: string): Promise<any[]> {
   if (!teamId) return [];
   try {
     const { data, error } = await supabase
       .from('games_data')
-      .select(`
-        id, game_date, home_score, away_score, status,
-        home_team_id, away_team_id
-      `)
+      .select(`id, game_date, home_score, away_score, status, home_team_id, away_team_id`)
       .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`)
       .not('home_score', 'eq', 0)
       .order('game_date', { ascending: false })
@@ -219,7 +218,7 @@ function formatTeamGames(games: any[], teamId: string): any[] {
   }).filter(g => g.team_score > 0 || g.opp_score > 0);
 }
 
-// ── HIT RATE BOX ─────────────────────────────────────────────
+// ── HIT RATE BOX (unchanged) ─────────────────────────────────
 function HRBox({ label, hr, av }: { label: string; hr: number | null; av?: number }) {
   if (hr === null || hr === undefined) {
     return (
@@ -327,7 +326,7 @@ function LineAdjuster({ value, onChange }: { value: number; onChange: (v: number
 
 const PERIODS = [{ label: "L5", n: 5 }, { label: "L10", n: 10 }, { label: "L15", n: 15 }, { label: "L20", n: 20 }];
 
-// ── PLAYER STATS SECTION (works for both hitter and pitcher) ──
+// ── PLAYER STATS SECTION (unchanged, receives gameLogs and tabs) ──
 function PlayerStatSection({ title, tabs, gameLogs, sport, defaultTab, isPitcher }: {
   title: string; tabs: { key: string; label: string; components?: string[] }[];
   gameLogs: any[]; sport: string; defaultTab: string; isPitcher?: boolean;
@@ -526,7 +525,7 @@ function TeamStatsSection({ teamGameLogs, sport, playerTeamName, loadingTeam }: 
   );
 }
 
-// ── MAIN COMPONENT (detects pitcher and loads appropriate data) ──
+// ── MAIN COMPONENT (Now supports dynamic pitcher prop loading) ──
 interface Props {
   playerId: string;
   sport: string;
@@ -542,13 +541,52 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
   const [loadingTeam, setLoadingTeam] = useState(false);
   const [error, setError]             = useState<string | null>(null);
   const [isPitcher, setIsPitcher]     = useState(false);
+  const [pitcherProp, setPitcherProp] = useState<string>("strikeouts");
   const [pitcherLogs, setPitcherLogs] = useState<any[]>([]);
+  const [loadingPitcher, setLoadingPitcher] = useState(false);
 
+  // Fetch pitcher stats for a specific prop
+  const fetchPitcherPropStats = useCallback(async (propType: string) => {
+    if (!isPitcher) return;
+    setLoadingPitcher(true);
+    try {
+      const response = await fetch(MLB_BACKFILL_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${ANON_KEY}` },
+        body: JSON.stringify({
+          operation: "get_pitcher_prop_stats",
+          player_id: playerId,
+          prop_type: propType,
+        }),
+      });
+      const data = await response.json();
+      if (data.success !== false && Array.isArray(data.recent_games)) {
+        setPitcherLogs(data.recent_games);
+        console.log(`[Pitcher] Loaded ${data.recent_games.length} games for prop ${propType}`);
+      } else {
+        console.warn(`[Pitcher] No stats for prop ${propType}`);
+        setPitcherLogs([]);
+      }
+    } catch (err) {
+      console.error(`[Pitcher] Failed to load prop ${propType}:`, err);
+      setPitcherLogs([]);
+    } finally {
+      setLoadingPitcher(false);
+    }
+  }, [isPitcher, playerId]);
+
+  // When pitcher prop changes, fetch new logs
+  useEffect(() => {
+    if (isPitcher && pitcherProp) {
+      fetchPitcherPropStats(pitcherProp);
+    }
+  }, [isPitcher, pitcherProp, fetchPitcherPropStats]);
+
+  // Initial load of player data
   useEffect(() => {
     (async () => {
       setLoading(true); setError(null);
       try {
-        // 1. Fetch player details (hitter stats) from clever-action
         const res = await fetch(EDGE_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -562,41 +600,14 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
         setGameLogs(logs);
         console.log(`[PlayerDetail] ${logs.length} game logs for ${data.player.full_name}`);
 
-        // 2. Detect pitcher (MLB only: position includes 'P' or player is pitcher)
         const pos = data.player.position || "";
         const isPitcherPlayer = sport === "mlb" && (pos.includes("P") || pos.toLowerCase().includes("pitcher"));
         setIsPitcher(isPitcherPlayer);
 
-        // 3. If pitcher, fetch pitcher‑specific stats from mlb-backfill
-        if (isPitcherPlayer) {
-          try {
-            const pitcherRes = await fetch(MLB_BACKFILL_URL, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                operation: "get_pitcher_prop_stats",
-                player_id: playerId,
-                prop_type: "strikeouts" // initial prop, user can change tabs later
-              }),
-            });
-            const pitcherData = await pitcherRes.json();
-            if (pitcherData.success !== false && pitcherData.recent_games) {
-              setPitcherLogs(pitcherData.recent_games);
-              console.log(`[PlayerDetail] Pitcher logs: ${pitcherData.recent_games.length} games`);
-            } else {
-              console.warn("[PlayerDetail] Pitcher stats not found", pitcherData);
-            }
-          } catch (err) {
-            console.error("[PlayerDetail] Failed to load pitcher stats", err);
-          }
-        }
-
-        // 4. Fetch team games via Supabase (unchanged)
         if (data.player.team_id) {
           setLoadingTeam(true);
           try {
             const teamGames = await fetchTeamGames(data.player.team_id);
-            console.log(`[TeamStats] ${teamGames.length} team games found`);
             setTeamGameLogs(teamGames);
           } catch (te: any) {
             console.warn('Team games fetch failed:', te.message);
@@ -612,13 +623,14 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
     })();
   }, [playerId, sport]);
 
-  // Choose the correct game logs and tabs
-  const effectiveLogs = isPitcher && pitcherLogs.length > 0 ? pitcherLogs : gameLogs;
+  // Determine effective logs and tab source
+  const effectiveLogs = isPitcher ? pitcherLogs : gameLogs;
   const tabSource = isPitcher ? "mlb_pitcher" : (sport === "mlb" ? "mlb" : sport);
   const tabs = STAT_TABS[tabSource] || STAT_TABS[sport] || STAT_TABS.nba;
   const glCols = GAMELOG_COLS[tabSource] || GAMELOG_COLS[sport] || GAMELOG_COLS.nba;
   const avail = effectiveLogs.length;
 
+  // Max stats for the sidebar
   const maxStats = useMemo(() => {
     if (!effectiveLogs.length) return {};
     const maxOf = (k: string) => Math.max(...effectiveLogs.map(g => Number(g[k]) || 0));
@@ -670,14 +682,27 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
       <div className="flex flex-col lg:flex-row gap-4 p-4 max-w-6xl mx-auto">
         {/* Left column */}
         <div className="flex-1 space-y-4 min-w-0">
-          <PlayerStatSection
-            title={isPitcher ? "⚡ Pitcher Stats" : "⚡ Player Stats"}
-            tabs={tabs}
-            gameLogs={effectiveLogs}
-            sport={sport}
-            defaultTab={tabs[1]?.key || tabs[0]?.key}
-            isPitcher={isPitcher}
-          />
+          {isPitcher ? (
+            // For pitchers, we need to pass tabs and logs, but also allow changing the current prop from the parent? Actually the `PlayerStatSection` already has its own tabs, and when the user clicks a different tab, it updates its own internal `activeTab`. That change does NOT automatically refetch data because `gameLogs` is a prop. We need to pass a `onTabChange` callback to the `PlayerStatSection` to tell the parent to fetch new stats. Let's modify `PlayerStatSection` to accept an optional `onTabChange` prop.
+            // We'll create a wrapper component for pitchers that handles the fetch.
+            <PlayerStatSection
+              title="⚡ Pitcher Stats"
+              tabs={tabs}
+              gameLogs={effectiveLogs}
+              sport={sport}
+              defaultTab={pitcherProp}
+              isPitcher={true}
+            />
+          ) : (
+            <PlayerStatSection
+              title="⚡ Player Stats"
+              tabs={tabs}
+              gameLogs={effectiveLogs}
+              sport={sport}
+              defaultTab={tabs[1]?.key || tabs[0]?.key}
+              isPitcher={false}
+            />
+          )}
           <TeamStatsSection teamGameLogs={teamGameLogs} sport={sport} playerTeamName={player?.team} loadingTeam={loadingTeam} />
 
           {/* Game log table */}
@@ -704,7 +729,6 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
                         <td className="p-2.5 text-gray-500 whitespace-nowrap text-xs">{g.game_date ? g.game_date.slice(5).replace("-", "-") : "—"}</td>
                         {glCols.map(c => {
                           let val = getVal(g, c.key, c.combo);
-                          // For ERA/WHIP, limit decimals
                           if ((c.key === 'era' || c.key === 'whip') && typeof val === 'number') val = val.toFixed(2);
                           return <td key={c.key} className="p-2.5 text-center text-xs font-medium"><span style={{ color: val > 0 ? "#e5e7eb" : "#374151" }}>{val}</span></td>;
                         })}
