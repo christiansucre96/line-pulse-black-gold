@@ -8,6 +8,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Search, RefreshCw, Calendar } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 
+// ✅ NEW IMPORTS for Pitcher Props
+import { PitcherPropsScanner } from "@/components/PitcherPropsScanner";
+import { PitcherPlayerDetails } from "@/components/PitcherPlayerDetails";
+
 const supabase = createClient(
   import.meta.env.VITE_SUPABASE_URL!,
   import.meta.env.VITE_SUPABASE_ANON_KEY!
@@ -196,6 +200,8 @@ export default function Scanner() {
   const [marketLine, setMarketLine] = useState<number | null>(null);
   const [noStatsWarning, setNoStatsWarning] = useState(false);
   const [soccerLeague, setSoccerLeague] = useState("all");
+  // ✅ New state for tab switching
+  const [activeTab, setActiveTab] = useState<"hitters" | "pitchers">("hitters");
 
   const playerId = searchParams.get("playerId");
   const urlSport = searchParams.get("sport");
@@ -312,7 +318,6 @@ export default function Scanner() {
 
   useEffect(() => {
     if (selectedGame && selectedGame !== "__loading__") {
-      // Find the label for the selected game (used for MLB filtering)
       const game = gameOptions.find(g => g.game_id === selectedGame);
       fetchPlayers(sport, selectedGame, game?.label || "");
     }
@@ -379,6 +384,10 @@ export default function Scanner() {
   );
 
   if (playerId) {
+    // If the active tab is "pitchers" and the player is a pitcher, show PitcherPlayerDetails
+    if (activeTab === "pitchers") {
+      return <PitcherPlayerDetails playerId={playerId} onBack={() => navigate("/scanner")} />;
+    }
     return <PlayerDetailView playerId={playerId} sport={sport} onBack={() => navigate("/scanner")} />;
   }
 
@@ -410,344 +419,378 @@ export default function Scanner() {
           </button>
         </div>
 
-        {/* Controls */}
-        <div className="flex flex-wrap gap-2 mb-2">
-          <Select
-            value={sport}
-            onValueChange={(s) => {
-              if (s === "horse-racing") {
-                navigate("/horse-racing");
-                return;
-              }
-              setSport(s);
-            }}
-          >
-            <SelectTrigger className="w-36 bg-gray-900 border-gray-700 text-yellow-400 text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="bg-gray-900 border-gray-700">
-              {SPORTS.map((s) => (
-                <SelectItem key={s.value} value={s.value}>
-                  {s.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          {sport === "soccer" && (
-            <Select value={soccerLeague} onValueChange={setSoccerLeague}>
-              <SelectTrigger className="w-52 bg-gray-900 border-yellow-700/40 text-gray-300 text-sm">
-                <SelectValue placeholder="All Leagues" />
-              </SelectTrigger>
-              <SelectContent className="bg-gray-900 border-gray-700 max-h-72 overflow-y-auto">
-                {SOCCER_LEAGUES.map((l) => (
-                  <SelectItem key={l.id} value={l.id}>
-                    {l.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-
-          <Select value={selectedGame} onValueChange={setSelectedGame}>
-            <SelectTrigger className="w-72 bg-gray-900 border-gray-700 text-gray-300 text-sm">
-              <SelectValue placeholder="Loading games..." />
-            </SelectTrigger>
-            <SelectContent className="bg-gray-900 border-gray-700 max-h-64 overflow-y-auto">
-              <SelectItem value="all">All Games (Today)</SelectItem>
-              {gameOptions.map((g) => (
-                <SelectItem key={g.game_id} value={g.game_id}>
-                  {g.label}
-                  {g.time ? ` — ${g.time}` : ""}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select value={filterProp} onValueChange={setFilterProp}>
-            <SelectTrigger className="w-40 bg-gray-900 border-gray-700 text-gray-300 text-sm">
-              <SelectValue placeholder="Select prop" />
-            </SelectTrigger>
-            <SelectContent className="bg-gray-900 border-gray-700">
-              {currentProps.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <div className="relative flex-1 min-w-[180px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search players, teams..."
-              className="pl-9 bg-gray-900 border-gray-700 text-gray-300 text-sm h-9"
-            />
+        {/* 🔥 TABS: Hitter Props vs Pitcher Props */}
+        <div className="mb-4 border-b border-gray-700">
+          <div className="flex gap-1">
+            <button
+              onClick={() => setActiveTab("hitters")}
+              className={`px-4 py-2 text-sm font-medium rounded-t-lg transition ${
+                activeTab === "hitters"
+                  ? "bg-yellow-500/20 text-yellow-400 border-b-2 border-yellow-500"
+                  : "text-gray-400 hover:text-gray-300 hover:bg-gray-800/50"
+              }`}
+            >
+              🏏 Hitter Props
+            </button>
+            <button
+              onClick={() => setActiveTab("pitchers")}
+              className={`px-4 py-2 text-sm font-medium rounded-t-lg transition ${
+                activeTab === "pitchers"
+                  ? "bg-yellow-500/20 text-yellow-400 border-b-2 border-yellow-500"
+                  : "text-gray-400 hover:text-gray-300 hover:bg-gray-800/50"
+              }`}
+            >
+              🎯 Pitcher Props
+            </button>
           </div>
         </div>
 
-        {/* Market Line */}
-        <div className="mb-4 p-3 bg-gray-900/50 rounded-lg border border-gray-700 flex items-center gap-3 flex-wrap">
-          <span className="text-sm text-gray-400 font-medium">📊 Market Line:</span>
-          <input
-            type="number"
-            step="0.5"
-            placeholder="e.g. 26.5"
-            value={marketLine ?? ""}
-            onChange={(e) => setMarketLine(e.target.value ? parseFloat(e.target.value) : null)}
-            className="w-24 px-3 py-1.5 bg-gray-800 border border-gray-600 rounded text-white text-sm focus:border-blue-500 focus:outline-none"
-          />
-          {marketLine && <span className="text-xs text-gray-600">Trend shows vs {marketLine}</span>}
-        </div>
-
-        {/* Warnings */}
-        {noStatsWarning && !loading && (
-          <div className="mb-4 p-3 bg-yellow-900/20 border border-yellow-700/50 rounded-lg flex items-start gap-2">
-            <span className="text-yellow-400 text-lg">⚠️</span>
-            <div>
-              <p className="text-yellow-400 text-sm font-semibold">Players found but no historical stats yet</p>
-              <p className="text-yellow-700 text-xs mt-0.5">
-                Go to <strong>Admin → {sport.toUpperCase()} → Historical Stats → Run</strong> to sync game logs.
-              </p>
-            </div>
-          </div>
-        )}
-        {error && (
-          <div className="mb-4 p-3 bg-red-900/20 border border-red-800 rounded-lg text-red-400 text-sm">
-            ❌ {error}
-          </div>
-        )}
-
-        {loading && (
-          <div className="text-center py-16">
-            <div className="w-8 h-8 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-            <p className="text-gray-500 text-sm">Loading {sport.toUpperCase()} players...</p>
-          </div>
-        )}
-
-        {!loading && displayPlayers.length === 0 && (
-          <div className="text-center py-20 text-gray-600 border border-gray-800 rounded-xl bg-gray-900/20">
-            <p className="text-lg font-semibold">No players found</p>
-            <p className="text-sm mt-1 text-gray-700">
-              {gameOptions.length === 0
-                ? `No ${sport.toUpperCase()} games today. Run Schedule sync or try another league.`
-                : `Stats haven't been synced yet for this game.`}
-            </p>
-            <div className="flex gap-2 justify-center mt-4">
-              <button
-                onClick={() => {
-                  const game = gameOptions.find(g => g.game_id === selectedGame);
-                  fetchPlayers(sport, selectedGame, game?.label || "");
+        {activeTab === "pitchers" ? (
+          // 🔥 New Pitcher Props Scanner
+          <PitcherPropsScanner />
+        ) : (
+          // Existing Hitter Props UI
+          <>
+            {/* Controls */}
+            <div className="flex flex-wrap gap-2 mb-2">
+              <Select
+                value={sport}
+                onValueChange={(s) => {
+                  if (s === "horse-racing") {
+                    navigate("/horse-racing");
+                    return;
+                  }
+                  setSport(s);
                 }}
-                className="px-4 py-2 bg-yellow-500 text-black rounded font-semibold text-sm hover:bg-yellow-600"
               >
-                Retry
-              </button>
-              {selectedGame !== "all" && (
-                <button
-                  onClick={() => setSelectedGame("all")}
-                  className="px-4 py-2 bg-gray-700 text-gray-300 rounded font-semibold text-sm hover:bg-gray-600"
-                >
-                  Show All Games
-                </button>
+                <SelectTrigger className="w-36 bg-gray-900 border-gray-700 text-yellow-400 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-gray-900 border-gray-700">
+                  {SPORTS.map((s) => (
+                    <SelectItem key={s.value} value={s.value}>
+                      {s.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {sport === "soccer" && (
+                <Select value={soccerLeague} onValueChange={setSoccerLeague}>
+                  <SelectTrigger className="w-52 bg-gray-900 border-yellow-700/40 text-gray-300 text-sm">
+                    <SelectValue placeholder="All Leagues" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-gray-900 border-gray-700 max-h-72 overflow-y-auto">
+                    {SOCCER_LEAGUES.map((l) => (
+                      <SelectItem key={l.id} value={l.id}>
+                        {l.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               )}
-            </div>
-          </div>
-        )}
 
-        {!loading && displayPlayers.length > 0 && (
-          <div className="bg-gray-900/30 border border-gray-800 rounded-xl overflow-hidden">
-            <div className="px-4 py-2 border-b border-gray-800 text-xs text-gray-600 flex justify-between items-center">
-              <span>{displayPlayers.length} players shown</span>
-              <span>
-                {withStatCount} with stats
-                {someNoStats && (
-                  <span className="ml-1 text-yellow-700">
-                    · {displayPlayers.length - withStatCount} missing — run Historical Stats
+              <Select value={selectedGame} onValueChange={setSelectedGame}>
+                <SelectTrigger className="w-72 bg-gray-900 border-gray-700 text-gray-300 text-sm">
+                  <SelectValue placeholder="Loading games..." />
+                </SelectTrigger>
+                <SelectContent className="bg-gray-900 border-gray-700 max-h-64 overflow-y-auto">
+                  <SelectItem value="all">All Games (Today)</SelectItem>
+                  {gameOptions.map((g) => (
+                    <SelectItem key={g.game_id} value={g.game_id}>
+                      {g.label}
+                      {g.time ? ` — ${g.time}` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={filterProp} onValueChange={setFilterProp}>
+                <SelectTrigger className="w-40 bg-gray-900 border-gray-700 text-gray-300 text-sm">
+                  <SelectValue placeholder="Select prop" />
+                </SelectTrigger>
+                <SelectContent className="bg-gray-900 border-gray-700">
+                  {currentProps.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <div className="relative flex-1 min-w-[180px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search players, teams..."
+                  className="pl-9 bg-gray-900 border-gray-700 text-gray-300 text-sm h-9"
+                />
+              </div>
+            </div>
+
+            {/* Market Line */}
+            <div className="mb-4 p-3 bg-gray-900/50 rounded-lg border border-gray-700 flex items-center gap-3 flex-wrap">
+              <span className="text-sm text-gray-400 font-medium">📊 Market Line:</span>
+              <input
+                type="number"
+                step="0.5"
+                placeholder="e.g. 26.5"
+                value={marketLine ?? ""}
+                onChange={(e) => setMarketLine(e.target.value ? parseFloat(e.target.value) : null)}
+                className="w-24 px-3 py-1.5 bg-gray-800 border border-gray-600 rounded text-white text-sm focus:border-blue-500 focus:outline-none"
+              />
+              {marketLine && <span className="text-xs text-gray-600">Trend shows vs {marketLine}</span>}
+            </div>
+
+            {/* Warnings */}
+            {noStatsWarning && !loading && (
+              <div className="mb-4 p-3 bg-yellow-900/20 border border-yellow-700/50 rounded-lg flex items-start gap-2">
+                <span className="text-yellow-400 text-lg">⚠️</span>
+                <div>
+                  <p className="text-yellow-400 text-sm font-semibold">Players found but no historical stats yet</p>
+                  <p className="text-yellow-700 text-xs mt-0.5">
+                    Go to <strong>Admin → {sport.toUpperCase()} → Historical Stats → Run</strong> to sync game logs.
+                  </p>
+                </div>
+              </div>
+            )}
+            {error && (
+              <div className="mb-4 p-3 bg-red-900/20 border border-red-800 rounded-lg text-red-400 text-sm">
+                ❌ {error}
+              </div>
+            )}
+
+            {loading && (
+              <div className="text-center py-16">
+                <div className="w-8 h-8 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                <p className="text-gray-500 text-sm">Loading {sport.toUpperCase()} players...</p>
+              </div>
+            )}
+
+            {!loading && displayPlayers.length === 0 && (
+              <div className="text-center py-20 text-gray-600 border border-gray-800 rounded-xl bg-gray-900/20">
+                <p className="text-lg font-semibold">No players found</p>
+                <p className="text-sm mt-1 text-gray-700">
+                  {gameOptions.length === 0
+                    ? `No ${sport.toUpperCase()} games today. Run Schedule sync or try another league.`
+                    : `Stats haven't been synced yet for this game.`}
+                </p>
+                <div className="flex gap-2 justify-center mt-4">
+                  <button
+                    onClick={() => {
+                      const game = gameOptions.find(g => g.game_id === selectedGame);
+                      fetchPlayers(sport, selectedGame, game?.label || "");
+                    }}
+                    className="px-4 py-2 bg-yellow-500 text-black rounded font-semibold text-sm hover:bg-yellow-600"
+                  >
+                    Retry
+                  </button>
+                  {selectedGame !== "all" && (
+                    <button
+                      onClick={() => setSelectedGame("all")}
+                      className="px-4 py-2 bg-gray-700 text-gray-300 rounded font-semibold text-sm hover:bg-gray-600"
+                    >
+                      Show All Games
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {!loading && displayPlayers.length > 0 && (
+              <div className="bg-gray-900/30 border border-gray-800 rounded-xl overflow-hidden">
+                <div className="px-4 py-2 border-b border-gray-800 text-xs text-gray-600 flex justify-between items-center">
+                  <span>{displayPlayers.length} players shown</span>
+                  <span>
+                    {withStatCount} with stats
+                    {someNoStats && (
+                      <span className="ml-1 text-yellow-700">
+                        · {displayPlayers.length - withStatCount} missing — run Historical Stats
+                      </span>
+                    )}
                   </span>
-                )}
-              </span>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="border-b border-gray-800">
-                  <tr>
-                    <SortTh label="Player" sk="name" />
-                    <th className="p-3 text-left text-[11px] font-semibold text-yellow-400/70 uppercase tracking-wider whitespace-nowrap">
-                      Game
-                    </th>
-                    <SortTh label="Line" sk="line" />
-                    <SortTh label="Avg L10" sk="avg" />
-                    <SortTh label="Diff" sk="diff" />
-                    <SortTh label="L5" sk="l5" />
-                    <SortTh label="L10" sk="l10" />
-                    <SortTh label="L15" sk="l15" />
-                    <SortTh label="L20" sk="l20" />
-                    <SortTh label="Rolling ↺" sk="rolling" />
-                    <th className="p-3 text-left text-[11px] font-semibold text-yellow-400/70 uppercase tracking-wider whitespace-nowrap">
-                      Trend
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayPlayers.map((p, i) => {
-                    const pd =
-                      p.all_props?.[filterProp] ||
-                      p.all_props?.[Object.keys(p.all_props || {})[0]] ||
-                      null;
-                    const diff = pd ? (pd.avg_l10 ?? 0) - (pd.line ?? 0) : 0;
-                    const gameTime = p.game_time ? formatTimeET(p.game_time) : "";
-                    const hasStats = Object.keys(p.all_props || {}).length > 0;
-                    const rolling = pd ? calcRolling(pd.values || [], null) : null;
-
-                    return (
-                      <tr
-                        key={`${p.player_id}-${i}`}
-                        onClick={() => navigate(`/scanner?playerId=${p.player_id}&sport=${sport}`)}
-                        className={`border-b border-gray-800/50 hover:bg-gray-800/40 cursor-pointer transition-colors ${
-                          !hasStats ? "opacity-40" : ""
-                        }`}
-                      >
-                        <td className="p-3">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-yellow-500 to-yellow-700 flex items-center justify-center text-black text-xs font-bold shrink-0">
-                              {getInitials(p.name)}
-                            </div>
-                            <div>
-                              <p className="font-semibold text-white text-sm leading-tight">{p.name}</p>
-                              <p className="text-[10px] text-gray-500">
-                                {p.team_abbr} · {p.position}
-                                {pd && ` · ${pd.label}`}
-                                {p.is_starter && <span className="ml-1 text-green-400">★</span>}
-                                {!hasStats && <span className="ml-1 text-yellow-800"> · no stats</span>}
-                              </p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="p-3">
-                          <p className="text-xs text-gray-400">vs {p.opponent || "—"}</p>
-                          <p className="text-[10px] text-gray-600">{gameTime}</p>
-                        </td>
-                        <td className="p-3">
-                          <span className="text-yellow-400 font-bold text-sm">
-                            {pd?.line != null ? pd.line.toFixed(1) : "—"}
-                          </span>
-                        </td>
-                        <td className="p-3 text-gray-300 text-sm">
-                          {pd?.avg_l10 != null ? pd.avg_l10 : "—"}
-                        </td>
-                        <td className="p-3">
-                          {pd ? (
-                            <span
-                              className={`text-sm font-semibold ${
-                                diff > 0
-                                  ? "text-green-400"
-                                  : diff < 0
-                                  ? "text-red-400"
-                                  : "text-gray-500"
-                              }`}
-                            >
-                              {diff > 0 ? "+" : ""}
-                              {diff.toFixed(1)}
-                            </span>
-                          ) : (
-                            <span className="text-gray-600">—</span>
-                          )}
-                        </td>
-                        <td className="p-3">
-                          <HRBox value={pd?.l5 ?? null} />
-                        </td>
-                        <td className="p-3">
-                          <HRBox value={pd?.l10 ?? null} />
-                        </td>
-                        <td className="p-3">
-                          <HRBox value={pd?.l15 ?? null} />
-                        </td>
-                        <td className="p-3">
-                          <HRBox value={pd?.l20 ?? null} />
-                        </td>
-                        <td className="p-3">
-                          <div className="flex flex-col gap-1">
-                            {pd?.streak ? (
-                              <span
-                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold ${
-                                  pd.streak.type === "Over"
-                                    ? "bg-green-500/20 text-green-400 border border-green-500/30"
-                                    : "bg-red-500/20 text-red-400 border border-red-500/30"
-                                }`}
-                              >
-                                {pd.streak.type === "Over" ? "🔺" : "🔻"} {pd.streak.count}
-                              </span>
-                            ) : (
-                              <span className="text-gray-700 text-xs">—</span>
-                            )}
-                            {rolling && rolling.count > 0 && (
-                              <span className="text-[10px] text-gray-500">
-                                avg {rolling.avg}
-                                <span className="text-gray-700"> /{rolling.count}G</span>
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="p-3">
-                          {(() => {
-                            if (marketLine && pd?.avg_l10 != null) {
-                              const edge = pd.avg_l10 - marketLine;
-                              const pct = marketLine > 0 ? (edge / marketLine) * 100 : 0;
-                              let sig = "Neutral",
-                                cls = "bg-gray-500/10 text-gray-400 border border-gray-500/30";
-                              if (pct >= 10) {
-                                sig = "🟢 STRONG OVER";
-                                cls = "bg-green-500/30 text-green-300 border border-green-500/50";
-                              } else if (pct >= 3) {
-                                sig = "🟡 Over";
-                                cls = "bg-green-500/15 text-green-400 border border-green-500/30";
-                              } else if (pct <= -10) {
-                                sig = "🔴 STRONG UNDER";
-                                cls = "bg-red-500/30 text-red-300 border border-red-500/50";
-                              } else if (pct <= -3) {
-                                sig = "🟠 Under";
-                                cls = "bg-red-500/15 text-red-400 border border-red-500/30";
-                              }
-                              return (
-                                <div className="flex flex-col gap-1">
-                                  <span className={`inline-flex px-2 py-1 rounded text-xs font-bold ${cls}`}>{sig}</span>
-                                  <span className="text-[10px] text-gray-500">
-                                    Edge: {edge > 0 ? "+" : ""}
-                                    {edge.toFixed(1)}
-                                  </span>
-                                </div>
-                              );
-                            }
-                            if (!pd) return <span className="text-gray-700 text-xs">—</span>;
-                            const trend = pd.trend || "Neutral";
-                            const styles: Record<string, string> = {
-                              "Strong Over": "bg-green-500/30 text-green-300 border border-green-500/50",
-                              Over: "bg-green-500/10 text-green-400 border border-green-500/30",
-                              "Strong Under": "bg-red-500/30 text-red-300 border border-red-500/50",
-                              Under: "bg-red-500/10 text-red-400 border border-red-500/30",
-                              Neutral: "bg-gray-500/10 text-gray-400 border border-gray-500/30",
-                            };
-                            return (
-                              <span
-                                className={`inline-flex px-2 py-1 rounded text-xs font-bold ${
-                                  styles[trend] || styles["Neutral"]
-                                }`}
-                              >
-                                {trend}
-                              </span>
-                            );
-                          })()}
-                        </td>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="border-b border-gray-800">
+                      <tr>
+                        <SortTh label="Player" sk="name" />
+                        <th className="p-3 text-left text-[11px] font-semibold text-yellow-400/70 uppercase tracking-wider whitespace-nowrap">
+                          Game
+                        </th>
+                        <SortTh label="Line" sk="line" />
+                        <SortTh label="Avg L10" sk="avg" />
+                        <SortTh label="Diff" sk="diff" />
+                        <SortTh label="L5" sk="l5" />
+                        <SortTh label="L10" sk="l10" />
+                        <SortTh label="L15" sk="l15" />
+                        <SortTh label="L20" sk="l20" />
+                        <SortTh label="Rolling ↺" sk="rolling" />
+                        <th className="p-3 text-left text-[11px] font-semibold text-yellow-400/70 uppercase tracking-wider whitespace-nowrap">
+                          Trend
+                        </th>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                    </thead>
+                    <tbody>
+                      {displayPlayers.map((p, i) => {
+                        const pd =
+                          p.all_props?.[filterProp] ||
+                          p.all_props?.[Object.keys(p.all_props || {})[0]] ||
+                          null;
+                        const diff = pd ? (pd.avg_l10 ?? 0) - (pd.line ?? 0) : 0;
+                        const gameTime = p.game_time ? formatTimeET(p.game_time) : "";
+                        const hasStats = Object.keys(p.all_props || {}).length > 0;
+                        const rolling = pd ? calcRolling(pd.values || [], null) : null;
+
+                        return (
+                          <tr
+                            key={`${p.player_id}-${i}`}
+                            onClick={() => navigate(`/scanner?playerId=${p.player_id}&sport=${sport}`)}
+                            className={`border-b border-gray-800/50 hover:bg-gray-800/40 cursor-pointer transition-colors ${
+                              !hasStats ? "opacity-40" : ""
+                            }`}
+                          >
+                            <td className="p-3">
+                              <div className="flex items-center gap-2.5">
+                                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-yellow-500 to-yellow-700 flex items-center justify-center text-black text-xs font-bold shrink-0">
+                                  {getInitials(p.name)}
+                                </div>
+                                <div>
+                                  <p className="font-semibold text-white text-sm leading-tight">{p.name}</p>
+                                  <p className="text-[10px] text-gray-500">
+                                    {p.team_abbr} · {p.position}
+                                    {pd && ` · ${pd.label}`}
+                                    {p.is_starter && <span className="ml-1 text-green-400">★</span>}
+                                    {!hasStats && <span className="ml-1 text-yellow-800"> · no stats</span>}
+                                  </p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="p-3">
+                              <p className="text-xs text-gray-400">vs {p.opponent || "—"}</p>
+                              <p className="text-[10px] text-gray-600">{gameTime}</p>
+                            </td>
+                            <td className="p-3">
+                              <span className="text-yellow-400 font-bold text-sm">
+                                {pd?.line != null ? pd.line.toFixed(1) : "—"}
+                              </span>
+                            </td>
+                            <td className="p-3 text-gray-300 text-sm">
+                              {pd?.avg_l10 != null ? pd.avg_l10 : "—"}
+                            </td>
+                            <td className="p-3">
+                              {pd ? (
+                                <span
+                                  className={`text-sm font-semibold ${
+                                    diff > 0
+                                      ? "text-green-400"
+                                      : diff < 0
+                                      ? "text-red-400"
+                                      : "text-gray-500"
+                                  }`}
+                                >
+                                  {diff > 0 ? "+" : ""}
+                                  {diff.toFixed(1)}
+                                </span>
+                              ) : (
+                                <span className="text-gray-600">—</span>
+                              )}
+                            </td>
+                            <td className="p-3">
+                              <HRBox value={pd?.l5 ?? null} />
+                            </td>
+                            <td className="p-3">
+                              <HRBox value={pd?.l10 ?? null} />
+                            </td>
+                            <td className="p-3">
+                              <HRBox value={pd?.l15 ?? null} />
+                            </td>
+                            <td className="p-3">
+                              <HRBox value={pd?.l20 ?? null} />
+                            </td>
+                            <td className="p-3">
+                              <div className="flex flex-col gap-1">
+                                {pd?.streak ? (
+                                  <span
+                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold ${
+                                      pd.streak.type === "Over"
+                                        ? "bg-green-500/20 text-green-400 border border-green-500/30"
+                                        : "bg-red-500/20 text-red-400 border border-red-500/30"
+                                    }`}
+                                  >
+                                    {pd.streak.type === "Over" ? "🔺" : "🔻"} {pd.streak.count}
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-700 text-xs">—</span>
+                                )}
+                                {rolling && rolling.count > 0 && (
+                                  <span className="text-[10px] text-gray-500">
+                                    avg {rolling.avg}
+                                    <span className="text-gray-700"> /{rolling.count}G</span>
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="p-3">
+                              {(() => {
+                                if (marketLine && pd?.avg_l10 != null) {
+                                  const edge = pd.avg_l10 - marketLine;
+                                  const pct = marketLine > 0 ? (edge / marketLine) * 100 : 0;
+                                  let sig = "Neutral",
+                                    cls = "bg-gray-500/10 text-gray-400 border border-gray-500/30";
+                                  if (pct >= 10) {
+                                    sig = "🟢 STRONG OVER";
+                                    cls = "bg-green-500/30 text-green-300 border border-green-500/50";
+                                  } else if (pct >= 3) {
+                                    sig = "🟡 Over";
+                                    cls = "bg-green-500/15 text-green-400 border border-green-500/30";
+                                  } else if (pct <= -10) {
+                                    sig = "🔴 STRONG UNDER";
+                                    cls = "bg-red-500/30 text-red-300 border border-red-500/50";
+                                  } else if (pct <= -3) {
+                                    sig = "🟠 Under";
+                                    cls = "bg-red-500/15 text-red-400 border border-red-500/30";
+                                  }
+                                  return (
+                                    <div className="flex flex-col gap-1">
+                                      <span className={`inline-flex px-2 py-1 rounded text-xs font-bold ${cls}`}>{sig}</span>
+                                      <span className="text-[10px] text-gray-500">
+                                        Edge: {edge > 0 ? "+" : ""}
+                                        {edge.toFixed(1)}
+                                      </span>
+                                    </div>
+                                  );
+                                }
+                                if (!pd) return <span className="text-gray-700 text-xs">—</span>;
+                                const trend = pd.trend || "Neutral";
+                                const styles: Record<string, string> = {
+                                  "Strong Over": "bg-green-500/30 text-green-300 border border-green-500/50",
+                                  Over: "bg-green-500/10 text-green-400 border border-green-500/30",
+                                  "Strong Under": "bg-red-500/30 text-red-300 border border-red-500/50",
+                                  Under: "bg-red-500/10 text-red-400 border border-red-500/30",
+                                  Neutral: "bg-gray-500/10 text-gray-400 border border-gray-500/30",
+                                };
+                                return (
+                                  <span
+                                    className={`inline-flex px-2 py-1 rounded text-xs font-bold ${
+                                      styles[trend] || styles["Neutral"]
+                                    }`}
+                                  >
+                                    {trend}
+                                  </span>
+                                );
+                              })()}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
     </DashboardLayout>
