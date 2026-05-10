@@ -108,16 +108,22 @@ const SPORT_PROPS: Record<string, { id: string; label: string }[]> = {
     { id: "combo_rush_rec", label: "Rush+Rec Yds" },
   ],
   mlb: [
+    // Hitter props
     { id: "hits", label: "Hits" },
     { id: "runs", label: "Runs" },
     { id: "rbi", label: "RBI" },
     { id: "home_runs", label: "HR" },
     { id: "total_bases", label: "Total Bases" },
-    { id: "strikeouts_pitching", label: "K (Pitcher)" },
     { id: "strikeouts_batting", label: "K (Batter)" },
     { id: "stolen_bases", label: "Stolen Bases" },
     { id: "combo_hrr", label: "H+R+RBI" },
     { id: "combo_tb_hits", label: "TB+Hits" },
+    // 🔥 NEW: Pitcher props
+    { id: "strikeouts_pitching", label: "K (Pitcher)" },
+    { id: "hits_allowed", label: "Hits Allowed" },
+    { id: "earned_runs", label: "Earned Runs" },
+    { id: "walks_allowed", label: "Walks Allowed" },
+    { id: "outs_pitched", label: "Outs Pitched" },
   ],
   nhl: [
     { id: "goals", label: "Goals" },
@@ -200,7 +206,6 @@ export default function Scanner() {
   const [marketLine, setMarketLine] = useState<number | null>(null);
   const [noStatsWarning, setNoStatsWarning] = useState(false);
   const [soccerLeague, setSoccerLeague] = useState("all");
-  // ✅ New state for tab switching
   const [activeTab, setActiveTab] = useState<"hitters" | "pitchers">("hitters");
 
   const playerId = searchParams.get("playerId");
@@ -254,9 +259,8 @@ export default function Scanner() {
       try {
         const body: any = { operation: "get_players", sport: s };
         
-        // For MLB, send the game label to filter by team abbreviations
         if (s === "mlb" && gameId !== "all") {
-          body.game = gameLabel;   // e.g., "MIN vs WSH — 6:45 PM"
+          body.game = gameLabel;
         } else if (gameId && gameId !== "all") {
           body.game_id = gameId;
         }
@@ -384,7 +388,6 @@ export default function Scanner() {
   );
 
   if (playerId) {
-    // If the active tab is "pitchers" and the player is a pitcher, show PitcherPlayerDetails
     if (activeTab === "pitchers") {
       return <PitcherPlayerDetails playerId={playerId} onBack={() => navigate("/scanner")} />;
     }
@@ -398,7 +401,6 @@ export default function Scanner() {
   return (
     <DashboardLayout>
       <div className="p-4 max-w-7xl mx-auto">
-        {/* Header */}
         <div className="mb-5 flex items-start justify-between">
           <div>
             <h1 className="text-2xl font-bold text-yellow-400">⚡ LinePulse Scanner</h1>
@@ -419,7 +421,7 @@ export default function Scanner() {
           </button>
         </div>
 
-        {/* 🔥 TABS: Hitter Props vs Pitcher Props */}
+        {/* Tabs */}
         <div className="mb-4 border-b border-gray-700">
           <div className="flex gap-1">
             <button
@@ -446,10 +448,8 @@ export default function Scanner() {
         </div>
 
         {activeTab === "pitchers" ? (
-          // 🔥 New Pitcher Props Scanner
           <PitcherPropsScanner />
         ) : (
-          // Existing Hitter Props UI
           <>
             {/* Controls */}
             <div className="flex flex-wrap gap-2 mb-2">
@@ -543,7 +543,7 @@ export default function Scanner() {
               {marketLine && <span className="text-xs text-gray-600">Trend shows vs {marketLine}</span>}
             </div>
 
-            {/* Warnings */}
+            {/* Warnings, loading, empty state, table – unchanged */}
             {noStatsWarning && !loading && (
               <div className="mb-4 p-3 bg-yellow-900/20 border border-yellow-700/50 rounded-lg flex items-start gap-2">
                 <span className="text-yellow-400 text-lg">⚠️</span>
