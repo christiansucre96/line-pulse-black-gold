@@ -1,7 +1,6 @@
 // src/components/PlayerDetailView.tsx
 // LinePulse — Black & Gold brand
-// FIXED: Team stats now query games_data directly via Supabase
-// FIXED: Injury position JSON cleaned up
+// SUPPORTS: Hitter stats (existing) + Pitcher stats (MLB, via get_pitcher_prop_stats)
 
 import { useEffect, useState, useMemo } from "react";
 import { ArrowLeft, ChevronRight } from "lucide-react";
@@ -13,6 +12,7 @@ const supabase = createClient(
 );
 
 const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-action";
+const MLB_BACKFILL_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/mlb-backfill";
 
 // Brand tokens
 const GOLD = "#c9a84c";
@@ -56,13 +56,23 @@ const STAT_TABS: Record<string, { key: string; label: string; components?: strin
     { key: "combo_rush_rec", label: "RUSH+REC", components: ["rushing_yards", "receiving_yards"] },
   ],
   mlb: [
+    // Hitter tabs
     { key: "hits", label: "H" },
     { key: "runs", label: "R" },
     { key: "rbi", label: "RBI" },
     { key: "home_runs", label: "HR" },
     { key: "total_bases", label: "TB" },
-    { key: "strikeouts_pitching", label: "K" },
+    { key: "strikeouts_batting", label: "K" },
     { key: "combo_hrr", label: "H+R+RBI", components: ["hits", "runs", "rbi"] },
+  ],
+  mlb_pitcher: [  // New pitcher‑specific tabs (loaded dynamically)
+    { key: "strikeouts", label: "K" },
+    { key: "hits_allowed", label: "H" },
+    { key: "earned_runs", label: "ER" },
+    { key: "walks", label: "BB" },
+    { key: "ip", label: "IP" },
+    { key: "era", label: "ERA" },
+    { key: "whip", label: "WHIP" },
   ],
   nhl: [
     { key: "goals", label: "G" },
@@ -111,6 +121,15 @@ const GAMELOG_COLS: Record<string, { key: string; label: string; combo?: string[
     { key: "total_bases", label: "TB" },
     { key: "hrr", label: "H+R+RBI", combo: ["hits", "runs", "rbi"] },
   ],
+  mlb_pitcher: [
+    { key: "strikeouts", label: "K" },
+    { key: "hits_allowed", label: "H" },
+    { key: "earned_runs", label: "ER" },
+    { key: "walks", label: "BB" },
+    { key: "ip", label: "IP" },
+    { key: "era", label: "ERA" },
+    { key: "whip", label: "WHIP" },
+  ],
   nhl: [
     { key: "goals", label: "G" },
     { key: "assists_hockey", label: "A" },
@@ -154,9 +173,7 @@ function fmtDate(d: string) {
 // ── FETCH TEAM GAMES FROM games_data ─────────────────────────
 async function fetchTeamGames(teamId: string): Promise<any[]> {
   if (!teamId) return [];
-
   try {
-    // Get games where this team is home or away, with final scores
     const { data, error } = await supabase
       .from('games_data')
       .select(`
@@ -167,9 +184,7 @@ async function fetchTeamGames(teamId: string): Promise<any[]> {
       .not('home_score', 'eq', 0)
       .order('game_date', { ascending: false })
       .limit(25);
-
     if (error || !data?.length) {
-      // Fallback: also try status=final
       const { data: data2 } = await supabase
         .from('games_data')
         .select('id, game_date, home_score, away_score, status, home_team_id, away_team_id')
@@ -180,14 +195,12 @@ async function fetchTeamGames(teamId: string): Promise<any[]> {
       if (!data2?.length) return [];
       return formatTeamGames(data2, teamId);
     }
-
     return formatTeamGames(data, teamId);
   } catch (e: any) {
     console.error('fetchTeamGames error:', e.message);
     return [];
   }
 }
-
 function formatTeamGames(games: any[], teamId: string): any[] {
   return games.map(g => {
     const isHome = g.home_team_id === teamId;
@@ -197,7 +210,7 @@ function formatTeamGames(games: any[], teamId: string): any[] {
       game_date:  g.game_date,
       team_score: teamScore,
       opp_score:  oppScore,
-      opponent:   isHome ? 'vs OPP' : '@ OPP', // will enhance with team names
+      opponent:   isHome ? 'vs OPP' : '@ OPP',
       score:      teamScore,
       opp:        oppScore,
       margin:     teamScore - oppScore,
@@ -314,10 +327,10 @@ function LineAdjuster({ value, onChange }: { value: number; onChange: (v: number
 
 const PERIODS = [{ label: "L5", n: 5 }, { label: "L10", n: 10 }, { label: "L15", n: 15 }, { label: "L20", n: 20 }];
 
-// ── PLAYER STATS SECTION ─────────────────────────────────────
-function PlayerStatSection({ title, tabs, gameLogs, sport, defaultTab }: {
+// ── PLAYER STATS SECTION (works for both hitter and pitcher) ──
+function PlayerStatSection({ title, tabs, gameLogs, sport, defaultTab, isPitcher }: {
   title: string; tabs: { key: string; label: string; components?: string[] }[];
-  gameLogs: any[]; sport: string; defaultTab: string;
+  gameLogs: any[]; sport: string; defaultTab: string; isPitcher?: boolean;
 }) {
   const [activeTab, setActiveTab] = useState(defaultTab);
   const [activePeriod, setActivePeriod] = useState(10);
@@ -392,7 +405,7 @@ function PlayerStatSection({ title, tabs, gameLogs, sport, defaultTab }: {
   );
 }
 
-// ── TEAM STATS SECTION ───────────────────────────────────────
+// ── TEAM STATS SECTION (unchanged) ───────────────────────────
 function TeamStatsSection({ teamGameLogs, sport, playerTeamName, loadingTeam }: {
   teamGameLogs: any[]; sport: string; playerTeamName?: string; loadingTeam: boolean;
 }) {
@@ -406,10 +419,7 @@ function TeamStatsSection({ teamGameLogs, sport, playerTeamName, loadingTeam }: 
     { key: "margin", label: "MARGIN" },
     { key: "total", label: "TOTAL" },
   ];
-
   const tab = TEAM_TABS.find(t => t.key === activeTab) || TEAM_TABS[0];
-
-  // Map tab key to game log field
   const vals = teamGameLogs.map(g => {
     if (tab.key === "score")  return Number(g.team_score) || 0;
     if (tab.key === "opp")    return Number(g.opp_score)  || 0;
@@ -417,22 +427,14 @@ function TeamStatsSection({ teamGameLogs, sport, playerTeamName, loadingTeam }: 
     if (tab.key === "total")  return Number(g.total)      || 0;
     return 0;
   });
-
-  const slices: Record<number, number[]> = {
-    5:  vals.slice(0, 5),
-    10: vals.slice(0, 10),
-    15: vals.slice(0, 15),
-    20: vals.slice(0, 20),
-  };
-
+  const slices: Record<number, number[]> = { 5: vals.slice(0,5), 10: vals.slice(0,10), 15: vals.slice(0,15), 20: vals.slice(0,20) };
   const a10 = avg(slices[10]);
-  const defaultLine = roundHalf(a10 || 110); // fallback to 110 for NBA
+  const defaultLine = roundHalf(a10 || 110);
   const line = customLines[tab.key] ?? defaultLine;
   const activeSlice = slices[activePeriod] || slices[10];
   const activeAvg = avg(activeSlice);
   const activeHitRate = hitRate(activeSlice, line);
   const actualGames = activeSlice.length;
-
   const chartLogs = teamGameLogs.slice(0, activePeriod).map(g => ({
     opponent: g.opponent || "—",
     game_date: g.game_date || "",
@@ -441,7 +443,6 @@ function TeamStatsSection({ teamGameLogs, sport, playerTeamName, loadingTeam }: 
              : tab.key === "margin" ? Number(g.margin)
              : Number(g.total),
   }));
-
   const chartKey = `${tab.key}-${activePeriod}-${line}-${actualGames}`;
   const insufficientData = activePeriod > teamGameLogs.length;
 
@@ -455,7 +456,6 @@ function TeamStatsSection({ teamGameLogs, sport, playerTeamName, loadingTeam }: 
       </div>
     );
   }
-
   if (!teamGameLogs.length) {
     return (
       <div className="rounded-xl border overflow-hidden" style={{ background: BG_CARD, borderColor: BORDER }}>
@@ -470,7 +470,6 @@ function TeamStatsSection({ teamGameLogs, sport, playerTeamName, loadingTeam }: 
       </div>
     );
   }
-
   return (
     <div className="rounded-xl overflow-hidden border" style={{ background: BG_CARD, borderColor: BORDER }}>
       <div className="px-4 py-2.5 border-b flex items-center justify-between" style={{ borderColor: BORDER }}>
@@ -508,7 +507,7 @@ function TeamStatsSection({ teamGameLogs, sport, playerTeamName, loadingTeam }: 
         </div>
         <div className="flex items-center gap-2 text-[11px]">
           <span className="px-2 py-0.5 rounded-full font-bold" style={{ background: `${GOLD_DIM}30`, color: GOLD, border: `1px solid ${GOLD_DIM}` }}>
-            {actualGames === activePeriod ? `Last ${activePeriod} games` : `Last ${activePeriod} (${actualGames} available)`}
+            Showing {actualGames === activePeriod ? `Last ${activePeriod} games` : `Last ${activePeriod} (${actualGames} available)`}
           </span>
           <span className="text-gray-500">
             Avg <span className="font-bold" style={{ color: GOLD_BRIGHT }}>{activeAvg.toFixed(1)}</span>
@@ -527,7 +526,7 @@ function TeamStatsSection({ teamGameLogs, sport, playerTeamName, loadingTeam }: 
   );
 }
 
-// ── MAIN COMPONENT ────────────────────────────────────────────
+// ── MAIN COMPONENT (detects pitcher and loads appropriate data) ──
 interface Props {
   playerId: string;
   sport: string;
@@ -542,12 +541,14 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
   const [loading, setLoading]         = useState(true);
   const [loadingTeam, setLoadingTeam] = useState(false);
   const [error, setError]             = useState<string | null>(null);
+  const [isPitcher, setIsPitcher]     = useState(false);
+  const [pitcherLogs, setPitcherLogs] = useState<any[]>([]);
 
   useEffect(() => {
     (async () => {
       setLoading(true); setError(null);
       try {
-        // Fetch player details + game logs from clever-action
+        // 1. Fetch player details (hitter stats) from clever-action
         const res = await fetch(EDGE_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -561,7 +562,36 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
         setGameLogs(logs);
         console.log(`[PlayerDetail] ${logs.length} game logs for ${data.player.full_name}`);
 
-        // Fetch team games directly from games_data via Supabase
+        // 2. Detect pitcher (MLB only: position includes 'P' or player is pitcher)
+        const pos = data.player.position || "";
+        const isPitcherPlayer = sport === "mlb" && (pos.includes("P") || pos.toLowerCase().includes("pitcher"));
+        setIsPitcher(isPitcherPlayer);
+
+        // 3. If pitcher, fetch pitcher‑specific stats from mlb-backfill
+        if (isPitcherPlayer) {
+          try {
+            const pitcherRes = await fetch(MLB_BACKFILL_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                operation: "get_pitcher_prop_stats",
+                player_id: playerId,
+                prop_type: "strikeouts" // initial prop, user can change tabs later
+              }),
+            });
+            const pitcherData = await pitcherRes.json();
+            if (pitcherData.success !== false && pitcherData.recent_games) {
+              setPitcherLogs(pitcherData.recent_games);
+              console.log(`[PlayerDetail] Pitcher logs: ${pitcherData.recent_games.length} games`);
+            } else {
+              console.warn("[PlayerDetail] Pitcher stats not found", pitcherData);
+            }
+          } catch (err) {
+            console.error("[PlayerDetail] Failed to load pitcher stats", err);
+          }
+        }
+
+        // 4. Fetch team games via Supabase (unchanged)
         if (data.player.team_id) {
           setLoadingTeam(true);
           try {
@@ -582,22 +612,27 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
     })();
   }, [playerId, sport]);
 
-  const tabs = STAT_TABS[sport] || STAT_TABS.nba;
-  const glCols = GAMELOG_COLS[sport] || GAMELOG_COLS.nba;
+  // Choose the correct game logs and tabs
+  const effectiveLogs = isPitcher && pitcherLogs.length > 0 ? pitcherLogs : gameLogs;
+  const tabSource = isPitcher ? "mlb_pitcher" : (sport === "mlb" ? "mlb" : sport);
+  const tabs = STAT_TABS[tabSource] || STAT_TABS[sport] || STAT_TABS.nba;
+  const glCols = GAMELOG_COLS[tabSource] || GAMELOG_COLS[sport] || GAMELOG_COLS.nba;
+  const avail = effectiveLogs.length;
 
   const maxStats = useMemo(() => {
-    if (!gameLogs.length) return {};
-    const maxOf = (k: string) => Math.max(...gameLogs.map(g => Number(g[k]) || 0));
+    if (!effectiveLogs.length) return {};
+    const maxOf = (k: string) => Math.max(...effectiveLogs.map(g => Number(g[k]) || 0));
+    if (isPitcher) return { Strikeouts: maxOf("strikeouts"), "Hits Allowed": maxOf("hits_allowed"), "Earned Runs": maxOf("earned_runs"), Walks: maxOf("walks"), IP: maxOf("ip"), ERA: maxOf("era"), WHIP: maxOf("whip") };
     if (sport === "nba") return { Points: maxOf("points"), Rebounds: maxOf("rebounds"), Assists: maxOf("assists"), Steals: maxOf("steals"), Blocks: maxOf("blocks"), "3PM": maxOf("three_pointers_made") };
     if (sport === "nfl") return { "Pass Yds": maxOf("passing_yards"), "Rush Yds": maxOf("rushing_yards"), "Rec Yds": maxOf("receiving_yards"), "Pass TDs": maxOf("passing_tds") };
     if (sport === "mlb") return { Hits: maxOf("hits"), Runs: maxOf("runs"), RBI: maxOf("rbi"), HR: maxOf("home_runs"), TB: maxOf("total_bases") };
     if (sport === "nhl") return { Goals: maxOf("goals"), Assists: maxOf("assists_hockey"), SOG: maxOf("shots_on_goal"), Blocked: maxOf("blocked_shots") };
     return { Goals: maxOf("goals_soccer"), Assists: maxOf("assists_soccer"), Shots: maxOf("shots_soccer") };
-  }, [gameLogs, sport]);
+  }, [effectiveLogs, sport, isPitcher]);
 
   const name = player?.full_name || playerName || "Player";
   const initials = getInitials(name);
-  const avail = gameLogs.length;
+  const position = player?.position || (isPitcher ? "P" : "N/A");
 
   if (loading) {
     return (
@@ -628,14 +663,21 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
         <div className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0" style={{ background: `${GOLD_DIM}55`, border: `1.5px solid ${GOLD_DIM}`, color: GOLD_BRIGHT }}>{initials}</div>
         <div className="min-w-0 flex-1">
           <h1 className="font-bold text-base leading-tight truncate" style={{ color: GOLD_BRIGHT }}>{name}</h1>
-          <p className="text-[11px] text-gray-500 truncate">{player?.team} · {player?.position} · {sport.toUpperCase()} · {avail} games</p>
+          <p className="text-[11px] text-gray-500 truncate">{player?.team} · {position} · {sport.toUpperCase()} · {avail} games</p>
         </div>
       </div>
 
       <div className="flex flex-col lg:flex-row gap-4 p-4 max-w-6xl mx-auto">
         {/* Left column */}
         <div className="flex-1 space-y-4 min-w-0">
-          <PlayerStatSection title="⚡ Player Stats" tabs={tabs} gameLogs={gameLogs} sport={sport} defaultTab={tabs[1]?.key || tabs[0]?.key} />
+          <PlayerStatSection
+            title={isPitcher ? "⚡ Pitcher Stats" : "⚡ Player Stats"}
+            tabs={tabs}
+            gameLogs={effectiveLogs}
+            sport={sport}
+            defaultTab={tabs[1]?.key || tabs[0]?.key}
+            isPitcher={isPitcher}
+          />
           <TeamStatsSection teamGameLogs={teamGameLogs} sport={sport} playerTeamName={player?.team} loadingTeam={loadingTeam} />
 
           {/* Game log table */}
@@ -643,7 +685,7 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
             <div className="px-4 py-2.5 border-b flex items-center gap-2" style={{ borderColor: BORDER }}>
               <span className="font-bold text-sm" style={{ color: GOLD }}>Gamelog — Last {Math.min(15, avail)} Games</span>
             </div>
-            {gameLogs.length === 0 ? (
+            {avail === 0 ? (
               <div className="p-8 text-center text-gray-600 text-sm">No game logs available</div>
             ) : (
               <div className="overflow-x-auto">
@@ -656,12 +698,14 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
                     </tr>
                   </thead>
                   <tbody>
-                    {gameLogs.slice(0, 15).map((g, i) => (
+                    {effectiveLogs.slice(0, 15).map((g, i) => (
                       <tr key={i} className="transition-colors hover:bg-white/5" style={{ borderBottom: `1px solid ${BORDER}33` }}>
                         <td className="p-2.5 font-medium text-gray-300 whitespace-nowrap text-xs">{g.opponent || g.team_abbreviation || "—"}</td>
                         <td className="p-2.5 text-gray-500 whitespace-nowrap text-xs">{g.game_date ? g.game_date.slice(5).replace("-", "-") : "—"}</td>
                         {glCols.map(c => {
-                          const val = getVal(g, c.key, c.combo);
+                          let val = getVal(g, c.key, c.combo);
+                          // For ERA/WHIP, limit decimals
+                          if ((c.key === 'era' || c.key === 'whip') && typeof val === 'number') val = val.toFixed(2);
                           return <td key={c.key} className="p-2.5 text-center text-xs font-medium"><span style={{ color: val > 0 ? "#e5e7eb" : "#374151" }}>{val}</span></td>;
                         })}
                       </tr>
@@ -683,7 +727,7 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
                 <div className="flex flex-wrap gap-1 mt-1">
                   <span className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: `${GOLD_DIM}30`, color: GOLD, border: `1px solid ${GOLD_DIM}` }}>{player?.team || "—"}</span>
                   <span className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: "#1e293b", color: "#94a3b8", border: `1px solid ${BORDER}` }}>{sport.toUpperCase()}</span>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: "#1e293b", color: "#94a3b8", border: `1px solid ${BORDER}` }}>{player?.position || "—"}</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: "#1e293b", color: "#94a3b8", border: `1px solid ${BORDER}` }}>{position}</span>
                 </div>
               </div>
             </div>
@@ -707,11 +751,11 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
             </div>
           </div>
 
-          {gameLogs.length > 0 && (
+          {effectiveLogs.length > 0 && (
             <div className="rounded-xl border p-4 space-y-2" style={{ background: BG_CARD, borderColor: BORDER }}>
               <p className="text-[10px] font-bold uppercase tracking-widest mb-3" style={{ color: GOLD_DIM }}>Quick Hit Rates (L10)</p>
               {tabs.slice(0, 8).map(t => {
-                const vals = gameLogs.map(g => getVal(g, t.key, t.components));
+                const vals = effectiveLogs.map(g => getVal(g, t.key, t.components));
                 const l10 = vals.slice(0, 10);
                 const a10 = avg(l10);
                 const line = roundHalf(a10);
