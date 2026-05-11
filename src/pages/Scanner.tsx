@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Search, RefreshCw, Calendar } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 
-// ✅ Pitcher Props Scanner & Details (already implemented elsewhere)
+// Pitcher Props Scanner & Details
 import { PitcherPropsScanner } from "@/components/PitcherPropsScanner";
 import { PitcherPlayerDetails } from "@/components/PitcherPlayerDetails";
 
@@ -108,7 +108,6 @@ const SPORT_PROPS: Record<string, { id: string; label: string }[]> = {
     { id: "combo_rush_rec", label: "Rush+Rec Yds" },
   ],
   mlb: [
-    // Hitter props
     { id: "hits", label: "Hits" },
     { id: "runs", label: "Runs" },
     { id: "rbi", label: "RBI" },
@@ -118,7 +117,7 @@ const SPORT_PROPS: Record<string, { id: string; label: string }[]> = {
     { id: "stolen_bases", label: "Stolen Bases" },
     { id: "combo_hrr", label: "H+R+RBI" },
     { id: "combo_tb_hits", label: "TB+Hits" },
-    // 🔥 ALL 8 PITCHER PROPS (Stake)
+    // ALL 8 PITCHER PROPS
     { id: "strikeouts_pitching", label: "K (Pitcher)" },
     { id: "earned_runs", label: "Earned Runs" },
     { id: "hits_allowed", label: "Hits Allowed" },
