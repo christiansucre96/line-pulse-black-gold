@@ -108,6 +108,7 @@ const SPORT_PROPS: Record<string, { id: string; label: string }[]> = {
     { id: "combo_rush_rec", label: "Rush+Rec Yds" },
   ],
   mlb: [
+    // Hitter props
     { id: "hits", label: "Hits" },
     { id: "runs", label: "Runs" },
     { id: "rbi", label: "RBI" },
@@ -117,14 +118,14 @@ const SPORT_PROPS: Record<string, { id: string; label: string }[]> = {
     { id: "stolen_bases", label: "Stolen Bases" },
     { id: "combo_hrr", label: "H+R+RBI" },
     { id: "combo_tb_hits", label: "TB+Hits" },
-    // 🔥 ALL 8 PITCHER PROPS
-    { id: "strikeouts_pitching", label: "K (Pitcher)" },
-    { id: "earned_runs", label: "Earned Runs" },
-    { id: "hits_allowed", label: "Hits Allowed" },
+    // 🔥 Pitcher props – descriptive labels
+    { id: "strikeouts_pitching", label: "Strikeouts (K)" },
+    { id: "earned_runs", label: "Earned Runs (ER)" },
+    { id: "hits_allowed", label: "Hits Allowed (H)" },
     { id: "outs_pitched", label: "Outs Pitched" },
-    { id: "walks_allowed", label: "Walks" },
+    { id: "walks_allowed", label: "Walks (BB)" },
     { id: "win_probability", label: "Win Probability" },
-    { id: "first_strikeout", label: "First Strike Out" },
+    { id: "first_strikeout", label: "First Strikeout" },
     { id: "first_earned_run", label: "First Earned Run" },
   ],
   nhl: [
