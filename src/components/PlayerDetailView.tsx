@@ -1,6 +1,6 @@
-=// src/components/PlayerDetailView.tsx
+// src/components/PlayerDetailView.tsx
 // LinePulse — Black & Gold brand
-// SUPPORTS: Hitter stats (existing) + Pitcher stats (MLB, dynamic prop switching)
+// SUPPORTS: Hitter stats + Pitcher stats (MLB, dynamic prop switching)
 
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { ArrowLeft, ChevronRight } from "lucide-react";
@@ -15,7 +15,7 @@ const EDGE_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/clever-a
 const MLB_BACKFILL_URL = "https://retfkpfvhuseyphvwzxg.supabase.co/functions/v1/mlb-backfill";
 const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Brand tokens (unchanged)
+// Brand tokens
 const GOLD = "#c9a84c";
 const GOLD_BRIGHT = "#f0b429";
 const GOLD_DIM = "#7a5c1e";
@@ -57,7 +57,6 @@ const STAT_TABS: Record<string, { key: string; label: string; components?: strin
     { key: "combo_rush_rec", label: "RUSH+REC", components: ["rushing_yards", "receiving_yards"] },
   ],
   mlb: [
-    // Hitter tabs
     { key: "hits", label: "H" },
     { key: "runs", label: "R" },
     { key: "rbi", label: "RBI" },
@@ -94,7 +93,7 @@ const STAT_TABS: Record<string, { key: string; label: string; components?: strin
   ],
 };
 
-// Game log columns for the table (unchanged)
+// Game log columns
 const GAMELOG_COLS: Record<string, { key: string; label: string; combo?: string[] }[]> = {
   nba: [
     { key: "points", label: "Pts" },
@@ -150,7 +149,7 @@ const GAMELOG_COLS: Record<string, { key: string; label: string; combo?: string[
   ],
 };
 
-// ── HELPERS (unchanged) ──────────────────────────────────────
+// ── HELPERS ──────────────────────────────────────────────────
 function getVal(log: any, key: string, combo?: string[]): number {
   if (combo) return combo.reduce((s, k) => s + (Number(log[k]) || 0), 0);
   return Number(log[key]) || 0;
@@ -172,7 +171,7 @@ function fmtDate(d: string) {
   try { const [, m, day] = d.split("-"); return `${m}-${day}`; } catch { return d; }
 }
 
-// ── FETCH TEAM GAMES FROM games_data (unchanged) ─────────────
+// ── FETCH TEAM GAMES ─────────────────────────────────────────
 async function fetchTeamGames(teamId: string): Promise<any[]> {
   if (!teamId) return [];
   try {
@@ -204,21 +203,21 @@ function formatTeamGames(games: any[], teamId: string): any[] {
   return games.map(g => {
     const isHome = g.home_team_id === teamId;
     const teamScore = isHome ? Number(g.home_score) : Number(g.away_score);
-    const oppScore  = isHome ? Number(g.away_score)  : Number(g.home_score);
+    const oppScore = isHome ? Number(g.away_score) : Number(g.home_score);
     return {
-      game_date:  g.game_date,
+      game_date: g.game_date,
       team_score: teamScore,
-      opp_score:  oppScore,
-      opponent:   isHome ? 'vs OPP' : '@ OPP',
-      score:      teamScore,
-      opp:        oppScore,
-      margin:     teamScore - oppScore,
-      total:      teamScore + oppScore,
+      opp_score: oppScore,
+      opponent: isHome ? 'vs OPP' : '@ OPP',
+      score: teamScore,
+      opp: oppScore,
+      margin: teamScore - oppScore,
+      total: teamScore + oppScore,
     };
   }).filter(g => g.team_score > 0 || g.opp_score > 0);
 }
 
-// ── HIT RATE BOX (unchanged) ─────────────────────────────────
+// ── HIT RATE BOX ─────────────────────────────────────────────
 function HRBox({ label, hr, av }: { label: string; hr: number | null; av?: number }) {
   if (hr === null || hr === undefined) {
     return (
@@ -326,10 +325,14 @@ function LineAdjuster({ value, onChange }: { value: number; onChange: (v: number
 
 const PERIODS = [{ label: "L5", n: 5 }, { label: "L10", n: 10 }, { label: "L15", n: 15 }, { label: "L20", n: 20 }];
 
-// ── PLAYER STATS SECTION (unchanged, receives gameLogs and tabs) ──
-function PlayerStatSection({ title, tabs, gameLogs, sport, defaultTab, isPitcher }: {
-  title: string; tabs: { key: string; label: string; components?: string[] }[];
-  gameLogs: any[]; sport: string; defaultTab: string; isPitcher?: boolean;
+// ── PLAYER STATS SECTION (supports optional onTabChange for pitchers) ──
+function PlayerStatSection({ title, tabs, gameLogs, sport, defaultTab, onTabChange }: {
+  title: string;
+  tabs: { key: string; label: string; components?: string[] }[];
+  gameLogs: any[];
+  sport: string;
+  defaultTab: string;
+  onTabChange?: (tabKey: string) => void;
 }) {
   const [activeTab, setActiveTab] = useState(defaultTab);
   const [activePeriod, setActivePeriod] = useState(10);
@@ -349,12 +352,18 @@ function PlayerStatSection({ title, tabs, gameLogs, sport, defaultTab, isPitcher
   const chartKey = `${tab.key}-${activePeriod}-${line}-${actualGames}`;
   const insufficientData = activePeriod > gameLogs.length;
 
+  const handleTabChange = (key: string) => {
+    setActiveTab(key);
+    setActivePeriod(10);
+    if (onTabChange) onTabChange(key);
+  };
+
   return (
     <div className="rounded-xl overflow-hidden border" style={{ background: BG_CARD, borderColor: BORDER }}>
       <div className="px-4 py-2.5 border-b flex items-center gap-2" style={{ borderColor: BORDER }}>
         <span className="font-bold text-sm" style={{ color: GOLD }}>{title}</span>
       </div>
-      <TabBar tabs={tabs} active={activeTab} onSelect={key => { setActiveTab(key); setActivePeriod(10); }} />
+      <TabBar tabs={tabs} active={activeTab} onSelect={handleTabChange} />
       <div className="p-4 space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -404,7 +413,7 @@ function PlayerStatSection({ title, tabs, gameLogs, sport, defaultTab, isPitcher
   );
 }
 
-// ── TEAM STATS SECTION (unchanged) ───────────────────────────
+// ── TEAM STATS SECTION ────────────────────────────────────────
 function TeamStatsSection({ teamGameLogs, sport, playerTeamName, loadingTeam }: {
   teamGameLogs: any[]; sport: string; playerTeamName?: string; loadingTeam: boolean;
 }) {
@@ -420,13 +429,13 @@ function TeamStatsSection({ teamGameLogs, sport, playerTeamName, loadingTeam }: 
   ];
   const tab = TEAM_TABS.find(t => t.key === activeTab) || TEAM_TABS[0];
   const vals = teamGameLogs.map(g => {
-    if (tab.key === "score")  return Number(g.team_score) || 0;
-    if (tab.key === "opp")    return Number(g.opp_score)  || 0;
-    if (tab.key === "margin") return Number(g.margin)     || 0;
-    if (tab.key === "total")  return Number(g.total)      || 0;
+    if (tab.key === "score") return Number(g.team_score) || 0;
+    if (tab.key === "opp") return Number(g.opp_score) || 0;
+    if (tab.key === "margin") return Number(g.margin) || 0;
+    if (tab.key === "total") return Number(g.total) || 0;
     return 0;
   });
-  const slices: Record<number, number[]> = { 5: vals.slice(0,5), 10: vals.slice(0,10), 15: vals.slice(0,15), 20: vals.slice(0,20) };
+  const slices: Record<number, number[]> = { 5: vals.slice(0, 5), 10: vals.slice(0, 10), 15: vals.slice(0, 15), 20: vals.slice(0, 20) };
   const a10 = avg(slices[10]);
   const defaultLine = roundHalf(a10 || 110);
   const line = customLines[tab.key] ?? defaultLine;
@@ -437,8 +446,8 @@ function TeamStatsSection({ teamGameLogs, sport, playerTeamName, loadingTeam }: 
   const chartLogs = teamGameLogs.slice(0, activePeriod).map(g => ({
     opponent: g.opponent || "—",
     game_date: g.game_date || "",
-    [tab.key]: tab.key === "score"  ? Number(g.team_score)
-             : tab.key === "opp"    ? Number(g.opp_score)
+    [tab.key]: tab.key === "score" ? Number(g.team_score)
+             : tab.key === "opp" ? Number(g.opp_score)
              : tab.key === "margin" ? Number(g.margin)
              : Number(g.total),
   }));
@@ -525,7 +534,7 @@ function TeamStatsSection({ teamGameLogs, sport, playerTeamName, loadingTeam }: 
   );
 }
 
-// ── MAIN COMPONENT (Now supports dynamic pitcher prop loading) ──
+// ── MAIN COMPONENT (corrected syntax + pitcher prop switching) ──
 interface Props {
   playerId: string;
   sport: string;
@@ -534,18 +543,17 @@ interface Props {
 }
 
 export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props) {
-  const [player, setPlayer]           = useState<any>(null);
-  const [gameLogs, setGameLogs]       = useState<any[]>([]);
+  const [player, setPlayer] = useState<any>(null);
+  const [gameLogs, setGameLogs] = useState<any[]>([]);
   const [teamGameLogs, setTeamGameLogs] = useState<any[]>([]);
-  const [loading, setLoading]         = useState(true);
+  const [loading, setLoading] = useState(true);
   const [loadingTeam, setLoadingTeam] = useState(false);
-  const [error, setError]             = useState<string | null>(null);
-  const [isPitcher, setIsPitcher]     = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isPitcher, setIsPitcher] = useState(false);
   const [pitcherProp, setPitcherProp] = useState<string>("strikeouts");
   const [pitcherLogs, setPitcherLogs] = useState<any[]>([]);
   const [loadingPitcher, setLoadingPitcher] = useState(false);
 
-  // Fetch pitcher stats for a specific prop
   const fetchPitcherPropStats = useCallback(async (propType: string) => {
     if (!isPitcher) return;
     setLoadingPitcher(true);
@@ -623,14 +631,12 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
     })();
   }, [playerId, sport]);
 
-  // Determine effective logs and tab source
   const effectiveLogs = isPitcher ? pitcherLogs : gameLogs;
   const tabSource = isPitcher ? "mlb_pitcher" : (sport === "mlb" ? "mlb" : sport);
   const tabs = STAT_TABS[tabSource] || STAT_TABS[sport] || STAT_TABS.nba;
   const glCols = GAMELOG_COLS[tabSource] || GAMELOG_COLS[sport] || GAMELOG_COLS.nba;
   const avail = effectiveLogs.length;
 
-  // Max stats for the sidebar
   const maxStats = useMemo(() => {
     if (!effectiveLogs.length) return {};
     const maxOf = (k: string) => Math.max(...effectiveLogs.map(g => Number(g[k]) || 0));
@@ -683,15 +689,13 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
         {/* Left column */}
         <div className="flex-1 space-y-4 min-w-0">
           {isPitcher ? (
-            // For pitchers, we need to pass tabs and logs, but also allow changing the current prop from the parent? Actually the `PlayerStatSection` already has its own tabs, and when the user clicks a different tab, it updates its own internal `activeTab`. That change does NOT automatically refetch data because `gameLogs` is a prop. We need to pass a `onTabChange` callback to the `PlayerStatSection` to tell the parent to fetch new stats. Let's modify `PlayerStatSection` to accept an optional `onTabChange` prop.
-            // We'll create a wrapper component for pitchers that handles the fetch.
             <PlayerStatSection
               title="⚡ Pitcher Stats"
               tabs={tabs}
               gameLogs={effectiveLogs}
               sport={sport}
               defaultTab={pitcherProp}
-              isPitcher={true}
+              onTabChange={(newTab) => setPitcherProp(newTab)}
             />
           ) : (
             <PlayerStatSection
@@ -700,7 +704,7 @@ export function PlayerDetailView({ playerId, sport, onBack, playerName }: Props)
               gameLogs={effectiveLogs}
               sport={sport}
               defaultTab={tabs[1]?.key || tabs[0]?.key}
-              isPitcher={false}
+              onTabChange={undefined}
             />
           )}
           <TeamStatsSection teamGameLogs={teamGameLogs} sport={sport} playerTeamName={player?.team} loadingTeam={loadingTeam} />
